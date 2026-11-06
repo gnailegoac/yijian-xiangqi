@@ -124,7 +124,11 @@ test('undo while thinking ignores an already queued late worker result', async (
   await page.addInitScript(() => {
     window.__lateWorkerResults = 0;
     window.__terminatedWorkers = 0;
+    const NativeWorker = window.Worker;
     window.Worker = class {
+      constructor(url, options) {
+        if (!String(url).endsWith('/ai-worker.js')) return new NativeWorker(url, options);
+      }
       postMessage(data) {
         setTimeout(() => {
           window.__lateWorkerResults += 1;

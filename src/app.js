@@ -47,6 +47,12 @@ let toastTimeout = null;
 let aiError = false;
 let storageAvailable = true;
 let audioContext = null;
+let coachWorker = null;
+let coachRequestId = 0;
+let coachTimeout = null;
+let coachPending = false;
+let coachError = false;
+let coachData = null;
 
 function moveKey(move) { return `${move.from.row},${move.from.col}-${move.to.row},${move.to.col}`; }
 function samePoint(point, row, col) { return point?.row === row && point?.col === col; }
@@ -202,7 +208,75 @@ function renderSettings() {
   $('#ai-settings').hidden = state.mode !== 'ai';
   $('#local-description').hidden = state.mode === 'ai';
 }
-function render() { renderBoard(); renderPlayers(); renderStatus(); renderHistory(); renderSettings(); }
+function render() { renderBoard(); renderPlayers(); renderStatus(); renderHistory(); renderSettings(); renderCoach(); }
+
+const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+function renderCoach() {
+  const gameStatus = status();
+  const ready = !!coachData?.recommendation && humanTurn() && !gameStatus.over;
+  $('#coach-use-button').hidden = !ready;
+  $('#coach-status').textContent = coachPending ? '正在分析…' : coachError ? '暂不可用' : gameStatus.over ? '本局结束' : !humanTurn() ? '等待对手' : '行棋建议';
+  let content = '';
+  function entry(id, label, explanation) {
+    return `<div id="${id}" class="coach-item"><div class="coach-item-heading"><span>${escapeHtml(label)}</span><strong>${escapeHtml(explanation.notation)} · ${escapeHtml(explanation.headline)}</strong></div><p>${explanation.reasons.map(escapeHtml).join('；')}</p>${explanation.caution ? `<p class="coach-caution">留意：${escapeHtml(explanation.caution)}</p>` : ''}</div>`;
+  }
+  if (coachData?.opponent) content += entry('coach-opponent', state.mode === 'local' ? `${colorName(opposite(state.turn))}刚才` : '对手刚才', coachData.opponent);
+  if (ready) content += entry('coach-recommendation', state.mode === 'local' ? `${colorName(state.turn)}建议` : '推荐你走', coachData.recommendation);
+  else if (coachPending) content += '<p class="coach-placeholder">正在结合吃子、将军和棋子位置，寻找走法与理由…</p>';
+  else if (gameStatus.over) content += '<p class="coach-placeholder">本局已结束。可以悔棋回看，或开启下一盘。</p>';
+  else if (!humanTurn()) content += '<p class="coach-placeholder">对手落子后，会自动解读这步棋的作用，并给出你的应对建议。</p>';
+  else if (coachError) content += '<p class="coach-placeholder">本次分析中断，你仍然可以正常行棋。<button type="button" class="coach-retry" data-action="coach-retry">重新分析</button></p>';
+  $('#coach-content').innerHTML = content;
+}
+
+function cancelCoaching() {
+  coachRequestId++;
+  clearTimeout(coachTimeout);
+  coachWorker?.terminate(); coachWorker = null;
+  coachPending = false;
+}
+
+function refreshCoaching() {
+  cancelCoaching(); coachData = null; coachError = false;
+  const gameStatus = status();
+  const last = state.history.at(-1);
+  const opponentMove = last && (state.mode === 'local' || last.turn !== state.humanColor) ? { board: last.board, move: last.move } : null;
+  if ((!humanTurn() && !gameStatus.over) || (gameStatus.over && (!opponentMove || gameStatus.reason === 'resign'))) { renderCoach(); return; }
+  const id = ++coachRequestId;
+  const board = state.board;
+  const color = state.turn;
+  coachPending = true; renderCoach();
+  const fail = () => {
+    if (id !== coachRequestId) return;
+    cancelCoaching(); coachError = true; renderCoach();
+  };
+  try {
+    coachWorker = new Worker(new URL('./coach-worker.js', import.meta.url), { type: 'module' });
+    coachWorker.onmessage = ({ data }) => {
+      if (data.id !== id || id !== coachRequestId || state.board !== board || state.turn !== color) return;
+      if (data.error || (!data.recommendation && !status().over)) { fail(); return; }
+      if (data.recommendation && !getLegalMoves(state.board, state.turn).some((move) => moveKey(move) === moveKey(data.recommendation.move))) { fail(); return; }
+      cancelCoaching(); coachData = data; renderCoach();
+    };
+    coachWorker.onerror = fail;
+    coachWorker.postMessage({ id, board, color, opponentMove, difficulty: 'normal' });
+    coachTimeout = setTimeout(fail, 15000);
+  } catch { fail(); }
+}
+
+function showCoachMove() {
+  if (!humanTurn() || status().over || thinking) return;
+  const recommended = coachData?.recommendation?.move;
+  if (!recommended) { if (!coachPending) refreshCoaching(); toast('正在分析推荐走法，请稍候'); return; }
+  const move = getLegalMoves(state.board, state.turn).find((candidate) => moveKey(candidate) === moveKey(recommended));
+  if (!move) { refreshCoaching(); return; }
+  if (hintBusy) cancelAnalysis();
+  suggestion = move; selected = move.from;
+  legalTargets = getPieceLegalMoves(state.board, move.from.row, move.from.col);
+  renderBoard(); renderStatus();
+  $(`.board-cell[data-row="${move.from.row}"][data-col="${move.from.col}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  toast(`推荐：${moveToNotation(state.board, move)}。虚线框是建议落点，点击后才会落子。`);
+}
 function renderClock() {
   const seconds = Math.max(0, Math.floor(((state.endedAt || Date.now()) - state.startedAt) / 1000));
   $('#elapsed-time').textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
@@ -231,6 +305,7 @@ function cancelAnalysis() {
 
 function makeMove(move) {
   cancelAnalysis();
+  cancelCoaching(); coachData = null;
   const notation = moveToNotation(state.board, move);
   state.history.push({ board: state.board, turn: state.turn, move, notation });
   state.board = applyMove(state.board, move);
@@ -243,7 +318,7 @@ function makeMove(move) {
   $('#board-announcement').textContent = `${colorName(opposite(state.turn))}${notation}。${$('#status-title').textContent}`;
   if (gameStatus.over) toast(`${colorName(gameStatus.winner)}获胜，棋局结束`);
   else if (gameStatus.check) toast(`${colorName(state.turn)}被将军，请应将`);
-  maybeComputerMove();
+  refreshCoaching(); maybeComputerMove();
 }
 
 function beginAnalysis(kind) {
@@ -308,10 +383,11 @@ function undo() {
     if (state.history.length === 1 && last.turn !== state.humanColor) { renderStatus(); toast('电脑开局的第一步无法悔棋，你可以重新开局'); maybeComputerMove(); return; }
   }
   const previous = state.history[state.history.length - count];
+  cancelCoaching(); coachData = null;
   state.board = previous.board; state.turn = previous.turn;
   state.history.splice(-count); state.result = null; state.endedAt = null;
   selected = null; legalTargets = []; suggestion = null;
-  save(); render(); toast(state.mode === 'ai' && count === 2 ? '已退回到你上一次落子前' : '已悔棋'); maybeComputerMove();
+  save(); render(); toast(state.mode === 'ai' && count === 2 ? '已退回到你上一次落子前' : '已悔棋'); refreshCoaching(); maybeComputerMove();
 }
 
 function modal(title, content, actions = [{ text: '知道了', primary: true }]) {
@@ -331,11 +407,12 @@ function modal(title, content, actions = [{ text: '知道了', primary: true }])
 function newGame(config = {}) {
   const start = () => {
     cancelAnalysis();
+    cancelCoaching(); coachData = null;
     const nextConfig = { mode: state.mode, difficulty: state.difficulty, humanColor: state.humanColor, flipped: state.flipped, sound: state.sound, ...config };
     if (config.humanColor) nextConfig.flipped = config.humanColor === 'black';
     state = freshGame(nextConfig);
     selected = null; legalTargets = []; suggestion = null;
-    save(); render(); maybeComputerMove();
+    save(); render(); refreshCoaching(); maybeComputerMove();
   };
   if (state.history.length && !status().over) modal('开始新的对局？', '<p>当前棋局将被替换。你可以先下载本局棋谱，再开启新的一盘。</p>', [{ text: '继续当前棋局' }, { text: '开始新对局', primary: true, onClick: start }]);
   else start();
@@ -355,12 +432,14 @@ const actions = {
   new: () => newGame(),
   flip: () => { state.flipped = !state.flipped; save(); renderBoard(); renderPlayers(); },
   undo,
-  hint: () => { if (humanTurn() && !status().over && !thinking && !hintBusy) beginAnalysis('hint'); },
+  hint: () => { if (humanTurn() && !status().over && !thinking && !hintBusy) { if (coachData?.recommendation) showCoachMove(); else beginAnalysis('hint'); } },
+  'coach-use': showCoachMove,
+  'coach-retry': refreshCoaching,
   sound: () => { state.sound = !state.sound; save(); renderStatus(); sound(); },
   resign: () => {
     if (status().over || thinking) return;
     const resigning = state.mode === 'ai' ? state.humanColor : state.turn;
-    modal('确定认输？', `<p>本局将以${colorName(opposite(resigning))}获胜结束。下一盘，继续过招。</p>`, [{ text: '继续对弈' }, { text: '确认认输', primary: true, onClick: () => { cancelAnalysis(); state.result = { over: true, winner: opposite(resigning), reason: 'resign', check: false }; state.endedAt = Date.now(); selected = null; legalTargets = []; suggestion = null; save(); render(); $('#board-announcement').textContent = `${colorName(resigning)}认输，${colorName(opposite(resigning))}获胜`; } }]);
+    modal('确定认输？', `<p>本局将以${colorName(opposite(resigning))}获胜结束。下一盘，继续过招。</p>`, [{ text: '继续对弈' }, { text: '确认认输', primary: true, onClick: () => { cancelAnalysis(); cancelCoaching(); state.result = { over: true, winner: opposite(resigning), reason: 'resign', check: false }; state.endedAt = Date.now(); selected = null; legalTargets = []; suggestion = null; save(); render(); $('#board-announcement').textContent = `${colorName(resigning)}认输，${colorName(opposite(resigning))}获胜`; } }]);
   },
   retry: () => maybeComputerMove(),
   export: exportGame,
@@ -400,5 +479,5 @@ document.addEventListener('keydown', (event) => {
 $('#modal-close').addEventListener('click', () => $('#modal').close());
 $('#modal').addEventListener('click', (event) => { if (event.target === $('#modal')) { const rect = $('#modal').getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) $('#modal').close(); } });
 
-restore(); render(); maybeComputerMove();
+restore(); render(); refreshCoaching(); maybeComputerMove();
 setInterval(renderClock, 1000);
