@@ -218,11 +218,18 @@ function renderCoach() {
   $('#coach-status').textContent = coachPending ? '正在分析…' : coachError ? '暂不可用' : gameStatus.over ? '本局结束' : !humanTurn() ? '等待对手' : '行棋建议';
   let content = '';
   function entry(id, label, explanation) {
-    return `<div id="${id}" class="coach-item"><div class="coach-item-heading"><span>${escapeHtml(label)}</span><strong>${escapeHtml(explanation.notation)} · ${escapeHtml(explanation.headline)}</strong></div><p>${explanation.reasons.map(escapeHtml).join('；')}</p>${explanation.caution ? `<p class="coach-caution">留意：${escapeHtml(explanation.caution)}</p>` : ''}</div>`;
+    const isOpponent = id === 'coach-opponent';
+    const continuation = (explanation.continuation || []).slice(isOpponent ? 1 : 0);
+    const coordinates = continuation.map(({ from, to }) => ({ from, to }));
+    const line = continuation.length >= 2 ? `<div class="coach-continuation" data-pv="${escapeHtml(JSON.stringify(coordinates))}" data-start-color="${continuation[0].color}"><span class="coach-line-label">${isOpponent ? '针对这步，可参考这样应对' : '推荐后的参考应对'}</span><div class="coach-line">${continuation.map((ply) => `<span class="coach-ply ${ply.color}" data-notation="${escapeHtml(ply.notation)}" data-color="${ply.color}"><i>${ply.color === 'red' ? '红' : '黑'}</i>${escapeHtml(ply.notation)}</span>`).join('<span class="coach-arrow" aria-hidden="true">→</span>')}</div></div>` : '';
+    const reasons = explanation.reasons.length ? `<p>${explanation.reasons.map(escapeHtml).join('；')}</p>` : '';
+    const lineSummary = line && explanation.lineSummary ? `<p class="coach-line-summary">${escapeHtml(explanation.lineSummary)}</p>` : '';
+    const comparison = explanation.comparison ? `<p class="coach-comparison">${escapeHtml(explanation.comparison)}</p>` : '';
+    return `<div id="${id}" class="coach-item"><div class="coach-item-heading"><span>${escapeHtml(label)}</span><strong>${escapeHtml(explanation.notation)} · ${escapeHtml(explanation.headline)}</strong></div>${reasons}${line}${lineSummary}${comparison}${explanation.caution ? `<p class="coach-caution">留意：${escapeHtml(explanation.caution)}</p>` : ''}</div>`;
   }
   if (coachData?.opponent) content += entry('coach-opponent', state.mode === 'local' ? `${colorName(opposite(state.turn))}刚才` : '对手刚才', coachData.opponent);
   if (ready) content += entry('coach-recommendation', state.mode === 'local' ? `${colorName(state.turn)}建议` : '推荐你走', coachData.recommendation);
-  else if (coachPending) content += '<p class="coach-placeholder">正在结合吃子、将军和棋子位置，寻找走法与理由…</p>';
+  else if (coachPending) content += '<p class="coach-placeholder">正在推演双方接下来的走法，检查威胁、保护和交换结果…</p>';
   else if (gameStatus.over) content += '<p class="coach-placeholder">本局已结束。可以悔棋回看，或开启下一盘。</p>';
   else if (!humanTurn()) content += '<p class="coach-placeholder">对手落子后，会自动解读这步棋的作用，并给出你的应对建议。</p>';
   else if (coachError) content += '<p class="coach-placeholder">本次分析中断，你仍然可以正常行棋。<button type="button" class="coach-retry" data-action="coach-retry">重新分析</button></p>';
