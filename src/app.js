@@ -22,6 +22,15 @@ const icons = {
 function fillIcons(root = document) { root.querySelectorAll('[data-icon]').forEach((el) => { el.innerHTML = svgStart + (icons[el.dataset.icon] || icons.leaf) + '</svg>'; }); }
 fillIcons();
 
+const mobileLayout = window.matchMedia('(max-width: 760px)');
+function placeUndoButton() {
+  const button = $('#undo-button');
+  if (mobileLayout.matches) $('#mobile-board-actions').append(button);
+  else $('.status-card .action-row').prepend(button);
+}
+mobileLayout.addEventListener('change', placeUndoButton);
+placeUndoButton();
+
 function freshGame(config = {}) {
   return { board: createInitialBoard(), turn: 'red', history: [], mode: 'ai', difficulty: 'normal', humanColor: 'red', flipped: false, sound: false, startedAt: Date.now(), endedAt: null, result: null, ...config };
 }
