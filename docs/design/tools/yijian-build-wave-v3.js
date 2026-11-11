@@ -170,7 +170,11 @@ const runs = pkgs.map(p => {
   const impl = p.implReportFile
     ? Promise.all(deps).then(() => null)
     : Promise.all(deps)
-      .then(() => agent(implPrompt(p), { label: `impl:${p.id}`, phase: 'Implement', schema: REPORT }))
+      // a package that waits for others gets their engineers' reports at the end of its brief
+      .then(reports => agent(implPrompt(p) + (reports.some(Boolean) ? `
+
+REPORTS OF THE PACKAGES YOU BUILD ON (${(p.after || []).join(', ')}): their engineers finished just now; their reviewers are at work at this moment and may still change details in those files, so read the files themselves too.
+${JSON.stringify(reports.filter(Boolean), null, 1)}` : ''), { label: `impl:${p.id}`, phase: 'Implement', schema: REPORT }))
       .catch(() => null)
   implDone[p.id] = impl
   return impl.then(r =>
