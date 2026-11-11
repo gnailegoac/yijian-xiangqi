@@ -297,7 +297,7 @@ const SCENES = {
                   show: { line: '看，【马7进5】一跳，炮就白丢了。' } },
       '2:9776': { quick: 'good', cat: 'good', reply: { notation: '车9平8', line: '多半是【车9平8】，出车抢先。' } },
       '4:7101': { quick: 'best', cat: 'best', earned: true, cue: CUE.wow, line: '白吃一匹马！他的车刚走开，这匹马就没人保护了。',
-                  praise: { tier: 'great', streak: 1 }, self: true, rival: { mood: 'frown', line: '哼，大意了。' } },
+                  praise: { tier: 'great', streak: 1 }, self: true, rival: { mood: 'frown', line: '这一手厉害。' } },
     },
     replies: {
       1: { move: [0, 7, 2, 6], word: '出子', line: '他跳马，护住了中间的卒。' },
@@ -532,7 +532,7 @@ async function gameOver(result, reason, byChildMate, quiet = false) {
   const view = {
     result, reason, byChildMate, stats: { rounds: G.roundBase + Math.ceil(G.history.length / 2), captures: G.trophies.mine.length + (G.roundBase ? 4 : 0), brilliant: G.brilliant + (G.roundBase ? 1 : 0) },
     proud: quiet ? null : G.proud ?? SAMPLE_PROUD, rank: result === 'win' ? { to: 3, name: RANK_NAMES[2] } : null,
-    goal: result === 'draw' ? null : '下一盘小目标：吃子之前，先看它有没有保镖。', kept: result === 'win' ? true : null, quiet,
+    goal: result === 'draw' ? null : '下一盘小目标——吃子之前，先看它有没有保镖。', kept: result === 'win' ? true : null, quiet,
   };
   await stage.over(view);
   if (!alive()) return;
@@ -689,7 +689,7 @@ function startScene(name, opts = {}) {
   (async () => {
     if (opts.deal) {
       await say('start', '小主公，红方先行。这一局，亮陪你一起下。', { cue: CUE.go, lifetime: 'position' });
-      if (alive()) local('上盘说好的小目标：吃子之前，先看它有没有保镖。');          // held until the greeting has been read (K-101)
+      if (alive()) local('上盘说好的小目标——吃子之前，先看它有没有保镖。');          // held until the greeting has been read (K-101)
     } else if (scene.intro) {
       local(scene.intro);
     }
@@ -946,7 +946,7 @@ function rawOver(result, reason, extra = {}) {
   G.phase = 'over'; G.result = { result, reason }; G.positionId += 1;
   pushPhase();
   return stage.over({ result, reason, byChildMate: false, stats: { rounds: 34, captures: 9, brilliant: 1 }, proud: SAMPLE_PROUD,
-                      rank: result === 'win' ? { to: 4, name: RANK_NAMES[3] } : null, goal: '下一盘小目标：吃子之前，先看它有没有保镖。', kept: result === 'win' ? true : null, quiet: false, ...extra });
+                      rank: result === 'win' ? { to: 4, name: RANK_NAMES[3] } : null, goal: '下一盘小目标——吃子之前，先看它有没有保镖。', kept: result === 'win' ? true : null, quiet: false, ...extra });
 }
 const V = (cat, o = {}) => () => { if (!G.trial) ensureTrial(false); stage.verdict({ cat, final: true, held: false, voiced: false, earned: false, focus: [], ...o }); };
 let streamId = '';
