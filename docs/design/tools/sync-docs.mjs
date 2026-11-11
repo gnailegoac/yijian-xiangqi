@@ -29,7 +29,7 @@ const rules = [
 const jobs = [
   ...fs.readdirSync(design).filter(f => /^(SPEC\.md|SPEC-TOC\.txt|CONTRACT-NOTES\.md|WAVE\d+-NOTES\.md)$/.test(f))
     .map(f => ({ from: path.join(design, f), to: path.join(out, f) })),
-  ...fs.readdirSync(here).filter(f => f.endsWith('.mjs')).map(f => ({ from: path.join(here, f), to: path.join(out, 'tools', f) })),
+  ...fs.readdirSync(here).filter(f => /\.(mjs|cjs)$/.test(f)).map(f => ({ from: path.join(here, f), to: path.join(out, 'tools', f) })),
   ...all('--workflow').map(f => ({ from: f, to: path.join(out, 'tools', path.basename(f)) })),
 ];
 

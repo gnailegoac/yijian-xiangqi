@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="chibi" data-motion="full">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>dev · 诸葛亮与司马懿</title>
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<link rel="stylesheet" href="../styles/tokens.css">
+<link rel="stylesheet" href="../styles/themes.css">
+<link rel="stylesheet" href="../styles/buddy.css">
+<style>
+  /* Harness chrome only. Everything that belongs to the component is in ../styles/buddy.css. */
+  html { background: var(--page); }
+  body { min-height: 100vh; padding: 0 0 48px; color: var(--ink);
+         background: radial-gradient(90% 50% at 80% -10%, var(--surface-2), transparent 100%), var(--page); }
+  .bar { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+         padding: 8px 16px; background: var(--surface); border-bottom: 1.5px solid var(--edge); }
+  .bar h1 { margin: 0 auto 0 0; font: 700 20px/28px var(--font-kai); }
+  .seg { display: inline-flex; flex-wrap: wrap; max-width: 100%; border: 1px solid var(--edge); border-radius: 12px; overflow: hidden; }
+  .seg button { min-width: 56px; min-height: 44px; padding: 0 12px; border: 0; background: var(--surface-2); cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--edge); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+  /* body > main: the harness page only. With ?shell=1 the body holds #app, whose <main id="stage"> belongs to layout.css. */
+  body > main { max-width: 1180px; margin: 0 auto; padding: 0 16px; overflow-x: clip; }
+  body > main > section { margin-top: 24px; }
+  h2 { margin: 0 0 4px; font: 700 18px/26px var(--font-kai); }
+  .note { margin: 0 0 12px; color: var(--ink-2); font-size: 13px; line-height: 20px; }
+  .btn { min-height: 44px; min-width: 44px; padding: 0 12px; border: 1px solid var(--edge); border-radius: 12px;
+         background: var(--surface-2); cursor: pointer; }
+  .btn:active { transform: translateY(1px); }
+  .btn--go { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 700; }
+  .group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
+  .group > b { flex: 0 0 100%; font-size: 13px; color: var(--ink-2); font-weight: 600; }
+  .group label { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 8px; }
+  .group input[type="checkbox"] { width: 20px; height: 20px; }
+  .group select { min-height: 44px; border-radius: 12px; border: 1px solid var(--edge); background: var(--surface-2); padding: 0 8px; }
+
+  /* the sheet of moods */
+  .sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 12px; }
+  .card { display: grid; justify-items: center; gap: 6px; padding: 12px 8px 10px; border: 1px solid var(--edge);
+          border-radius: 16px; background: color-mix(in srgb, var(--surface) 70%, transparent); }
+  .card__full { width: 249px; height: 290px; --buddy-h: 290px; }
+  .card__row { display: flex; align-items: center; gap: 12px; }
+  .card__bust { width: 56px; height: 56px; --buddy-h: 56px; }
+  .card__name { font-size: 14px; line-height: 20px; }
+  .card__name small { color: var(--ink-2); }
+  .sheet .bubble { display: none; }
+  .sheet .buddy-box { display: block; }
+  .sheet--small { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+  .strip { display: flex; flex-wrap: wrap; gap: 10px 14px; margin: 0 0 14px; }
+  .strip figure { margin: 0; display: grid; justify-items: center; gap: 2px; font-size: 11px; line-height: 14px; color: var(--ink-2); }
+  .strip .card__bust .bubble { display: none; }
+  .strip .buddy-box { display: block; }
+  .sheet--small .card__full { width: 118px; height: 138px; --buddy-h: 138px; }
+
+  /* the stage mock-ups: boxes with the size of the real coach region */
+  .mock { position: relative; display: flex; gap: 0; margin: 0 0 12px; max-width: 100%; }
+  .mock__board { flex: none; align-self: stretch; width: 76px; border-radius: 12px 0 0 12px; display: grid; place-items: center;
+                 background: linear-gradient(135deg, var(--field-a), var(--field-b)); color: var(--river-text);
+                 font: 700 18px/1.2 var(--font-kai); writing-mode: vertical-rl; box-shadow: inset 0 0 0 2px var(--frame-edge); }
+  .mock__coach { display: grid; grid-template-rows: minmax(var(--buddy-h), 1fr) auto; min-width: 0;
+                 border: 1px dashed var(--edge); border-radius: 12px; padding: 8px; box-sizing: content-box; }
+  .mock__chips { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 6px; }
+  .mock__chips span { height: var(--chip-h, 48px); padding: 0 16px; border-radius: 24px; display: inline-flex; align-items: center;
+                      background: var(--surface); box-shadow: 0 0 0 1px var(--edge); color: var(--ink-2); font-size: 15px; white-space: nowrap; }
+  .mock[data-layout="landscape"] .mock__coach { width: 480px; height: 676px; --buddy-h: 291px; }
+  .mock[data-layout="landscape"][data-kb="1"] .mock__coach { height: 276px; --buddy-h: 123px; }
+  .mock[data-layout="portrait"] .mock__board, .mock[data-layout="compact"] .mock__board { display: none; }
+  .mock[data-layout="portrait"] .mock__coach { width: 804px; height: 176px; --buddy-h: 120px; }
+  .mock[data-layout="portrait"] .mock__chips, .mock[data-layout="compact"] .mock__chips { flex-wrap: nowrap; overflow: hidden; }
+  .mock[data-layout="compact"] .mock__coach { width: 344px; height: 130px; --buddy-h: 56px; --chip-h: 36px; padding: 0; border-radius: 0; }
+  .mock[data-layout="compact"] .mock__chips span { font-size: 13px; padding: 0 12px; }
+
+  /* stand-in for the move link that chat.css (package X6) styles in the real page */
+  .move-link { font: inherit; font-weight: 600; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer;
+               text-decoration: underline dashed 1.5px; text-underline-offset: 3px; white-space: nowrap; }
+  .move-link[data-color="black"] { color: var(--blk-rim); }
+
+  /* the rival: a top-bar mock-up and a sheet */
+  .topbar-mock { display: flex; align-items: center; gap: 12px; height: var(--top); margin-bottom: 0; }
+  .topbar-mock .sq { flex: none; width: 44px; height: min(44px, var(--top)); border: 1px solid var(--edge); border-radius: 12px;
+                     background: var(--surface); display: grid; place-items: center; }
+  .topbar-mock .round { margin-left: 170px; color: var(--ink-2); font-size: 14px; white-space: nowrap; }
+  .topbar-mock .fill { flex: 1; }
+  .boardtop { height: 40px; border-radius: 10px 10px 0 0; background: linear-gradient(135deg, var(--field-a), var(--field-b));
+              box-shadow: inset 0 0 0 2px var(--frame-edge); }
+  .rivalsheet { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: flex-end; }
+  .rcard { display: grid; justify-items: center; gap: 6px; font-size: 13px; }
+  .rcard__row { display: flex; align-items: center; gap: 14px; }
+  .rcard .rival { height: auto; }
+  .rcard .rival__plate, .rcard .rival__say { display: none; }
+  .rcard .zoom .rival { --_d: 150px; }
+  .rcard .d56 .rival { --_d: 56px; }
+  .rcard .d44 .rival { --_d: 44px; }
+
+  .log { margin: 0; padding: 8px 12px; height: 132px; overflow: auto; border: 1px solid var(--edge); border-radius: 12px;
+         background: var(--surface); font: 13px/20px ui-monospace, Menlo, Consolas, monospace; color: var(--ink-2); }
+
+  /* ?shell=1: the harness chrome steps aside for the real shell */
+  html.shell body { padding: 0; background: none; }
+  .shell-topbar { display: flex; align-items: center; gap: 12px; }
+  .shell-topbar .sq { flex: none; width: 44px; height: min(44px, var(--top)); border: 1px solid var(--edge); border-radius: 12px;
+                      background: var(--surface); display: grid; place-items: center; }
+  .shell-topbar .round { margin-left: auto; color: var(--ink-2); font-size: 14px; white-space: nowrap; }
+  .shell-chat { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 6px; overflow: hidden; }
+  .shell-chat[data-rows="1"] { flex-wrap: nowrap; }
+  .shell-chat span { flex: none; height: 48px; padding: 0 16px; border-radius: 24px; display: inline-flex; align-items: center;
+                     background: var(--surface); box-shadow: 0 0 0 1px var(--edge); color: var(--ink-2); font-size: 15px; white-space: nowrap; margin: 1px; }
+  [data-layout="compact"] .shell-chat span { height: 36px; font-size: 13px; padding: 0 12px; }
+
+  @media (max-width: 599.98px) {
+    body > main { padding: 0 8px; }
+    .bar { padding: 6px 8px; }
+    .bar h1 { font-size: 17px; }
+    .mock[data-layout="landscape"] .mock__coach { width: min(480px, 100vw - 16px - 18px - 44px); }
+    .mock[data-layout="landscape"] .mock__board { width: 44px; }
+    .mock[data-layout="portrait"] .mock__coach { width: min(804px, 100vw - 34px); }
+    .topbar-mock .round { margin-left: auto; }
+    .topbar-mock .fill { display: none; }
+  }
+  @media (max-width: 899.98px) and (min-width: 600px) {
+    .mock[data-layout="portrait"] .mock__coach { width: min(804px, 100vw - 50px); }
+  }
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>诸葛亮 · 司马懿</h1>
+  <a class="btn" style="display:inline-flex;align-items:center;text-decoration:none;color:inherit" href="?shell=1&mood=curious&say=哪个子还没有出动？看看它能去哪里。&cue=主公请看——&rival=thinking">放进真实外壳看看</a>
+  <div class="seg" id="theme-switch" role="group" aria-label="theme">
+    <button type="button" data-theme-id="chibi">赤壁</button><button type="button" data-theme-id="longzhong">隆中</button><button type="button" data-theme-id="shachang">沙场</button>
+  </div>
+  <div class="seg" id="motion-switch" role="group" aria-label="motion">
+    <button type="button" data-motion-id="full">动态完整</button><button type="button" data-motion-id="reduced">动态精简</button>
+  </div>
+</header>
+
+<main>
+  <section id="sheet-section">
+    <h2>十种神情 · 290 px 全身 与 56 px 头像</h2>
+    <p class="note">§11.3 的整张表：每格一个独立的 createBuddy。点「朝向」可以看 landscape 布局里镜像后的样子（扇子一侧朝向棋盘），以及 landscape 里用 <code>--buddy-face: 1</code> 不镜像的样子（开场卡的迎宾：扇子一侧背向文字）。</p>
+    <div class="group">
+      <div class="seg" id="facing-switch" role="group" aria-label="facing">
+        <button type="button" data-facing="">朝右（默认）</button><button type="button" data-facing="landscape">朝左（landscape）</button><button type="button" data-facing="asdrawn">landscape 不镜像（--buddy-face: 1）</button>
+      </div>
+    </div>
+    <div class="sheet" id="sheet"></div>
+  </section>
+
+  <section id="small-section">
+    <h2>56 px 头像一排 · 138 px 全身一排</h2>
+    <p class="note">手机上他只有 56 px：十种神情在这个尺寸也要一眼分得出来。</p>
+    <div class="strip" id="bust-strip"></div>
+    <div class="sheet sheet--small" id="sheet-small"></div>
+  </section>
+
+  <section id="stage-section">
+    <h2>舞台 · 一个可操作的诸葛亮</h2>
+    <p class="note">虚线框是真实页面里军师区域的尺寸。左边一条是棋盘所在的方向。</p>
+    <div class="group">
+      <div class="seg" id="layout-switch" role="group" aria-label="layout">
+        <button type="button" data-mock="landscape">landscape 全身 291</button><button type="button" data-mock="landscape-kb">landscape 键盘 123</button><button type="button" data-mock="portrait">portrait 头像 120</button><button type="button" data-mock="compact">compact 头像 56</button>
+      </div>
+    </div>
+    <div class="mock" id="mock" data-layout="landscape" data-kb="0">
+      <div class="mock__board">棋盘</div>
+      <div class="mock__coach">
+        <div id="buddy" class="coach__buddy"></div>
+        <div class="mock__chips"><span>对方想干什么？</span><span>现在谁占上风？</span><span>我有危险吗？</span><span>我上一步怎么样？</span></div>
+      </div>
+    </div>
+
+    <div class="group" id="mood-buttons"><b>setMood(mood, {hold, instant})</b></div>
+    <div class="group">
+      <label><input type="checkbox" id="opt-hold"> hold 1200 ms</label>
+      <label><input type="checkbox" id="opt-instant"> instant</label>
+      <label>setBaseMood <select id="base-select"></select></label>
+      <span id="mood-readout" class="note" style="margin:0"></span>
+    </div>
+    <div class="group" id="gesture-buttons"><b>react(gesture)</b></div>
+    <div class="group">
+      <b>setSpeaking / setVariant / destroy</b>
+      <button class="btn" type="button" id="speak-on">setSpeaking(true)</button>
+      <button class="btn" type="button" id="speak-off">setSpeaking(false)</button>
+      <button class="btn" type="button" id="variant-full">setVariant('full')</button>
+      <button class="btn" type="button" id="variant-bust">setVariant('bust')</button>
+      <button class="btn" type="button" id="destroy">destroy()</button>
+      <button class="btn" type="button" id="recreate">createBuddy()</button>
+    </div>
+    <div class="group" id="bubble-buttons">
+      <b>bubble</b>
+      <button class="btn" type="button" data-b="begin">begin + 文字</button>
+      <button class="btn" type="button" data-b="begin-good">begin 妙哉！</button>
+      <button class="btn" type="button" data-b="begin-warn">begin 且慢！</button>
+      <button class="btn" type="button" data-b="begin-oh">begin 咦？</button>
+      <button class="btn" type="button" data-b="begin-wait">begin（无文字 → 三点）</button>
+      <button class="btn" type="button" data-b="long">begin 长句（装不下）</button>
+      <button class="btn" type="button" data-b="tag-good">setTag good</button>
+      <button class="btn" type="button" data-b="tag-warn">setTag warn</button>
+      <button class="btn" type="button" data-b="tag-neutral">setTag neutral</button>
+      <button class="btn" type="button" data-b="tag-null">setTag(null)</button>
+      <button class="btn" type="button" data-b="question">setQuestion</button>
+      <button class="btn" type="button" data-b="question-null">setQuestion(null)</button>
+      <button class="btn" type="button" data-b="caption">captionEl（走子说明）</button>
+      <button class="btn" type="button" data-b="status">status</button>
+      <button class="btn" type="button" data-b="stale-retract">markStale 已换一步</button>
+      <button class="btn" type="button" data-b="stale-commit">markStale 已落子</button>
+      <button class="btn" type="button" data-b="typing-on">setTyping(true)</button>
+      <button class="btn" type="button" data-b="typing-off">setTyping(false)</button>
+      <button class="btn" type="button" data-b="clear">clear</button>
+    </div>
+    <div class="group" id="scene-buttons">
+      <b>场景（舞台会这样用他）</b>
+      <button class="btn btn--go" type="button" data-scene="brilliant">试走 · 妙手</button>
+      <button class="btn btn--go" type="button" data-scene="good">试走 · 稳健（点头）</button>
+      <button class="btn btn--go" type="button" data-scene="held">试走 · 漏着（且慢！）</button>
+      <button class="btn btn--go" type="button" data-scene="ask">提问 · 对方会怎么应？</button>
+      <button class="btn btn--go" type="button" data-scene="rival">对方走子 + 一句话</button>
+      <button class="btn btn--go" type="button" data-scene="pouch">锦囊（用扇子指棋盘）</button>
+      <button class="btn btn--go" type="button" data-scene="win">获胜</button>
+      <button class="btn btn--go" type="button" data-scene="loss">惜败</button>
+    </div>
+  </section>
+
+  <section id="rival-section">
+    <h2>司马懿 · 五种神情</h2>
+    <p class="note">顶栏里的名牌：landscape 56 px，其余 44 px。下面一条是棋盘的上沿。</p>
+    <div class="group">
+      <div class="seg" id="rival-layout" role="group" aria-label="rival layout">
+        <button type="button" data-rl="landscape">landscape（顶栏 48）</button><button type="button" data-rl="portrait">portrait（顶栏 48）</button><button type="button" data-rl="compact">compact（顶栏 40）</button>
+      </div>
+    </div>
+    <div id="rival-mock" data-layout="landscape" style="--top:48px">
+      <div class="topbar-mock"><span class="sq">≡</span><div id="rival-host"></div><span class="round">第 12 回合</span><span class="fill"></span><span class="sq">♪</span></div>
+      <div class="boardtop" id="boardtop" style="margin-top:8px"></div>
+    </div>
+    <div class="group" id="rival-buttons" style="margin-top:12px"><b>set({mood, line})</b></div>
+    <div class="group"><label><input type="checkbox" id="rival-line" checked> 带一句台词</label></div>
+    <div class="rivalsheet" id="rival-sheet"></div>
+  </section>
+
+  <section id="log-section">
+    <h2>事件</h2>
+    <p class="note">点诸葛亮 → buddy:tap；点气泡 → bubble:expand {id}；点气泡里的着法 → chat:movelink（不会变成 bubble:expand）。</p>
+    <pre class="log" id="log"></pre>
+  </section>
+</main>
+
+<script type="module">
+import { createBuddy } from '../src/ui/buddy.js';
+import { createRivalView } from '../src/ui/rival-view.js';
+import { MOODS } from '../src/core/codes.js';
+
+const $ = (sel) => document.querySelector(sel);
+const params = new URLSearchParams(location.search);
+const root = document.documentElement;
+
+if (params.has('shell')) shell(); else harness();
+
+function harness() {
+
+const GLOSS = { idle: '待命', listening: '倾听', thinking: '思索', curious: '好奇', pleased: '满意', impressed: '惊叹',
+                worried: '担心', alarmed: '警觉', cheering: '欢呼', consoling: '安慰' };
+
+/* ---- theme and motion ---- */
+const all = { buddies: [], rivals: [] };
+function setTheme(id) {
+  root.dataset.theme = id;
+  for (const b of $('#theme-switch').children) b.setAttribute('aria-pressed', String(b.dataset.themeId === id));
+}
+function setMotion(id) {
+  root.dataset.motion = id;
+  for (const b of $('#motion-switch').children) b.setAttribute('aria-pressed', String(b.dataset.motionId === id));
+  for (const b of all.buddies) b.setReducedMotion(id === 'reduced');
+  for (const r of all.rivals) r.setReducedMotion(id === 'reduced');
+}
+const reducedNow = () => root.dataset.motion === 'reduced';
+$('#theme-switch').addEventListener('click', (e) => { const id = e.target.dataset.themeId; if (id) setTheme(id); });
+$('#motion-switch').addEventListener('click', (e) => { const id = e.target.dataset.motionId; if (id) setMotion(id); });
+
+/* ---- the sheets ---- */
+function card(mood, small) {
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.dataset.mood = mood;
+  const full = document.createElement('div');
+  full.className = 'card__full';
+  el.append(full);
+  const b1 = createBuddy(full, { variant: 'full', reducedMotion: reducedNow() });
+  b1.setMood(mood, { instant: true });
+  all.buddies.push(b1);
+  if (!small) {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'card__row';
+    const bust = document.createElement('div');
+    bust.className = 'card__bust';
+    const name = document.createElement('div');
+    name.className = 'card__name';
+    name.innerHTML = `<b>${mood}</b> <small>${GLOSS[mood]}</small>`;
+    rowEl.append(bust, name);
+    el.append(rowEl);
+    const b2 = createBuddy(bust, { variant: 'bust', reducedMotion: reducedNow() });
+    b2.setMood(mood, { instant: true });
+    all.buddies.push(b2);
+  }
+  return el;
+}
+for (const mood of MOODS) $('#sheet').append(card(mood, false));
+for (const mood of MOODS) $('#sheet-small').append(card(mood, true));
+for (const mood of MOODS) {
+  const f = document.createElement('figure');
+  const h = document.createElement('div');
+  h.className = 'card__bust';
+  const c = document.createElement('figcaption');
+  c.textContent = mood;
+  f.append(h, c);
+  $('#bust-strip').append(f);
+  const b = createBuddy(h, { variant: 'bust', reducedMotion: reducedNow() });
+  b.setMood(mood, { instant: true });
+  all.buddies.push(b);
+}
+function setFacing(v) {
+  // '' = no layout attribute; 'landscape' = mirrored by buddy.css; 'asdrawn' = landscape, but the host says --buddy-face: 1
+  for (const id of ['#sheet', '#sheet-small', '#bust-strip']) {
+    if (v) $(id).dataset.layout = 'landscape'; else delete $(id).dataset.layout;
+    if (v === 'asdrawn') $(id).style.setProperty('--buddy-face', '1'); else $(id).style.removeProperty('--buddy-face');
+  }
+  for (const b of $('#facing-switch').children) b.setAttribute('aria-pressed', String(b.dataset.facing === v));
+}
+$('#facing-switch').addEventListener('click', (e) => { if (e.target.dataset.facing !== undefined) setFacing(e.target.dataset.facing); });
+
+/* ---- the live stage ---- */
+const host = $('#buddy');
+const mock = $('#mock');
+let buddy = null;
+let mockName = 'landscape';
+function makeBuddy() {
+  if (buddy) return;
+  buddy = createBuddy(host, { variant: mockName === 'landscape' ? 'full' : 'bust', reducedMotion: reducedNow() });
+  all.buddies.push(buddy);
+  window.buddy = buddy;
+  readout();
+}
+function setMock(name) {
+  mockName = name;
+  mock.dataset.layout = name === 'landscape-kb' ? 'landscape' : name;
+  mock.dataset.kb = name === 'landscape-kb' ? '1' : '0';
+  for (const b of $('#layout-switch').children) b.setAttribute('aria-pressed', String(b.dataset.mock === name));
+  buddy?.setVariant(name === 'landscape' ? 'full' : 'bust');
+}
+$('#layout-switch').addEventListener('click', (e) => { if (e.target.dataset.mock) setMock(e.target.dataset.mock); });
+
+function readout() { $('#mood-readout').textContent = buddy ? `getMood() = ${buddy.getMood()}` : '已销毁'; }
+setInterval(readout, 200);
+
+for (const mood of MOODS) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'btn'; b.dataset.mood = mood; b.textContent = `${mood} ${GLOSS[mood]}`;
+  $('#mood-buttons').append(b);
+  const o = document.createElement('option');
+  o.value = mood; o.textContent = mood;
+  $('#base-select').append(o);
+}
+$('#mood-buttons').addEventListener('click', (e) => {
+  const mood = e.target.dataset.mood;
+  if (!mood || !buddy) return;
+  const opts = {};
+  if ($('#opt-hold').checked) opts.hold = 1200;
+  if ($('#opt-instant').checked) opts.instant = true;
+  buddy.setMood(mood, opts);
+});
+$('#base-select').addEventListener('change', (e) => buddy?.setBaseMood(e.target.value));
+for (const g of ['nod', 'hop', 'shake', 'peek', 'point']) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'btn'; b.dataset.gesture = g; b.textContent = g;
+  $('#gesture-buttons').append(b);
+}
+$('#gesture-buttons').addEventListener('click', (e) => { if (e.target.dataset.gesture) buddy?.react(e.target.dataset.gesture); });
+$('#speak-on').addEventListener('click', () => buddy?.setSpeaking(true));
+$('#speak-off').addEventListener('click', () => buddy?.setSpeaking(false));
+$('#variant-full').addEventListener('click', () => buddy?.setVariant('full'));
+$('#variant-bust').addEventListener('click', () => buddy?.setVariant('bust'));
+$('#destroy').addEventListener('click', () => { if (!buddy) return; dropPending(); stopTyper(); all.buddies.splice(all.buddies.indexOf(buddy), 1); buddy.destroy(); buddy = null; readout(); });
+$('#recreate').addEventListener('click', makeBuddy);
+
+/* ---- a stand-in for stream-text + chat-panel: types into the container begin() returned and ends the line ---- */
+let seq = 0;
+let typer = null;
+function stopTyper() { if (typer) { clearInterval(typer); typer = null; buddy?.setSpeaking(false); } }
+/* scene steps that are still to come; a new scene, a bubble button or destroy() drops them */
+let pending = [];
+function later(fn, ms) { pending.push(setTimeout(() => { if (buddy) fn(); }, ms)); }
+function dropPending() { pending.forEach(clearTimeout); pending = []; }
+function moveLink(notation, color) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'move-link'; b.dataset.move = '0727'; b.dataset.color = color; b.textContent = notation;
+  b.addEventListener('click', () => b.dispatchEvent(new CustomEvent('chat:movelink', { bubbles: true, detail: { link: { notation }, active: true } })));
+  return b;
+}
+/** parts: strings and {move, color} */
+function say(parts, { cue = null, source = 'llm', delay = 0 } = {}) {
+  if (!buddy) return null;
+  stopTyper();
+  const id = `m${++seq}`;
+  const el = buddy.bubble.begin({ id, cue });
+  const queue = [];
+  for (const p of parts) { if (typeof p === 'string') queue.push(...p); else queue.push(p); }
+  // like chat-panel: the end of a line is written on the bubble element (the container's parent)
+  const end = () => { if (el.parentElement) { el.parentElement.dataset.state = 'done'; el.parentElement.dataset.source = source; } };
+  const put = (item) => {
+    if (typeof item === 'string') { if (el.lastChild && el.lastChild.nodeType === 3) el.lastChild.data += item; else el.append(item); }
+    else el.append(moveLink(item.move, item.color));
+  };
+  const start = () => {
+    if (!buddy) return;
+    if (reducedNow()) { queue.forEach(put); end(); return; }
+    buddy.setSpeaking(true);
+    const mine = setInterval(() => {
+      if (!el.isConnected) { clearInterval(mine); if (typer === mine) stopTyper(); return; }       // another line took the bubble
+      if (queue.length) { put(queue.shift()); return; }
+      end();
+      clearInterval(mine);
+      if (typer === mine) stopTyper();
+    }, 25);
+    typer = mine;
+  };
+  if (delay) later(start, delay); else start();
+  return id;
+}
+function captionLine() {
+  if (!buddy) return;
+  const c = buddy.bubble.captionEl();
+  c.replaceChildren(moveLink('马8进7', 'black'), '出子');
+}
+const LONG = '小主公请看，这一步炮打中兵看似得了一子，其实对方的马正好回踩，咱们的炮就回不来了。先把车开出来，守住这条线，再找机会进攻，才是万全之策。亮以为，稳一手更好。再多说两句，气泡就装不下了，这时右下角会出现一个小标记。';
+const bubbleActions = {
+  'begin': () => say(['这步棋走得稳，先把马跳出来，下一步车就能出动了。']),
+  'begin-good': () => say(['炮打中兵，还带着将军，一举两得！'], { cue: '妙哉！' }),
+  'begin-warn': () => say(['这个子，真的没人管吗？'], { cue: '且慢！', source: 'local' }),
+  'begin-oh': () => say(['对方的车怎么自己走开了？'], { cue: '咦？' }),
+  'begin-wait': () => { stopTyper(); buddy?.bubble.begin({ id: `m${++seq}`, cue: null }); },
+  'long': () => say([LONG], { cue: '主公请看——' }),
+  'tag-good': () => buddy?.bubble.setTag('主公英明！', 'good'),
+  'tag-warn': () => buddy?.bubble.setTag('且慢……', 'warn'),
+  'tag-neutral': () => buddy?.bubble.setTag('咦？', 'neutral'),
+  'tag-null': () => buddy?.bubble.setTag(null, 'neutral'),
+  'question': () => { const q = document.createElement('span'); q.textContent = '对方会怎么应？'; buddy?.bubble.setQuestion(q); },
+  'question-null': () => buddy?.bubble.setQuestion(null),
+  'caption': () => captionLine(),
+  'status': () => buddy?.bubble.status('对方正在想…'),
+  'stale-retract': () => { stopTyper(); buddy?.bubble.markStale('已换一步'); },
+  'stale-commit': () => { stopTyper(); buddy?.bubble.markStale('已落子'); },
+  'typing-on': () => buddy?.bubble.setTyping(true),
+  'typing-off': () => buddy?.bubble.setTyping(false),
+  'clear': () => { stopTyper(); buddy?.bubble.clear(); },
+};
+$('#bubble-buttons').addEventListener('click', (e) => { const a = bubbleActions[e.target.dataset.b]; if (a) { dropPending(); a(); } });
+
+const scenes = {
+  brilliant() {
+    buddy.setMood('thinking');
+    later(() => { buddy.setMood('impressed'); say(['马后炮！这一步连亮都没想到，小主公自己看出来了。'], { cue: '妙哉！' }); }, 450);
+    later(() => buddy.setMood('idle'), 5200);
+  },
+  good() { stopTyper(); buddy.bubble.clear(); buddy.setMood('pleased', { hold: 1200 }); buddy.react('nod'); },
+  held() {
+    buddy.setMood('alarmed', { hold: 1200 });
+    buddy.setBaseMood('worried');
+    say(['这个子，真的没人管吗？'], { cue: '且慢！', source: 'local' });
+  },
+  ask() {
+    const q = document.createElement('span'); q.textContent = '对方会怎么应？';
+    buddy.bubble.setQuestion(q);
+    buddy.setMood('thinking');
+    stopTyper();
+    buddy.bubble.begin({ id: `m${++seq}`, cue: null });
+    later(() => { buddy.setMood('curious'); buddy.react('point');
+      say(['对方会走', { move: '马7进5', color: 'black' }, '把炮吃掉，咱们只换到一个卒，亏了。'], {}); buddy.bubble.setQuestion(q); }, 1300);
+    later(() => buddy.setMood('idle'), 6500);
+  },
+  rival() {
+    buddy.setBaseMood('idle'); buddy.setMood('idle');
+    stopTyper();
+    buddy.bubble.clear();
+    buddy.bubble.status('对方正在想…');
+    later(() => captionLine(), 900);
+    later(() => say(['顺炮对阵！它的炮瞄着你的中兵。']), 1500);
+  },
+  pouch() { buddy.setMood('curious'); buddy.react('point'); say(['哪个子还没有出动？看看它能去哪里。'], { cue: '主公请看——', source: 'local' }); later(() => buddy.setMood('idle'), 4500); },
+  win() { buddy.setBaseMood('cheering'); say(['一招绝杀，小主公威武！'], { cue: '大捷！', source: 'local' }); },
+  loss() { buddy.setBaseMood('consoling'); say(['胜败乃兵家常事。小主公，我们再来！'], { cue: '惜哉……', source: 'local' }); },
+};
+$('#scene-buttons').addEventListener('click', (e) => { const s = scenes[e.target.dataset.scene]; if (s && buddy) { dropPending(); s(); } });
+
+/* ---- the rival ---- */
+const rival = createRivalView($('#rival-host'));
+all.rivals.push(rival);
+window.rival = rival;
+const RIVAL_LINE = { calm: '稳扎稳打。', thinking: '容我三思……', frown: '局势不妙。', rattled: '竟有此着！', smug: '此计已成。' };
+const RIVAL_GLOSS = { calm: '镇定', thinking: '思考', frown: '皱眉', rattled: '慌了', smug: '得意' };
+for (const mood of Object.keys(RIVAL_LINE)) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'btn'; b.dataset.rmood = mood; b.textContent = `${mood} ${RIVAL_GLOSS[mood]}`;
+  $('#rival-buttons').append(b);
+  const c = document.createElement('div');
+  c.className = 'rcard';
+  const rowEl = document.createElement('div');
+  rowEl.className = 'rcard__row';
+  for (const size of ['zoom', 'd56', 'd44']) {
+    const h = document.createElement('div');
+    h.className = size;
+    rowEl.append(h);
+    const r = createRivalView(h);
+    r.setReducedMotion(true);                      // the sheet shows resting pictures
+    r.set({ mood });
+  }
+  const label = document.createElement('div');
+  label.innerHTML = `<b>${mood}</b> ${RIVAL_GLOSS[mood]}`;
+  c.append(rowEl, label);
+  $('#rival-sheet').append(c);
+}
+$('#rival-buttons').addEventListener('click', (e) => {
+  const mood = e.target.dataset.rmood;
+  if (!mood) return;
+  rival.set($('#rival-line').checked ? { mood, line: RIVAL_LINE[mood] } : { mood });
+});
+function setRivalLayout(name) {
+  const m = $('#rival-mock');
+  m.dataset.layout = name;
+  m.style.setProperty('--top', name === 'compact' ? '40px' : '48px');
+  $('#boardtop').style.marginTop = name === 'landscape' ? '8px' : name === 'portrait' ? '5px' : '4px';
+  for (const b of $('#rival-layout').children) b.setAttribute('aria-pressed', String(b.dataset.rl === name));
+}
+$('#rival-layout').addEventListener('click', (e) => { if (e.target.dataset.rl) setRivalLayout(e.target.dataset.rl); });
+
+/* ---- event log ---- */
+const log = $('#log');
+for (const type of ['buddy:tap', 'bubble:expand', 'chat:movelink']) {
+  document.addEventListener(type, (e) => {
+    log.textContent = `${new Date().toLocaleTimeString()}  ${type}  ${JSON.stringify(e.detail)}  (target: ${e.target.id || e.target.className})\n` + log.textContent;
+  });
+}
+
+/* ---- start ---- */
+setTheme(['chibi', 'longzhong', 'shachang'].includes(params.get('theme')) ? params.get('theme') : 'chibi');
+makeBuddy();
+setMotion(params.get('motion') === 'reduced' || (!params.has('motion') && matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'reduced' : 'full');
+setFacing(['landscape', 'asdrawn'].includes(params.get('facing')) ? params.get('facing') : '');
+setMock(['landscape', 'landscape-kb', 'portrait', 'compact'].includes(params.get('layout')) ? params.get('layout') : (innerWidth < 600 ? 'compact' : innerWidth < 900 ? 'portrait' : 'landscape'));
+setRivalLayout(innerWidth < 600 ? 'compact' : innerWidth < 900 ? 'portrait' : 'landscape');
+}
+
+/* ---- ?shell=1: the two characters inside the real app shell (index.html body + styles/layout.css + layout.js) ----
+ * The other regions stay empty, so the shell shows its own placeholders there. Extra parameters:
+ *   mood=<Mood>   say=<text>   cue=<text>   rival=<RivalMood>   line=<text>   theme, motion as above */
+async function shell() {
+  root.classList.add('shell');
+  root.dataset.theme = ['chibi', 'longzhong', 'shachang'].includes(params.get('theme')) ? params.get('theme') : 'chibi';
+  root.dataset.motion = params.get('motion') === 'reduced' ? 'reduced' : 'full';
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = '../styles/layout.css';
+  await new Promise((done) => { link.onload = done; link.onerror = done; document.head.append(link); });
+  const { computeLayout, applyLayout } = await import('../src/ui/layout.js');
+  const app = document.createElement('div');
+  app.id = 'app';
+  app.className = 'app';
+  for (const [k, v] of Object.entries({ layout: 'landscape', phase: 'childTurn', ply: '0', kb: '0', sheet: '0', coach: 'local' })) app.dataset[k] = v;
+  app.innerHTML = `
+    <header id="topbar" class="topbar"></header>
+    <main id="stage" class="stage"><div id="board"></div></main>
+    <div id="underbar" class="underbar"></div>
+    <section id="coach" class="coach" aria-label="军师"><div id="buddy" class="coach__buddy"></div><div id="chat" class="coach__chat"></div></section>
+    <div id="actions" class="actions"></div>
+    <div id="overlays"></div>`;
+  document.body.replaceChildren(app);
+
+  // stand-ins for the neighbours (hud top bar, chat chips): just enough to see the characters in place
+  const topbar = app.querySelector('#topbar');
+  topbar.classList.add('shell-topbar');
+  const menu = document.createElement('span');
+  menu.className = 'sq';
+  menu.textContent = '≡';
+  const rivalHost = document.createElement('div');
+  const round = document.createElement('span');
+  round.className = 'round';
+  round.textContent = '第 12 回合';
+  const mute = document.createElement('span');
+  mute.className = 'sq';
+  mute.textContent = '♪';
+  topbar.append(menu, rivalHost, round, mute);
+  const chat = app.querySelector('#chat');
+  chat.classList.add('shell-chat');
+  for (const label of ['对方想干什么？', '现在谁占上风？', '我有危险吗？', '我上一步怎么样？']) {
+    const chip = document.createElement('span');
+    chip.textContent = label;
+    chat.append(chip);
+  }
+
+  const reduced = root.dataset.motion === 'reduced';
+  let result = computeLayout({ W: innerWidth, H: innerHeight, visibleH: innerHeight, sheet: false });
+  applyLayout(app, result, null);
+  const buddy = createBuddy(app.querySelector('#buddy'), { variant: result.buddy, reducedMotion: reduced });
+  const rival = createRivalView(rivalHost);
+  rival.setReducedMotion(reduced);
+  window.buddy = buddy;
+  window.rival = rival;
+  addEventListener('resize', () => {
+    result = computeLayout({ W: innerWidth, H: innerHeight, visibleH: innerHeight, sheet: false });
+    applyLayout(app, result, null);
+    buddy.setVariant(result.buddy);
+    chat.dataset.rows = String(result.chipRows);
+    chat.hidden = !result.showChips;
+  });
+  chat.dataset.rows = String(result.chipRows);
+  chat.hidden = !result.showChips;
+
+  if (MOODS.includes(params.get('mood'))) buddy.setMood(params.get('mood'), { instant: true });
+  if (params.get('say')) {
+    const el = buddy.bubble.begin({ id: 'm1', cue: params.get('cue') });
+    el.textContent = params.get('say');
+    el.parentElement.dataset.state = 'done';
+    el.parentElement.dataset.source = 'local';
+  }
+  if (params.get('rival')) rival.set(params.get('line') ? { mood: params.get('rival'), line: params.get('line') } : { mood: params.get('rival') });
+}
+</script>
+</body>
+</html>

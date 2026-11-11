@@ -1,0 +1,13 @@
+{ "v": 1,
+  "turn": { "ply": 67, "me": "red", "phase": "endgame", "check": false, "n": 0, "back": null, "eval": { "b": "won" },
+    "mat": { "me": "R1H1C1P2A2E2", "opp": "H1P1A1E1", "cp": 1150 }, "level": 3,
+    "moments": [ { "n": 18, "s": "me", "move": "马三进四", "tag": "great", "k": "fork" } ], "taught": ["fork", "greedy"],
+    "mine": { "move": "车二进七", "cat": "best", "waited": true, "self": true }, "opp": null,
+    "threats": [], "chance": null, "known": { "threats": true, "chance": false } },
+  "events": [
+    { "i": 0, "kind": "over", "cue": "win",
+      "over": { "result": "win", "reason": "checkmate", "moves": 34,
+        "stats": { "good": 25, "taken": 2, "captures": 9, "brilliant": 1 },
+        "takeaway": { "kind": "habit", "code": "greedy", "n": 2, "ex": { "n": 2, "move": "炮五进四", "better": "马二进三" } },
+        "proud": { "n": 18, "s": "me", "move": "马三进四", "tag": "great", "k": "fork" },
+        "goal": "greedy", "kept": null, "rank": { "to": 4 } } } ] }

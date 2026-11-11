@@ -1,0 +1,23 @@
+{ "v": 1,
+  "turn": { "ply": 2, "me": "red", "phase": "opening", "check": false, "n": 35, "back": null, "eval": { "b": "even" },
+    "mat": { "me": "R2H2C2P5A2E2", "opp": "R2H2C2P5A2E2", "cp": 0 }, "level": 3,
+    "moments": [], "taught": [],
+    "mine": { "move": "炮二平五", "cat": "best", "waited": true, "self": true },
+    "opp": { "move": "马8进7", "check": false, "quality": "normal", "name": "horse_open",
+      "does": [ { "k": "develop", "by": { "s": "opp", "t": "H", "f": 7 } },
+                { "k": "defend", "on": { "s": "opp", "t": "P", "f": 5 } } ] },
+    "threats": [], "chance": null, "known": { "threats": true, "chance": false } },
+  "events": [
+    { "i": 0, "kind": "recap", "said": "none",
+      "recap": { "tries": [ { "move": "炮五进四", "cat": "mistake" }, { "move": "兵三进一", "cat": "ok" }, { "move": "马二进三", "cat": "best" } ],
+                 "hint": 1,
+                 "cur": { "move": "马二进三", "cat": "best", "loss": 0, "held": false, "eval": { "b": "even" },
+                          "does": [ { "k": "develop", "by": { "s": "me", "t": "H", "f": 3 } } ], "flaws": [], "cost": null, "reply": null,
+                          "toward": null, "chance": "none" } } },
+    { "i": 5, "kind": "ask", "ask": "good", "said": "local", "v": 0 },
+    { "i": 6, "kind": "ask", "ask": "reply", "more": { "better": [] }, "said": "local", "v": 0 },
+    { "i": 7, "kind": "ask", "ask": "score", "said": "local", "v": 0 },
+    { "i": 8, "kind": "ask", "ask": "danger", "said": "local", "v": 0 },
+    { "i": 9, "kind": "ask", "ask": "last", "said": "local", "v": 0 },
+    { "i": 10, "kind": "ask", "ask": "better" }
+  ] }

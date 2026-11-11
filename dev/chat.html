@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="chibi" data-motion="full">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-visual">
+<title>dev · 聊天面板与逐字文本</title>
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<link rel="stylesheet" href="../styles/tokens.css">
+<link rel="stylesheet" href="../styles/themes.css">
+<link rel="stylesheet" href="../styles/layout.css">
+<link rel="stylesheet" href="../styles/chat.css">
+<style>
+  /* Harness chrome only. Everything that belongs to the component is in ../styles/chat.css.
+   * The page is the real shell (layout.css + layout.js): top bar, under-bar and actions stay the shell's placeholders,
+   * the controls sit where the board would be, #buddy holds a stand-in figure with a stand-in bubble (or the real
+   * ones with ?buddy=real), and #chat holds the real chat panel. */
+
+  /* ---- controls, in the board's place ---- */
+  #board { display: grid; }
+  .dev { min-width: 0; min-height: 0; overflow: auto; padding: 10px 12px 14px; border: 1.5px dashed var(--edge); border-radius: 14px;
+         background: color-mix(in srgb, var(--surface) 72%, transparent); font-size: 13px; line-height: 18px; }
+  .dev h1 { margin: 0 0 6px; font: 700 18px/24px var(--font-kai); }
+  .dev h2 { margin: 10px 0 5px; color: var(--ink-2); font: 600 12px/16px var(--font-ui); letter-spacing: .08em; }
+  .dev .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .dev button { min-height: 40px; min-width: 44px; padding: 0 10px; border: 1px solid var(--edge); border-radius: 10px;
+                background: var(--surface-2); color: var(--ink); font: 500 13px/1 var(--font-ui); cursor: pointer; }
+  .dev button:active { transform: translateY(1px); }
+  .dev button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 700; }
+  .dev .seg { display: inline-flex; border: 1px solid var(--edge); border-radius: 10px; overflow: hidden; }
+  .dev .seg button { border: 0; border-radius: 0; }
+  .dev .seg button + button { border-left: 1px solid var(--edge); }
+  .dev__card { margin-top: 8px; padding: 10px 12px; border: 1.5px solid var(--edge); border-radius: 14px; background: var(--surface); }
+  .dev__card b { display: block; margin-bottom: 4px; font: 700 15px/20px var(--font-kai); color: var(--ink-2); }
+  .dev__card p { margin: 0; min-height: 48px; font-size: 16px; line-height: 24px; }
+  .dev__info { margin: 8px 0 0; color: var(--ink-2); font: 12px/16px ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .dev__log { margin: 4px 0 0; padding: 0; list-style: none; max-height: 132px; overflow: auto;
+              font: 12px/16px ui-monospace, Consolas, monospace; color: var(--ink-2); }
+  .dev__log li:first-child { color: var(--ink); }
+
+  /* ---- the simulated on-screen keyboard ---- */
+  #fake-kb { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: grid; place-items: center;
+             border-top: 1px solid var(--edge); color: var(--ink-2); font: 600 14px/1 var(--font-ui); letter-spacing: .3em;
+             background:
+               repeating-linear-gradient(90deg, transparent 0 6px, color-mix(in srgb, var(--ink) 9%, transparent) 6px 60px, transparent 60px 66px) 0 12px / 100% 52px repeat-y,
+               var(--surface-2); }
+
+  /* ---- stand-in figure and bubble (§11.6 in a few lines; the real ones are package X5's) ---- */
+  .fake-buddy { display: grid; height: 100%; min-height: 0; column-gap: 10px; }
+  .fake-buddy[data-variant="full"] { grid-template: "bubble" minmax(0, 1fr) "figure" auto / minmax(0, 1fr); }
+  .fake-buddy[data-variant="bust"] { grid-template: "figure bubble" minmax(0, 1fr) / auto minmax(0, 1fr); }
+  .fake-buddy svg { grid-area: figure; display: block; height: var(--buddy-h); width: auto; align-self: end; justify-self: start; }
+  .fake-buddy[data-variant="bust"] svg { align-self: center; }
+  .fake-buddy .fig-robe { fill: var(--surface-2); stroke: var(--edge); stroke-width: 2; }
+  .fake-buddy .fig-trim { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
+  .fake-buddy .fig-face { fill: var(--red-glyph); stroke: var(--edge); stroke-width: 1.5; }
+  .fake-buddy .fig-dark { fill: var(--blk-b); }
+  .fake-buddy .fig-fan { fill: var(--blk-glyph); stroke: var(--edge); stroke-width: 1.5; }
+  .fake-buddy .bubble { grid-area: bubble; position: relative; min-width: 0; max-height: 100%; overflow: hidden; padding: 10px 14px;
+                        border: 1.5px solid var(--edge); border-radius: 16px; background: var(--surface); color: var(--ink);
+                        font-size: 18px; line-height: 26px; cursor: pointer; }
+  .fake-buddy[data-variant="full"] .bubble { align-self: end; margin: 0 0 10px 18%; border-bottom-left-radius: 4px; }
+  .fake-buddy[data-variant="bust"] .bubble { align-self: center; justify-self: start; border-bottom-left-radius: 4px; }
+  [data-layout="compact"] .fake-buddy .bubble { font-size: 15px; line-height: 22px; padding: 7px 11px; }
+  .fake-buddy .bubble[data-empty="1"] { visibility: hidden; }
+  .fake-buddy .bubble__question { margin: 0 0 2px; color: var(--ink-2); font-size: 13px; line-height: 18px; }
+  .fake-buddy .bubble__tag { display: inline-block; margin-right: 8px; padding: 0 9px; border-radius: 10px; background: var(--surface-2);
+                             font: 700 16px/24px var(--font-kai); transform: rotate(-2deg); }
+  .fake-buddy .bubble__tag[data-tone="good"] { background: var(--accent); color: var(--accent-ink); }
+  .fake-buddy .bubble__tag[data-tone="warn"] { background: var(--danger); color: var(--danger-ink); }
+  .fake-buddy .bubble__caption { display: block; color: var(--ink-2); font-size: .89em; }
+  .fake-buddy .bubble__caption:empty { display: none; }
+  .fake-buddy .bubble[data-state="status"] .bubble__text { color: var(--ink-2); }
+  .fake-buddy .bubble[data-state="stale"] :is(.bubble__text, .bubble__tag, .bubble__caption, .bubble__question) { opacity: .55; }
+  .fake-buddy .bubble__stale { display: inline-block; margin-left: 8px; padding: 0 6px; border: 1px solid var(--edge); border-radius: 6px;
+                               color: var(--ink-2); font-size: 12px; line-height: 18px; vertical-align: 2px; }
+  .fake-buddy .bubble__dots { display: inline-flex; gap: 5px; align-items: center; height: 26px; vertical-align: bottom; }
+  .fake-buddy .bubble__dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-2); }
+  :root[data-motion="full"] .fake-buddy .bubble__dots i { animation: fake-dot 900ms var(--e-inout) infinite; }
+  :root[data-motion="full"] .fake-buddy .bubble__dots i:nth-child(2) { animation-delay: 150ms; }
+  :root[data-motion="full"] .fake-buddy .bubble__dots i:nth-child(3) { animation-delay: 300ms; }
+  @keyframes fake-dot { 0%, 60%, 100% { transform: translateY(0); opacity: .55; } 30% { transform: translateY(-5px); opacity: 1; } }
+</style>
+</head>
+<body>
+<div id="app" class="app" data-layout="landscape" data-phase="childTurn" data-ply="0" data-kb="0" data-sheet="0" data-coach="llm">
+  <header id="topbar" class="topbar"></header>
+  <main id="stage" class="stage"><div id="board"><div class="dev" id="dev">
+    <h1>聊天面板 · 逐字文本</h1>
+    <div class="row">
+      <span class="seg" id="seg-theme"><button data-v="chibi">赤壁</button><button data-v="longzhong">隆中</button><button data-v="shachang">沙场</button></span>
+      <span class="seg" id="seg-motion"><button data-v="full">动效 完整</button><button data-v="reduced">精简</button></span>
+      <span class="seg" id="seg-side"><button data-v="red">执红</button><button data-v="black">执黑</button></span>
+      <span class="seg" id="seg-buddy"><button data-v="fake">替身气泡</button><button data-v="real">真 buddy</button></span>
+    </div>
+
+    <h2>一句话 · begin / segment / reset / end / tool / local / caption</h2>
+    <div class="row">
+      <button data-run="tryLine">流式：试走点评</button>
+      <button data-run="planLine">流式：三连招 ▶</button>
+      <button data-run="praiseLine">流式：妙哉！</button>
+      <button data-run="heldLine">本地：且慢……</button>
+      <button data-run="localLine">本地一句</button>
+      <button data-run="captionLine">对方着法 caption</button>
+      <button data-run="oppLine">caption + 流式解说</button>
+      <button data-run="oppTakeback">解说未到，先来一句本地</button>
+      <button data-run="abortRetract">中断 → 已换一步</button>
+      <button data-run="abortCommit">中断 → 已落子</button>
+      <button data-run="abortEmpty">没出字就中断</button>
+      <button data-run="refusal">拒答 → reset → 固定句</button>
+      <button data-run="cutLine">半句断流 (cut)</button>
+      <button data-run="toolLine">工具指示</button>
+      <button data-run="askLine">提问 → 回答</button>
+      <button data-run="cardLine">写进卡片 (target)</button>
+      <button data-run="divider">第 N 回合</button>
+      <button data-run="flood">灌 70 条</button>
+      <button data-run="staleLast">上一句标「已换一步」</button>
+      <button data-run="endAll">endAll</button>
+      <button data-run="clear">clear</button>
+    </div>
+
+    <h2>快捷提问 · setChips</h2>
+    <div class="row" id="row-chips">
+      <button data-chips="turn">turn</button><button data-chips="trial">trial</button><button data-chips="held">held</button>
+      <button data-chips="after">after</button><button data-chips="hint3">hint3</button><button data-chips="takeback">takeback</button>
+      <button data-chips="over">over</button><button data-chips="none">对方回合 []</button>
+    </div>
+
+    <h2>输入与面板 · setInput / setSheet / setLayout / setTypeTicks</h2>
+    <div class="row">
+      <button data-toggle="visible">✎ 可用</button>
+      <button data-toggle="enabled">可发送</button>
+      <button data-toggle="ticks">打字音</button>
+      <button data-toggle="speaking">朗读中</button>
+      <button data-toggle="kb">模拟键盘</button>
+      <button data-run="sheetOpen">打开回看</button>
+      <button data-run="sheetFocus">打开并聚焦输入</button>
+      <button data-run="sheetClose">关闭</button>
+    </div>
+
+    <div class="dev__card"><b>这一局的收获</b><p id="card-text"></p></div>
+    <pre class="dev__info" id="info"></pre>
+    <ul class="dev__log" id="events"></ul>
+  </div></div></main>
+  <div id="underbar" class="underbar"></div>
+  <section id="coach" class="coach" aria-label="军师">
+    <div id="buddy" class="coach__buddy"></div>
+    <div id="chat" class="coach__chat"></div>
+  </section>
+  <div id="actions" class="actions"></div>
+  <div id="overlays"></div>
+</div>
+<div id="fake-kb" hidden>模拟键盘</div>
+
+<script type="module">
+import { createChatPanel } from '../src/ui/chat-panel.js';
+import { computeLayout, applyLayout } from '../src/ui/layout.js';
+import { ASK_LABEL, CUE } from '../src/core/codes.js';
+import { TXT } from '../src/ui/texts.js';
+
+const $ = (selector) => /** @type {HTMLElement} */ (document.querySelector(selector));
+const params = new URLSearchParams(location.search);
+const app = $('#app'), buddyHost = $('#buddy'), chatHost = $('#chat'), info = $('#info'), events = $('#events'), fakeKb = $('#fake-kb');
+
+// ---- fixtures: segments as the coach client hands them over -----------------------------------------------------------------
+
+const T = (text) => ({ type: 'text', text });
+/** code = from-row, from-col, to-row, to-col. */
+function M(notation, code, color, extra = {}) {
+  const [fr, fc, tr, tc] = [...code].map(Number);
+  return { type: 'move', notation, link: { from: { row: fr, col: fc }, to: { row: tr, col: tc }, color, code, pre: [], playable: false, src: 'reply', ...extra } };
+}
+const ref = (seg) => ({ from: seg.link.from, to: seg.link.to, color: seg.link.color });
+
+const reply = M('马7进5', '2634', 'black', { src: 'reply' });
+const cannon = M('炮二平五', '7774', 'red', { playable: true, src: 'better' });
+const horse8 = M('马8进7', '0726', 'black', { src: 'better', pre: [ref(cannon)] });
+const horse2 = M('马二进三', '9776', 'red', { src: 'better', pre: [ref(cannon), ref(horse8)] });
+const rivalMove = M('马8进7', '0726', 'black', { src: 'opp' });
+const best = M('炮五进四', '7434', 'red', { src: 'moment' });
+
+const LINES = {
+  try: [T('对方会走'), reply, T('把炮吃掉，咱们只换到一个卒，亏了。吃子前先看它有没有保镖。')],
+  plan: [T('先'), cannon, T('架上当头炮，对方多半'), horse8, T('，咱们再'), horse2, T('出子，阵势就稳了。')],
+  praise: [T('这一炮打得漂亮，白吃一个马！对面的阵脚要乱了。')],
+  held: [T('这个子，真的没人管吗？')],
+  local: [T('好，退回小主公上一步之前。再想想！')],
+  caption: [rivalMove, T('出子')],
+  opp: [T('对方跳马护住了中卒，还盯着咱们的炮。先看看炮有没有人保护。')],
+  takeback: [T('这一步被抓住了。要不要悔一步重想？')],
+  refusalStart: [T('这个问题')],
+  refused: [T('这件事亮帮不上忙。要是心里有事，记得找爸爸妈妈或老师说说。咱们接着看棋？')],
+  cut: [T('对方的车正盯着咱们的马。先把马挪开，或者给它找个保'), T('镖，不然下一步就要')],
+  tool: [cannon, T('是好棋：架起当头炮，直指对方的中卒。')],
+  card: [T('这一局你的炮用得真好，'), best, T('那一下最漂亮。下一盘小目标：吃子之前，先看它有没有保镖。')],
+  answers: {
+    good: [T('这步不错：既出了子，又护住了中兵。')],
+    reply: [T('对方会走'), reply, T('把炮吃掉，咱们只换到一个卒，亏了。')],
+    better: [T('有！'), cannon, T('更好，先架炮再出马。')],
+    why: [T('因为炮过河以后没有保镖，对方的马一跳就吃到它。')],
+    show: [T('你看，'), reply, T('——马一跳，炮就没了。')],
+    intent: [T('它想跳马踩咱们的中兵，顺便给车让路。')],
+    score: [T('现在差不多，咱们多一个卒，略占上风。')],
+    danger: [T('有一点：左边的马没人保护，对方的车正盯着它。')],
+    last: [T('上一步很稳，把马保住了。')],
+    proud: [best, T('最漂亮，一炮打掉了对方的中卒。')],
+    improve: [T('吃子之前多看一眼保镖，这一局因此丢了一个炮。')],
+    next: [T('下一盘记得：对方走完，先问自己它想干什么。')],
+  },
+};
+
+const chip = (ask, label) => ({ id: ask, label: label ?? ASK_LABEL[ask], ask });
+const CHIPS = {
+  turn: [chip('intent', '它的马想干啥？'), chip('danger', '我的炮危险吗？'), chip('last'), chip('score')],
+  trial: [chip('good'), chip('reply'), chip('better')],
+  held: [{ id: 'seen', label: '我看出来了', action: 'retract' }, chip('show'), { id: 'go', label: '就走这步', action: 'confirm' }],
+  after: [chip('why'), chip('reply'), chip('better')],
+  hint3: [{ id: 'try', label: '试试这步', action: 'pouch', primary: true }, chip('intent', '它的马想干啥？'), chip('last'), chip('score')],
+  takeback: [{ id: 'takeback', label: '悔一步重想', action: 'takeback', primary: true }, chip('intent', '它的马想干啥？'), chip('last'), chip('score')],
+  over: [chip('proud'), chip('improve'), chip('next')],
+  none: [],
+};
+
+// ---- stand-ins for the dependencies -----------------------------------------------------------------------------------------
+
+const state = { visible: true, enabled: true, ticks: false, speaking: false, kb: false, sheet: false, tickCount: 0, speechCancels: 0, round: 6 };
+/** @type {(on:boolean) => void} */
+let speakingListener = () => {};
+const audio = { play(name) { if (name === 'chat.tick') { state.tickCount += 1; report(); } } };
+const speech = { supported: false, setEnabled() {}, feed() {}, flush() {}, cancel() { state.speechCancels += 1; }, onSpeaking(cb) { speakingListener = cb; } };
+
+function createFakeBuddy(host) {
+  const wrap = document.createElement('div');
+  wrap.className = 'fake-buddy';
+  wrap.dataset.variant = 'full';
+  wrap.innerHTML = `
+    <svg viewBox="0 0 120 240" aria-hidden="true">
+      <path class="fig-robe" d="M28 100 Q60 84 92 100 L108 230 Q60 244 12 230 Z"/>
+      <path class="fig-trim" d="M48 96 L60 132 L72 96"/>
+      <path class="fig-fan" d="M92 150 C76 132 80 104 100 96 C116 110 114 138 92 150 Z"/>
+      <path class="fig-dark" d="M90 152 l6 26 l-5 2 l-5 -26 Z"/>
+      <circle class="fig-face" cx="60" cy="62" r="25"/>
+      <path class="fig-dark" d="M33 54 Q60 10 87 54 Q60 42 33 54 Z"/>
+      <path class="fig-dark" d="M52 82 Q60 104 68 82 Q60 88 52 82 Z"/>
+      <circle class="fig-dark" cx="51" cy="62" r="2.6"/><circle class="fig-dark" cx="69" cy="62" r="2.6"/>
+    </svg>`;
+  host.append(wrap);
+  const svg = /** @type {SVGElement} */ (wrap.querySelector('svg'));
+
+  const make = (tag, className) => { const el = document.createElement(tag); el.className = className; return el; };
+  const root = make('div', 'bubble');
+  const question = make('p', 'bubble__question'); question.hidden = true;
+  const tag = make('span', 'bubble__tag'); tag.hidden = true;
+  const caption = make('span', 'bubble__caption');
+  let text = make('span', 'bubble__text');
+  const dots = make('span', 'bubble__dots'); dots.hidden = true; dots.append(make('i', ''), make('i', ''), make('i', ''));
+  const stale = make('span', 'bubble__stale'); stale.hidden = true;
+  root.append(question, tag, caption, text, dots, stale);
+  wrap.append(root);
+
+  let id = null, questionFresh = false, captionFresh = false, typing = false, timer = 0;
+  const hasText = () => text.hasChildNodes();
+  const refresh = () => {
+    if (hasText() || root.dataset.state !== 'streaming') dots.hidden = true;
+    const empty = question.hidden && tag.hidden && !caption.hasChildNodes() && !hasText() && dots.hidden && stale.hidden;
+    root.dataset.empty = empty ? '1' : '0';
+  };
+  new MutationObserver(refresh).observe(root, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['data-state'] });
+  const dropLine = () => {
+    clearTimeout(timer); typing = false; dots.hidden = true; tag.hidden = true; tag.textContent = ''; stale.hidden = true; stale.textContent = '';
+    const next = make('span', 'bubble__text'); text.replaceWith(next); text = next;
+  };
+  const arm = () => { clearTimeout(timer); timer = setTimeout(() => { if (typing && !hasText() && root.dataset.state === 'streaming') { dots.hidden = false; refresh(); } }, 300); };
+  root.addEventListener('click', (event) => {
+    if (event.target.closest('button') || root.dataset.empty === '1') return;
+    host.dispatchEvent(new CustomEvent('bubble:expand', { bubbles: true, detail: { id } }));
+  });
+  refresh();
+
+  /** @type {import('../src/ui/types.js').Bubble} */
+  const bubble = {
+    begin(msg) {
+      id = msg.id;
+      if (questionFresh) questionFresh = false; else { question.replaceChildren(); question.hidden = true; }
+      if (captionFresh) captionFresh = false; else caption.replaceChildren();
+      dropLine();
+      root.dataset.state = 'streaming'; delete root.dataset.source;
+      bubble.setTag(msg.cue ?? null, 'neutral');
+      typing = true; arm(); refresh();
+      return text;
+    },
+    setTag(cue, tone) { tag.hidden = !cue; tag.textContent = cue ?? ''; tag.dataset.tone = tone; refresh(); },
+    setQuestion(el) {
+      question.replaceChildren(); question.hidden = !el;
+      if (el) { question.append(el.cloneNode(true)); questionFresh = true; }
+      refresh();
+    },
+    captionEl() { captionFresh = true; return caption; },
+    status(line) {
+      if (root.dataset.state === 'streaming' || (root.dataset.state === 'done' && hasText())) return;
+      dropLine(); question.replaceChildren(); question.hidden = true; caption.replaceChildren();
+      text.textContent = line; root.dataset.state = 'status'; refresh();
+    },
+    markStale(label) { typing = false; dots.hidden = true; root.dataset.state = 'stale'; stale.textContent = label; stale.hidden = !label; refresh(); },
+    setTyping(on) { typing = !!on; if (typing) arm(); else { clearTimeout(timer); dots.hidden = true; } refresh(); },
+    clear() { dropLine(); question.replaceChildren(); question.hidden = true; caption.replaceChildren(); delete root.dataset.state; delete root.dataset.source; refresh(); },
+  };
+  return {
+    bubble,
+    setVariant(variant) { wrap.dataset.variant = variant; svg.setAttribute('viewBox', variant === 'full' ? '0 0 120 240' : '0 0 120 120'); },
+    setReducedMotion() {},
+  };
+}
+
+/** The real figure and bubble (package X5), when they load; else the stand-in. */
+async function createBuddyFor(host) {
+  if (params.get('buddy') === 'real') {
+    try {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet'; link.href = '../styles/buddy.css';
+      document.head.insertBefore(link, document.querySelector('link[href$="chat.css"]'));
+      const { createBuddy } = await import('../src/ui/buddy.js');
+      const real = createBuddy(host, { variant: 'full', reducedMotion: document.documentElement.dataset.motion === 'reduced' });
+      return { bubble: real.bubble, setVariant: (v) => real.setVariant(v), setReducedMotion: (on) => real.setReducedMotion(on), real: true };
+    } catch (error) {
+      console.warn('the real buddy did not load; using the stand-in', error);
+    }
+  }
+  return { ...createFakeBuddy(host), real: false };
+}
+
+const buddy = await createBuddyFor(buddyHost);
+const chat = createChatPanel(chatHost, {
+  bubble: buddy.bubble, speech, audio, typeTicks: state.ticks, reducedMotion: document.documentElement.dataset.motion === 'reduced',
+});
+
+// ---- layout: the shell's own function, plus a simulated keyboard -------------------------------------------------------------
+
+let last = computeLayout({ W: innerWidth, H: innerHeight, visibleH: innerHeight, sheet: false });
+function relayout() {
+  const W = innerWidth, H = innerHeight;
+  const kbHeight = Math.min(W >= 600 ? 400 : 300, Math.round(H * 0.52));      // a landscape phone's keyboard is lower
+  const realVisible = window.visualViewport ? window.visualViewport.height : H;
+  const visibleH = state.kb ? H - kbHeight : realVisible;
+  last = computeLayout({ W, H, visibleH, sheet: state.sheet });
+  applyLayout(app, last, state.kb ? /** @type {any} */ ({ height: visibleH, offsetTop: 0 }) : window.visualViewport);
+  app.dataset.sheet = state.sheet ? '1' : '0';
+  fakeKb.hidden = !state.kb;
+  fakeKb.style.height = `${kbHeight}px`;
+  buddy.setVariant(last.buddy);
+  chat.setLayout({ mode: last.layout, showChips: last.showChips, chipRows: last.chipRows, kb: last.kb });
+  report();
+}
+addEventListener('resize', relayout);
+if (window.visualViewport) window.visualViewport.addEventListener('resize', relayout);
+
+function report() {
+  info.textContent = `${innerWidth}x${innerHeight} · ${last.layout} · coach ${Math.round(last.coachH)} · buddy ${last.buddyH} (${last.buddy}) · chips ${last.showChips ? last.chipRows + ' 行' : '隐藏'} · kb ${last.kb ? 1 : 0} · sheet ${state.sheet ? 1 : 0}`
+    + `\nchat.tick x ${state.tickCount} · speech.cancel x ${state.speechCancels} · ${buddy.real ? '真 buddy' : '替身气泡'}`;
+}
+function note(text) {
+  const li = document.createElement('li');
+  li.textContent = text;
+  events.prepend(li);
+  while (events.children.length > 30) events.lastChild.remove();
+}
+
+// ---- scenarios -----------------------------------------------------------------------------------------------------------------
+
+let seq = 0;
+let lastId = '';
+let job = { cancelled: false };
+const speed = Number(params.get('speed') ?? '1');           // > 1 = faster, for scripted screenshots
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms / speed));
+const nextId = () => `m${++seq}`;
+
+/** A new reply supersedes the one in flight, exactly like the coach client: the old one just stops calling. */
+function newJob() { job.cancelled = true; job = { cancelled: false }; return job; }
+
+/** Feeds segments like a streamed reply: first text after `latency`, then 2-5 characters every 45-95 ms; a move arrives whole. */
+async function feed(id, segments, mine, opts = {}) {
+  await wait(opts.latency ?? 1100);
+  for (const seg of segments) {
+    if (seg.type === 'move') {
+      if (mine.cancelled) return false;
+      chat.segment(id, seg);
+      await wait(70);
+      continue;
+    }
+    const chars = [...seg.text];
+    for (let i = 0; i < chars.length;) {
+      if (mine.cancelled) return false;
+      const n = 2 + Math.floor(Math.random() * 4);
+      chat.segment(id, T(chars.slice(i, i + n).join('')));
+      i += n;
+      if (opts.stopAfter && (opts.shown = (opts.shown ?? 0) + n) >= opts.stopAfter) return 'stopped';
+      await wait(45 + Math.random() * 50);
+    }
+  }
+  return !mine.cancelled;
+}
+
+async function stream(kind, segments, opts = {}) {
+  const mine = newJob();
+  const id = lastId = nextId();
+  chat.begin({ id, kind, cue: opts.cue ?? null, target: opts.target });
+  const ok = await feed(id, segments, mine, opts);
+  if (ok === true) chat.end(id, { reason: 'done', source: 'llm' });
+  return { id, ok, mine };
+}
+
+const run = {
+  tryLine: () => { chat.setChips(CHIPS.trial); return stream('try', LINES.try); },
+  planLine: () => stream('hint', LINES.plan, { cue: CUE.look }),
+  praiseLine: () => stream('try', LINES.praise, { cue: CUE.wow }),
+  heldLine: () => { newJob(); lastId = chat.local(LINES.held, { kind: 'try', cue: CUE.wait }); chat.setChips(CHIPS.held); },
+  localLine: () => { newJob(); lastId = chat.local(LINES.local); },
+  captionLine: () => { newJob(); state.round += 1; chat.addEvent(`第 ${state.round} 回合 · 对方 马8进7`); chat.caption(LINES.caption); chat.setChips(CHIPS.turn); },
+  oppLine: () => { run.captionLine(); return stream('opp', LINES.opp); },
+  // The script of a rival move that punishes (SPEC §5.8 E-turn): the reply is opened and, in the same turn, the
+  // local offer is said. The offer shows at once; the reply waits and takes the bubble when its text arrives.
+  oppTakeback: () => {
+    run.captionLine();
+    const reply = stream('opp', LINES.opp, { latency: 2200 });
+    chat.local(LINES.takeback);
+    chat.setChips(CHIPS.takeback);
+    return reply;
+  },
+  abortRetract: async () => {
+    const { id, ok } = await stream('try', LINES.try, { stopAfter: 14 });
+    if (ok === 'stopped') { newJob(); chat.end(id, { reason: 'aborted', source: 'none', stale: TXT.stale.retract }); chat.setChips(CHIPS.turn); }
+  },
+  abortCommit: async () => {
+    const { id, ok } = await stream('try', LINES.try, { stopAfter: 20 });
+    if (ok === 'stopped') { newJob(); chat.end(id, { reason: 'aborted', source: 'none', stale: TXT.stale.commit }); chat.setChips(CHIPS.none); }
+  },
+  abortEmpty: async () => {
+    const mine = newJob();
+    const id = lastId = nextId();
+    chat.begin({ id, kind: 'try' });
+    await wait(900);
+    if (!mine.cancelled) chat.end(id, { reason: 'aborted', source: 'none', stale: TXT.stale.retract });
+  },
+  refusal: async () => {
+    const mine = newJob();
+    chat.addChild('你是谁呀？');
+    const id = lastId = nextId();
+    chat.begin({ id, kind: 'ask' });
+    await feed(id, LINES.refusalStart, mine, { latency: 900 });
+    await wait(400);
+    if (mine.cancelled) return;
+    chat.reset(id);
+    for (const seg of LINES.refused) chat.segment(id, seg);
+    chat.end(id, { reason: 'done', source: 'local' });
+    chat.setChips(CHIPS.after);
+  },
+  cutLine: async () => {
+    const { id, ok } = await stream('opp', LINES.cut, { stopAfter: 36 });
+    if (ok === 'stopped') { newJob(); chat.end(id, { reason: 'cut', source: 'mixed' }); }
+  },
+  toolLine: async () => {
+    const mine = newJob();
+    chat.addChild('炮二平五好不好？');
+    const id = lastId = nextId();
+    chat.begin({ id, kind: 'ask' });
+    await wait(900);
+    if (mine.cancelled) return;
+    chat.tool(id, { phase: 'start', notation: '炮二平五' });
+    await wait(1600);
+    if (mine.cancelled) return;
+    chat.tool(id, { phase: 'end' });
+    if (await feed(id, LINES.tool, mine, { latency: 500 }) === true) chat.end(id, { reason: 'done', source: 'llm' });
+    chat.setChips(CHIPS.after);
+  },
+  askLine: async (code = 'reply') => {
+    chat.addChild(ASK_LABEL[code]);
+    await stream('ask', LINES.answers[code] ?? LINES.answers.good);
+    chat.setChips(code === 'proud' || code === 'improve' || code === 'next' ? CHIPS.over : CHIPS.after);
+  },
+  cardLine: () => stream('over', LINES.card, { target: $('#card-text'), cue: null }),
+  divider: () => { state.round += 1; chat.addEvent(`第 ${state.round} 回合 · 对方 马8进7`); },
+  flood: () => {
+    newJob();
+    for (let i = 1; i <= 35; i++) {
+      chat.addChild(`第 ${i} 个问题：${ASK_LABEL.reply}`);
+      chat.local([T(`第 ${i} 个回答：`), ...LINES.answers.reply]);
+    }
+  },
+  staleLast: () => chat.end(lastId, { reason: 'aborted', source: 'none', stale: TXT.stale.retract }),
+  endAll: () => { newJob(); chat.endAll('aborted'); },
+  clear: () => { newJob(); chat.clear(); },
+  sheetOpen: () => chat.setSheet(true),
+  sheetFocus: () => chat.setSheet(true, { focusInput: true }),
+  sheetClose: () => chat.setSheet(false),
+};
+
+// ---- the harness plays the stage and the director ---------------------------------------------------------------------------
+
+app.addEventListener('chat:sheet', (event) => { state.sheet = event.detail.open; relayout(); note(`chat:sheet ${JSON.stringify(event.detail)}`); });
+app.addEventListener('bubble:expand', (event) => { note(`bubble:expand ${JSON.stringify(event.detail)}`); chat.setSheet(true); });
+app.addEventListener('chat:ask', (event) => {
+  note(`chat:ask ${JSON.stringify(event.detail)}`);
+  const { code, text } = event.detail;
+  if (code) { run.askLine(code); return; }
+  if (/[进退平]/.test(text)) { chat.addChild(text); run.toolLineAnswer(); return; }
+  chat.addChild(text);
+  stream('ask', LINES.answers.score).then(() => chat.setChips(CHIPS.after));
+});
+run.toolLineAnswer = async () => {
+  const mine = newJob();
+  const id = lastId = nextId();
+  chat.begin({ id, kind: 'ask' });
+  await wait(900);
+  if (mine.cancelled) return;
+  chat.tool(id, { phase: 'start', notation: '炮二平五' });
+  await wait(1600);
+  if (mine.cancelled) return;
+  chat.tool(id, { phase: 'end' });
+  if (await feed(id, LINES.tool, mine, { latency: 500 }) === true) chat.end(id, { reason: 'done', source: 'llm' });
+};
+app.addEventListener('chat:chip', (event) => {
+  const spec = event.detail.chip;
+  note(`chat:chip ${JSON.stringify(spec)}`);
+  if (spec.action === 'retract') { chat.end(lastId, { reason: 'aborted', source: 'none', stale: TXT.stale.retract }); lastId = chat.local([T('好眼力！再挑一步。')]); chat.setChips(CHIPS.turn); }
+  if (spec.action === 'confirm') { chat.end(lastId, { reason: 'aborted', source: 'none', stale: TXT.stale.commit }); chat.setChips(CHIPS.none); }
+  if (spec.action === 'takeback') { lastId = chat.local(LINES.local); chat.setChips(CHIPS.turn); }
+  if (spec.action === 'pouch') chat.setChips(CHIPS.trial);
+});
+app.addEventListener('chat:stop', () => { newJob(); note('chat:stop {}'); });
+app.addEventListener('chat:movelink', (event) => note(`chat:movelink ${event.detail.link.code} ${event.target.textContent} active=${event.detail.active}`));
+app.addEventListener('chat:playline', (event) => note(`chat:playline ${event.detail.links.map((link) => link.code).join(' → ')}`));
+// Compact: one tap on the miniature closes the sheet (the stage's job in the game).
+$('#stage').addEventListener('click', () => { if (state.sheet && last.layout === 'compact') chat.setSheet(false); }, true);
+
+// ---- controls -------------------------------------------------------------------------------------------------------------------
+
+function segmented(id, current, apply) {
+  const box = $(id);
+  const paint = (value) => { for (const button of box.querySelectorAll('button')) button.setAttribute('aria-pressed', String(button.dataset.v === value)); };
+  box.addEventListener('click', (event) => { const v = event.target.dataset.v; if (!v) return; paint(v); apply(v); });
+  paint(current);
+  apply(current, true);
+}
+segmented('#seg-theme', params.get('theme') ?? 'chibi', (theme) => { document.documentElement.dataset.theme = theme; });
+segmented('#seg-motion', params.get('motion') ?? 'full', (motion) => {
+  document.documentElement.dataset.motion = motion;
+  chat.setReducedMotion(motion === 'reduced');
+  buddy.setReducedMotion(motion === 'reduced');
+});
+// The colour the child plays: chat.css reads it from the board (.bv[data-bottom]); the harness has no board, so it plants a marker.
+const marker = document.createElement('i');
+marker.className = 'bv';
+marker.hidden = true;
+$('#overlays').append(marker);
+segmented('#seg-side', params.get('side') ?? 'red', (side) => { marker.dataset.bottom = side; });
+segmented('#seg-buddy', buddy.real ? 'real' : 'fake', (kind, initial) => {
+  if (initial || (kind === 'real') === buddy.real) return;
+  const next = new URLSearchParams(location.search);
+  if (kind === 'real') next.set('buddy', 'real'); else next.delete('buddy');
+  location.search = next.toString();
+});
+
+const toggles = {
+  visible: () => chat.setInput({ visible: state.visible, enabled: state.enabled }),
+  enabled: () => chat.setInput({ visible: state.visible, enabled: state.enabled }),
+  ticks: () => chat.setTypeTicks(state.ticks),
+  speaking: () => speakingListener(state.speaking),
+  kb: () => relayout(),
+};
+for (const button of document.querySelectorAll('[data-toggle]')) {
+  const key = button.dataset.toggle;
+  button.setAttribute('aria-pressed', String(state[key]));
+  button.addEventListener('click', () => { state[key] = !state[key]; button.setAttribute('aria-pressed', String(state[key])); toggles[key](); report(); });
+}
+$('#dev').addEventListener('click', (event) => {
+  const button = event.target.closest('button');
+  if (!button) return;
+  if (button.dataset.run) run[button.dataset.run]();
+  if (button.dataset.chips) chat.setChips(CHIPS[button.dataset.chips]);
+});
+
+// ---- start -------------------------------------------------------------------------------------------------------------------------
+
+chat.setInput({ visible: state.visible, enabled: state.enabled });
+relayout();
+chat.setChips(CHIPS.turn);
+chat.addEvent('第 6 回合 · 对方 炮8平5');
+chat.local([T('小主公，亮在此恭候多时。这一局，由亮辅佐你。')], { kind: 'start', cue: CUE.go });
+
+// For scripted checks (Playwright steps): the controller, the scenarios and the fixtures.
+Object.assign(window, { __dev: { chat, run, state, LINES, CHIPS, T, M, relayout, buddy, get layout() { return last; }, get lastId() { return lastId; } } });
+document.documentElement.dataset.ready = '1';
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "lib": ["ES2023", "DOM", "DOM.Iterable", "WebWorker"]
+  },
+  "include": ["src/**/*.js"]
+}

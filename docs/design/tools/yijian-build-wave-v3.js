@@ -20,7 +20,7 @@ You are one of several engineers rebuilding 弈间, a Chinese chess (xiangqi) we
 THE CONTRACT
 - Build contract: ${SPEC} (about 6,450 lines, too large for one Read call; use offset and limit). Table of contents with line numbers: ${TOC}. Read the TOC first.
 - Always read lines 1-248 (reading rules, vocabulary, decisions log, file tree and owners, import rule) and lines 5816-5898 (work packages).
-- Readings already chosen for ambiguities, and owner decisions: ${NOTES}. Read its sections A, I, J, K, L and M and every item its "Index by package" lists for your package. They are binding.
+- Readings already chosen for ambiguities, and owner decisions: ${NOTES}. Read its sections A, I, J, K, L, M, N and O and every item its "Index by package" lists for your package. They are binding.
 - What the finished packages of earlier waves decided and what they ask of later packages: the WAVE*-NOTES.md files in the same folder as CONTRACT-NOTES.md (Part 1 readings by package, Part 2 requests grouped by the file they concern, Part 3 what was left unverified). Read Part 1 for every package you build on and every Part 2 entry that names one of your files; they are long, so search them for your file names.
 - The contract is frozen. Names, signatures, numbers and Chinese strings come from it literally. Do not invent exported names. Where the contract is ambiguous or contradicts itself and the notes do not settle it, choose the reading most consistent with the typedefs of section 3 and the signatures of section 4, and report it under contractIssues. Never improvise silently.
 
@@ -33,7 +33,11 @@ REPO AND RULES
 - Temporary files and experiments go under ${SCRATCH}\\work\\<your package id>\\ and never into the repo.
 - If you start a server or a browser, bind to 127.0.0.1, use only the port given to you, and stop it before you finish. Leave no background process running.
 - Identifiers and code comments in English. Child-facing text in Chinese exactly as the contract gives it. Source files are UTF-8 without BOM with LF line endings (the Write tool may produce CRLF on this machine: check your files and convert).
-- Because others are mid-edit, a whole-project type check or test run can fail in files that are not yours. Judge your work by your own files and tests.`
+- Because others are mid-edit, a whole-project type check or test run can fail in files that are not yours. Judge your work by your own files and tests.
+- MEMORY SAFETY (three runs of this build were lost to it). A scratch script once started a test process that grew by 1.5 GB per second; at 50 GB Windows ran out of memory and every engineer's session died. So: every node process you start for anything that is not a plain, known-good run (a scratch script, a simulation, a soak, a mutation or fuzz run, a test file you or a colleague are in the middle of changing, a loop "until ...") runs under the memory guard: put   NODE_OPTIONS="--import file:///C:/Users/USERNA~1/AppData/Local/Temp/claude/5884157893c5b410/a051714c-de36-47da-b3cc-cfc754f60ac3/scratchpad/tools/memguard.mjs" MEM_LIMIT_MB=3000   in front of the command (the variables reach every node process the command starts, also the ones behind node --test and spawnSync; choose a lower limit when you can), and give the whole command a timeout. The guard kills a process that passes the limit and prints a line starting with MEMGUARD. If that happens to you, it is a finding of the highest importance: write the exact command and the state of the files into your progress file at once, then find the cause (usually a loop or a test that never ends when the code under test misbehaves; a test must fail, never hang and never allocate without bound). A machine-wide watchdog also kills any node process above 8 GB; if one of your processes dies without a message, suspect that. A timeout on spawnSync or on node --test kills only the runner, not the test process behind it.
+- Your run can be cut off without warning (it has happened three times). Keep a progress file so that a colleague can continue where you stopped: ${SCRATCH}\\work\\<your package id>\\PROGRESS.md for an engineer, PROGRESS-REVIEW.md in the same folder for a reviewer. Append a few lines after every milestone and at least every fifteen minutes of work: what you finished, what you verified and with which result (numbers, test counts), what you decided and why, and what you were about to do next. If such a file from an earlier run is there, read it first and continue from it.
+- If the port given to you is already taken, it is a static server left behind by a colleague whose run was cut off: find the process that listens on that port, check that it answers like the static server (it serves the repo's files), stop it, and start your own.
+- On this machine tasklist, taskkill, Get-CimInstance and Get-NetTCPConnection can hang for minutes. Do not use them. Find a listener with: netstat -ano | grep LISTENING | grep :<port>   and stop a process with: node -e "process.kill(<pid>)"   Give every shell command that could hang a timeout.`
 
 function stateBlock(p) {
   const own = p.fix
@@ -88,13 +92,24 @@ const REVIEW = {
   required: ['status', 'summary', 'found', 'checks', 'contractIssues', 'needsFromOthers', 'remaining'],
 }
 
+// notesFile / reviewNoteFile: long task notes kept in a file, so that a relaunch does not have to resend them
+function notesOf(p) {
+  const file = p.notesFile ? `YOUR TASK NOTES are in this file: ${p.notesFile}\nRead it completely before anything else. It is part of this brief and as binding as the text here.` : ''
+  return [file, p.notes || ''].filter(Boolean).join('\n')
+}
+
+function reviewNoteOf(p) {
+  const file = p.reviewNoteFile ? `Read this file first, completely: ${p.reviewNoteFile}\nIt tells you what happened to this review before you and what you are expected to do about it.` : ''
+  return [file, p.reviewNote || ''].filter(Boolean).join('\n')
+}
+
 function implPrompt(p) {
   return `${COMMON}
 
 YOUR PACKAGE: ${p.id}, ${p.title} (wave ${args.wave}). Find its row in section 15: it lists your files, what it depends on and its done-criteria.
 Files you own and may edit or create: ${p.files}
 Read these contract sections completely before writing code (find the line numbers in the TOC): ${p.read}
-${p.notes || ''}
+${notesOf(p)}
 
 ${stateBlock(p)}
 
@@ -117,7 +132,7 @@ function reviewPrompt(p, impl) {
 YOUR ROLE: independent reviewer of work package ${p.id}, ${p.title} (wave ${args.wave}). An engineer has just implemented it; their report is at the end. Treat the report as claims to check, not as facts. You have the same ownership as the engineer: you may edit the package's files and no others.
 The package's files: ${p.files}
 Read these contract sections completely (line numbers in the TOC): ${p.read} ; also the package's row in section 15 and the tests section 14 lists for it.
-${p.notes || ''}
+${notesOf(p)}
 
 ${stateBlock(p)}
 (For you, "your own files" means the files of package ${p.id}, which now hold the engineer's ${p.fix ? 'changes on top of the earlier implementation' : 'implementation instead of stubs'}.)
@@ -138,9 +153,9 @@ ${p.ui ? '\n' + uiBlock(p, p.port + 20) + '\nLook with fresh eyes: compare what 
 FINAL REPORT
 status (done = you consider the package finished to the contract; partial = known gaps remain), summary, found (one entry per problem: severity critical, major or minor; where; what; whether you fixed it), checks with outcomes and test counts, contractIssues, needsFromOthers, remaining.
 
-${p.reviewNote ? `
+${reviewNoteOf(p) ? `
 BEFORE YOU START
-${p.reviewNote}
+${reviewNoteOf(p)}
 ` : ''}
 THE ENGINEER'S REPORT
 ${p.implReportFile ? `The engineer finished in an earlier run. Read the full report first, from this file: ${p.implReportFile}` : impl ? JSON.stringify(impl, null, 1) : 'The engineer run failed and left no report. The files may be partial or still stubs. Complete the package yourself first (same instructions as the engineer: implement everything, write the section 14 tests), then review it.'}`

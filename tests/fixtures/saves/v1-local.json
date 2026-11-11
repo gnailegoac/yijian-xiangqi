@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "mode": "local",
+  "difficulty": "normal",
+  "humanColor": "red",
+  "flipped": false,
+  "sound": false,
+  "moves": [
+    {"from":{"row":7,"col":7},"to":{"row":7,"col":4}},
+    {"from":{"row":0,"col":7},"to":{"row":2,"col":6}},
+    {"from":{"row":9,"col":7},"to":{"row":7,"col":6}},
+    {"from":{"row":0,"col":8},"to":{"row":0,"col":7}},
+    {"from":{"row":9,"col":8},"to":{"row":9,"col":7}}
+  ],
+  "startedAt": 1790000000000,
+  "endedAt": null,
+  "result": null
+}

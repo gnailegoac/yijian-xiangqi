@@ -1,0 +1,5 @@
+# Text files are stored and checked out with LF on every machine. Tests compare fixtures and
+# Chinese strings byte for byte, so a CRLF checkout (core.autocrlf=true on Windows) must not change them.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.png binary

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "mode": "ai",
+  "difficulty": "master",
+  "humanColor": "blue",
+  "flipped": false,
+  "sound": false,
+  "moves": [
+    {"from":{"row":7,"col":7,"id":"red-cannon-7"},"to":{"row":7,"col":4},"piece":{"id":"red-cannon-7","type":"cannon","color":"red"},"captured":null,"notation":"炮二平五"},
+    {"from":{"row":0,"col":7},"to":{"row":2,"col":6,"note":"x"},"piece":"horse","san":"马8进7","ms":5120},
+    {"to":{"row":7,"col":6},"from":{"row":9,"col":7},"extra":[1,2,3]},
+    {"from":{"row":0,"col":8},"to":{"row":0,"col":7},"captured":null,"check":false}
+  ],
+  "startedAt": 1790000000000,
+  "endedAt": 1789999999000,
+  "result": {"over":true,"winner":"red","reason":"checkmate","check":true},
+  "theme": "dark",
+  "coach": {"enabled":true},
+  "name": null
+}

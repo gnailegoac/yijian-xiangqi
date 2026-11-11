@@ -4,3 +4,6 @@ test-results/
 playwright-report/
 artifacts/
 *.log
+# Local secrets for the coach proxy (LLM gateway URL and key). Never commit.
+.env
+.env.local

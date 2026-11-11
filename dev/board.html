@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="chibi" data-motion="full">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>棋盘 · board-view harness</title>
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<link rel="stylesheet" href="../styles/tokens.css">
+<link rel="stylesheet" href="../styles/themes.css">
+<link rel="stylesheet" href="../styles/board.css">
+<style>
+  /* Harness chrome only. The board itself is styled by ../styles/board.css. */
+  html, body { height: 100%; overflow: hidden; }
+  body { overscroll-behavior: none; }
+  /* Like the app, the page never scrolls: the board keeps its place and only the control panel scrolls. */
+  .lab { height: 100vh; height: 100dvh; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; padding: 0 0 0 8px; }
+  .lab__stage { display: grid; place-items: center; padding-block: 8px; overflow: clip; min-height: 0; }
+  #board { aspect-ratio: 920 / 1060; position: relative; }
+  .lab__panel { min-width: 0; min-height: 0; overflow: auto; padding: 12px 16px 24px 0; display: flex; flex-direction: column; gap: 10px; }
+  .lab__panel > * { flex: none; }
+  .lab[data-layout="portrait"], .lab[data-layout="compact"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); padding: 0 8px; gap: 8px; }
+  .lab[data-layout="portrait"] .lab__stage, .lab[data-layout="compact"] .lab__stage { padding-block: 4px 0; }
+  .lab[data-layout="portrait"] .lab__panel, .lab[data-layout="compact"] .lab__panel { padding: 0 0 16px; }
+  .lab[data-layout="compact"] { padding: 0 4px; }
+
+  .lab h1 { margin: 0; font: 700 22px/28px var(--font-kai); color: var(--accent); display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .lab h1 small { font: 400 13px/18px var(--font-ui); color: var(--ink-2); }
+  .lab fieldset { margin: 0; padding: 8px 10px 10px; border: 1px solid var(--edge); border-radius: var(--r-card); background: var(--surface); min-width: 0; }
+  .lab legend { padding: 0 6px; font: 700 13px/18px var(--font-ui); color: var(--ink-2); }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .row + .row { margin-top: 6px; }
+  .row > span { font-size: 13px; color: var(--ink-2); min-width: 3.2em; }
+  .lab button.b {
+    min-height: 44px; min-width: 44px; padding: 0 12px; border-radius: var(--r-btn);
+    border: 1px solid var(--edge); background: var(--surface-2); color: var(--ink);
+    font: 600 14px/1 var(--font-ui); cursor: pointer;
+  }
+  .lab button.b:active { transform: translateY(1px); }
+  .lab button.b[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  .lab button.b.go { background: var(--accent); color: var(--accent-ink); border-color: transparent; box-shadow: 0 3px 0 color-mix(in srgb, var(--accent) 55%, #000); }
+  .lab input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--accent); height: 44px; }
+  .status { font: 600 13px/18px var(--font-ui); color: var(--ink-2); display: flex; gap: 12px; flex-wrap: wrap; }
+  .status b { color: var(--ink); font-weight: 700; }
+  #log { margin: 0; padding: 8px 10px; height: 168px; overflow: auto; border-radius: 12px; background: #0006; color: #d7e1ff;
+         font: 12px/16px ui-monospace, Consolas, monospace; white-space: pre-wrap; }
+  [data-theme="longzhong"] #log { background: #2a322a; }
+
+  /* The stand-in effects layer (used unless ?fx=real): just enough to see when and where an effect fires. */
+  .ffx { position: absolute; inset: 0; pointer-events: none; }
+  .ffx i { position: absolute; display: block; border-radius: 50%; translate: -50% -50%; }
+  .ffx .ring { background: none; border: 3px solid; }
+  .ffx .flash { inset: 0; border-radius: 0; translate: none; }
+  .ffx .band { left: 0; right: 0; translate: 0 -50%; border-radius: 0; display: grid; place-items: center; font: 700 1em var(--font-kai); white-space: nowrap; }
+  .ffx .band[data-tone="mine"] { background: color-mix(in srgb, var(--accent) 92%, transparent); color: var(--accent-ink); }
+  .ffx .band[data-tone="danger"] { background: var(--danger); color: var(--danger-ink); }
+  .ffx .band[data-tone="calm"] { background: color-mix(in srgb, var(--surface) 92%, transparent); color: var(--ink); border-block: 1px solid var(--edge); }
+</style>
+</head>
+<body>
+<div class="lab" id="lab" data-layout="landscape" data-phase="childTurn">
+  <main class="lab__stage" id="stage"><div id="board"></div></main>
+  <aside class="lab__panel">
+    <h1>棋盘实验台 <small>board-view.js · tap or drag on the board to play, or run a scene · ?fx=real ?audio=real ?bare ?nodeal ?theme= ?bottom= ?motion=reduced</small></h1>
+    <div class="status"><span>phase <b id="st-phase">childTurn</b></span><span>busy <b id="st-busy">0</b></span><span>c <b id="st-c">0</b></span><span>nodes <b id="st-nodes">0</b></span><span>last event <b id="st-event">—</b></span></div>
+    <fieldset><legend>Theme · motion · seat</legend>
+      <div class="row" id="r-theme"><span>theme</span></div>
+      <div class="row" id="r-motion"><span>motion</span></div>
+      <div class="row" id="r-seat"><span>seat</span></div>
+      <div class="row" id="r-phase"><span>turn glow</span></div>
+      <div class="row"><span>tension</span><input id="tension" type="range" min="0" max="1" step="0.05" value="0.1" aria-label="tension"></div>
+    </fieldset>
+    <fieldset><legend>Position · lifecycle</legend><div class="row" id="r-life"></div></fieldset>
+    <fieldset><legend>My moves (B) and captures (C)</legend><div class="row" id="r-me"></div><div class="row" id="r-mecap"></div></fieldset>
+    <fieldset><legend>Rival moves (E1, E2) and captures</legend><div class="row" id="r-rival"></div><div class="row" id="r-rivalcap"></div></fieldset>
+    <fieldset><legend>Selection · trial · aim · guard (A, D)</legend><div class="row" id="r-sel"></div><div class="row" id="r-trial"></div><div class="row" id="r-aim"></div></fieldset>
+    <fieldset><legend>Check · mate · river (E4, E5, E9)</legend><div class="row" id="r-event"></div></fieldset>
+    <fieldset><legend>Hints · arrows · ghost play (F)</legend><div class="row" id="r-hint"></div><div class="row" id="r-arrow"></div></fieldset>
+    <pre id="log" aria-label="log"></pre>
+  </aside>
+</div>
+
+<script type="module">
+import { createBoardView } from '../src/ui/board-view.js';
+import { computeLayout } from '../src/ui/layout.js';
+import { createInitialBoard, fenToBoard, getPieceLegalMoves, getLegalMoves, applyMove, getGameStatus, checkers, moveToNotation, opposite } from '../src/core/engine.js';
+
+const params = new URLSearchParams(location.search);
+const $ = (id) => document.getElementById(id);
+const lab = $('lab'), host = $('board'), root = document.documentElement;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const same = (a, b) => !!a && !!b && a.row === b.row && a.col === b.col;
+const sq = (row, col) => ({ row, col });
+
+// ---- log ------------------------------------------------------------------------------------------------------------
+const lines = [];                                          // everything (window.__log, for scripted checks); the panel shows the tail
+function log(...parts) {
+  lines.push(parts.map((p) => (typeof p === 'string' ? p : JSON.stringify(p))).join(' '));
+  $('log').textContent = lines.slice(-60).join('\n');
+  $('log').scrollTop = 1e6;
+}
+window.__log = lines;
+
+// ---- stand-in fx and audio (the real ones with ?fx=real / ?audio=real) -------------------------------------------------
+function createFakeFx() {
+  let layer = null, hostEl = null, reduced = false, c = 60;
+  const pending = new Set();
+  const BANNER = { start: ['开战！', 'mine', 2.0, 220, 600, 200], check: ['将军！', 'mine', 2.0, 180, 450, 200], mate: ['绝杀！', 'mine', 2.6, 220, 900, 250],
+                   stalemate: ['困毙！', 'mine', 2.0, 220, 800, 200], lose: ['惜败，再战！', 'calm', 1.5, 300, 900, 300], draw: ['握手言和', 'calm', 1.5, 300, 900, 300], river: ['过河！', 'calm', 1.1, 160, 400, 140] };
+  const css = (name) => getComputedStyle(hostEl).getPropertyValue(name).trim();
+  const node = (cls, style) => { const n = document.createElement('i'); n.className = cls; Object.assign(n.style, style); layer.append(n); return n; };
+  const fly = (at, color, size, dx, dy, ms, shape = '') => {
+    const n = node(shape, { left: `${at.x}px`, top: `${at.y}px`, width: `${size}px`, height: `${size}px`, background: shape === 'ring' ? 'none' : color, borderColor: color });
+    n.animate([{ transform: 'translate(0,0) scale(1)', opacity: 1 }, { transform: `translate(${dx}px, ${dy}px) scale(${shape === 'ring' ? 2.2 : 0.3})`, opacity: 0 }],
+      { duration: ms, easing: 'cubic-bezier(.1,.7,.3,1)' }).finished.then(() => n.remove(), () => n.remove());
+  };
+  const fx = {
+    live: 0,
+    mount(el) { hostEl = el.parentElement; layer = document.createElement('div'); layer.className = 'ffx'; el.append(layer); },
+    burst(kind, at, o = {}) {
+      log('fx.burst', kind, o);
+      if (reduced || !layer) return;
+      const colors = o.colors ?? [o.color ?? { dust: css('--label'), sparks: css('--fx-spark'), splash: css('--fx-cool'), explosion: css('--fx-ember'), stars: css('--fx-spark') }[kind] ?? css('--sel')];
+      if (kind === 'ring') { fly(at, o.color ?? css('--sel'), 0.9 * c * (o.size ?? 1), 0, 0, 300, 'ring'); return; }
+      const n = o.n ?? { dust: 8, capture: 24, explosion: 40, sparks: 10, splash: 18, stars: 14, trail: 10 }[kind] ?? 8;
+      const reach = { dust: 0.5, capture: 1.4, explosion: 2.2, sparks: 1.0, splash: 1.0, stars: 1.2, trail: 0.2 }[kind] ?? 1;
+      for (let i = 0; i < n; i++) {
+        let a = Math.random() * Math.PI * 2;
+        if (o.dir !== undefined) a = (kind === 'dust' ? o.dir + Math.PI : o.dir) + (Math.random() - 0.5) * (kind === 'sparks' ? 0.8 : 2);
+        if (kind === 'splash') a = -Math.PI / 2 + (Math.random() - 0.5) * 1.6;
+        const r = reach * c * (0.4 + Math.random() * 0.6);
+        fly(at, colors[i % colors.length], c * (0.06 + Math.random() * 0.1), Math.cos(a) * r, Math.sin(a) * r + (kind === 'capture' ? 0.3 * c : 0), 300 + Math.random() * 350);
+      }
+      if (kind === 'explosion') fly(at, css('--fx-spark'), 0.9 * c, 0, 0, 380, 'ring');
+    },
+    trail(from, to) { log('fx.trail'); if (reduced || !layer) return; for (let i = 0; i < 8; i++) fly({ x: from.x + (to.x - from.x) * i / 8, y: from.y + (to.y - from.y) * i / 8 }, css('--fx-white'), 0.08 * c, 0, 0, 240); },
+    slash(at) { log('fx.slash'); if (!reduced && layer) fly(at, '#ffd166', 1.2 * c, 0, 0, 200, 'ring'); },
+    projectile(from, to, o) {
+      log('fx.projectile', o);
+      if (reduced || !layer) return Promise.resolve();
+      const n = node('', { left: `${from.x}px`, top: `${from.y}px`, width: `${0.2 * c}px`, height: `${0.2 * c}px`, background: css('--fx-ember'), boxShadow: `0 0 ${0.3 * c}px ${css('--fx-ember')}` });
+      const frames = Array.from({ length: 13 }, (_, i) => { const u = i / 12; return { transform: `translate(${(to.x - from.x) * u}px, ${(to.y - from.y) * u - 4 * o.arc * u * (1 - u)}px)` }; });
+      return n.animate(frames, { duration: o.ms, easing: 'linear' }).finished.then(() => n.remove(), () => n.remove());
+    },
+    confetti() { log('fx.confetti'); },
+    wind() { log('fx.wind'); },
+    shake(level) {
+      log('fx.shake', level);
+      if (reduced || !hostEl) return;
+      const amp = [0, 2, 4, 7][level], ms = [0, 120, 200, 320][level];
+      hostEl.animate({ translate: Array.from({ length: 8 }, (_, i) => `${(Math.random() - 0.5) * 2 * amp * (1 - i / 8)}px ${(Math.random() - 0.5) * 2 * amp * (1 - i / 8)}px`).concat('0px 0px') }, { duration: ms, easing: 'linear' });
+    },
+    hitStop(ms) {
+      log('fx.hitStop', ms);
+      if (reduced || !hostEl) return;
+      const list = hostEl.getAnimations({ subtree: true }).filter((a) => a.playState === 'running');
+      for (const a of list) a.pause();
+      setTimeout(() => { for (const a of list) if (a.playState === 'paused') a.play(); }, ms);
+    },
+    flash(color, ms) {
+      log('fx.flash', color, ms);
+      if (reduced || !layer) return;
+      const n = node('flash', { background: color });
+      n.animate({ opacity: [0.35, 0] }, { duration: ms }).finished.then(() => n.remove(), () => n.remove());
+    },
+    banner(kind, o = {}) {
+      log('fx.banner', kind, o.tone ?? '', o.avoid ? 'avoid' : '');
+      if (!layer) return Promise.resolve();
+      const [text, tone, size, tin, hold, out] = BANNER[kind];
+      const font = Math.max(kind === 'river' ? 16 : 40, Math.min(96, size * c));
+      let y = hostEl.clientHeight / 2;
+      if (kind === 'river') y = 5.3 * c;
+      else if (o.avoid && Math.abs(o.avoid.y - y) < 1.2 * c + font * 0.8) y = o.avoid.y < y ? hostEl.clientHeight * 0.72 : hostEl.clientHeight * 0.28;
+      for (const old of layer.querySelectorAll('.band')) old.remove();
+      const n = node('band', { top: `${y}px`, height: `${1.6 * font}px`, fontSize: `${font}px` });
+      n.dataset.tone = o.tone ?? tone; n.dataset.kind = kind; n.textContent = text;
+      const total = reduced ? 1100 : tin + hold + out;
+      const frames = reduced
+        ? [{ opacity: 0 }, { opacity: 1, offset: 0.14 }, { opacity: 1, offset: 0.86 }, { opacity: 0 }]
+        : [{ clipPath: 'inset(0 100% 0 0)', opacity: 1 }, { clipPath: 'inset(0)', opacity: 1, offset: tin / total }, { clipPath: 'inset(0)', opacity: 1, offset: (tin + hold) / total }, { clipPath: 'inset(0)', opacity: 0 }];
+      return new Promise((resolve) => {
+        const done = () => { pending.delete(done); n.remove(); resolve(); };
+        pending.add(done);
+        n.animate(frames, { duration: total }).finished.then(done, done);
+      });
+    },
+    popup(text) { log('fx.popup', text); },
+    stamp(text) { log('fx.stamp', text); return Promise.resolve(); },
+    haptic(kind) { log('fx.haptic', kind); },
+    resize(w, h, cell) { c = cell; },
+    refreshPalette() { log('fx.refreshPalette'); },
+    setReducedMotion(on) { reduced = on; },
+    setHaptics() {},
+    clear() { log('fx.clear'); if (layer) layer.replaceChildren(); for (const done of [...pending]) done(); },
+  };
+  return fx;
+}
+const fakeAudio = () => ({
+  unlocked: true, unlock: () => Promise.resolve(true),
+  play(name, opts) { log('♪', name, opts ?? ''); },
+  setTension() {}, music: { start() {}, stop() {}, setScene() {} }, setSuspense() {}, duck() {}, setPalette() {}, setMuted() {}, applySettings() {},
+  cancelScheduled() {}, setHidden() {}, dispose() {},
+});
+
+let fx = createFakeFx(), audio = fakeAudio();
+if (params.get('fx') === 'real') {                         // the real effects need their own stylesheet (package X3)
+  const link = document.createElement('link');
+  link.rel = 'stylesheet'; link.href = '../styles/fx.css';
+  const styled = new Promise((resolve) => { link.onload = link.onerror = resolve; });
+  document.head.append(link);
+  await styled;                                            // banners, popups, stamps and the canvas are never seen unstyled
+  fx = (await import('../src/ui/fx.js')).createFx({ reducedMotion: params.get('motion') === 'reduced' });
+}
+if (params.get('audio') === 'real') {
+  audio = (await import('../src/ui/audio.js')).createAudio();
+  window.addEventListener('pointerdown', () => { audio.unlock(); }, true);
+}
+
+// ---- the view ---------------------------------------------------------------------------------------------------------
+const state = { theme: params.get('theme') ?? 'chibi', reduced: params.get('motion') === 'reduced', bottom: params.get('bottom') ?? 'red' };
+root.dataset.theme = state.theme;
+root.dataset.motion = state.reduced ? 'reduced' : 'full';
+
+function layout() {
+  const r = computeLayout({ W: innerWidth, H: innerHeight, visibleH: innerHeight, sheet: false });
+  lab.dataset.layout = r.layout;
+  host.style.width = `${Math.round(r.boardW * 100) / 100}px`;
+}
+layout();
+addEventListener('resize', layout);
+
+let view = createBoardView(host, { fx, audio, bottom: state.bottom, theme: state.theme, reducedMotion: state.reduced });
+fx.setReducedMotion(state.reduced);
+window.view = view;
+
+for (const type of ['board:pick', 'board:dragcancel', 'board:cellfocus']) {
+  host.addEventListener(type, (e) => {
+    $('st-event').textContent = `${type.slice(6)} ${e.detail.row},${e.detail.col}${e.detail.via ? ' ' + e.detail.via : ''}`;
+    if (type !== 'board:cellfocus') log(type, e.detail);
+    if (type === 'board:pick' && !params.has('bare')) tap(e.detail.row, e.detail.col);     // ?bare: events are only logged
+  });
+}
+setInterval(() => {
+  $('st-busy').textContent = root.dataset.uiBusy ?? '0';
+  $('st-c').textContent = String(view.cell());
+  $('st-nodes').textContent = String(host.querySelectorAll('*').length);
+  $('st-phase').textContent = lab.dataset.phase;
+}, 200);
+
+// ---- a tiny game, enough to drive every board moment by hand (the real rules of §5 live in src/game/session.js) ------------
+const game = { board: createInitialBoard(), turn: 'red', human: state.bottom, selected: null, targets: [], trial: null, moves: 0, over: false, timer: 0 };
+
+function kingSquare(board, color) {
+  for (let row = 0; row < 10; row++) for (let col = 0; col < 9; col++) if (board[row][col]?.type === 'king' && board[row][col].color === color) return sq(row, col);
+  return null;
+}
+function flagsOf(after, move) {
+  const enemy = opposite(move.piece.color), st = getGameStatus(after, enemy);
+  const crossed = move.piece.type === 'pawn' && (move.piece.color === 'red' ? move.from.row === 5 && move.to.row === 4 : move.from.row === 4 && move.to.row === 5);
+  return { check: st.check, mate: st.over && st.reason === 'checkmate', checkedKing: st.check ? kingSquare(after, enemy) : null, checkers: st.check ? checkers(after, enemy) : [], crossed };
+}
+const QUIET = { check: false, mate: false, checkedKing: null, checkers: [], crossed: false };
+const mv = (board, fr, fc, tr, tc) => ({ from: sq(fr, fc), to: sq(tr, tc), piece: board[fr][fc], captured: board[tr][tc] });
+function phase(p) { lab.dataset.phase = p; }
+
+function reset(board, opts = {}) {
+  clearTimeout(game.timer);
+  // opts.scene: a scripted scene, not a game — taps are refused and the rival does not answer
+  Object.assign(game, { board, turn: opts.turn ?? state.bottom, human: state.bottom, selected: null, targets: [], trial: null, moves: 0, over: !!opts.scene, opening: false });
+  view.setInteractive(true);
+  lab.classList.remove('lost');
+  host.classList.remove('is-lost');
+  phase(game.turn === game.human ? 'childTurn' : 'opponentTurn');
+  const done = view.setPosition(board, { deal: !!opts.deal });
+  if (!opts.scene && game.turn !== game.human) done.then(() => rivalMove());
+  return done;
+}
+function select(row, col) {
+  game.selected = sq(row, col);
+  game.targets = getPieceLegalMoves(game.board, row, col);
+  phase('selected');
+  view.setSelection(game.selected, game.targets, []);
+}
+function deselect() { game.selected = null; game.targets = []; phase('childTurn'); view.setSelection(null); }
+function tryMove(move) {
+  game.trial = move;
+  phase('tentative');
+  log('试走', moveToNotation(game.board, move));
+  return view.showTentative(move, { aim: !!move.captured, liftStep: game.moves });
+}
+function retract(reselect) {
+  game.trial = null;
+  phase(reselect ? 'selected' : 'childTurn');
+  if (!reselect) { game.selected = null; game.targets = []; }
+  return view.retractTentative({ reselect, targets: game.targets, forbidden: [] });
+}
+async function confirm() {
+  const move = game.trial;
+  const after = applyMove(game.board, move), flags = flagsOf(after, move);
+  log('你走了', moveToNotation(game.board, move));
+  Object.assign(game, { board: after, turn: opposite(game.human), trial: null, selected: null, targets: [], moves: game.moves + 1, opening: false });
+  phase(flags.mate ? 'over' : 'opponentTurn');
+  const done = view.commitTentative({ flags });
+  if (flags.mate || getGameStatus(after, game.turn).over) { game.over = true; return done; }
+  const started = performance.now();
+  await done;
+  game.timer = setTimeout(rivalMove, Math.max(0, 600 - (performance.now() - started)));
+}
+async function rivalMove() {
+  if (game.over || game.turn === game.human) return;
+  const all = getLegalMoves(game.board, game.turn);
+  if (!all.length) return;
+  const captures = all.filter((m) => m.captured);
+  const pool = captures.length && Math.random() < 0.7 ? captures : all;
+  const move = pool[Math.floor(Math.random() * pool.length)];
+  const after = applyMove(game.board, move), flags = flagsOf(after, move);
+  log('对方走了', moveToNotation(game.board, move));
+  Object.assign(game, { board: after, turn: game.human });
+  const over = flags.mate || getGameStatus(after, game.turn).over;
+  await view.playMove(move, { actor: 'rival', flags });
+  if (over) { game.over = true; phase('over'); host.classList.add('is-lost'); return; }
+  phase('childTurn');
+}
+function tap(row, col) {
+  const at = sq(row, col), piece = game.board[row][col];
+  if (game.over || game.turn !== game.human) { view.nudge(at); return; }
+  const mine = piece && piece.color === game.human;
+  if (game.trial) {
+    if (same(game.trial.to, at)) { confirm(); return; }
+    if (same(game.trial.from, at)) { retract(true); return; }
+    const other = game.targets.find((m) => same(m.to, at));
+    if (other) { tryMove(other); return; }
+    if (mine && getPieceLegalMoves(game.board, row, col).length) { retract(false); select(row, col); return; }
+    view.nudge(at);
+    return;
+  }
+  if (game.selected) {
+    if (same(game.selected, at)) { deselect(); return; }
+    const move = game.targets.find((m) => same(m.to, at));
+    if (move) { tryMove(move); return; }
+    if (mine && getPieceLegalMoves(game.board, row, col).length) { select(row, col); return; }
+    view.nudge(at);
+    return;
+  }
+  if (mine && getPieceLegalMoves(game.board, row, col).length) select(row, col); else view.nudge(at);
+}
+
+// ---- scenes -------------------------------------------------------------------------------------------------------------
+const MID = 'r1bakabnr/9/1cn4c1/p5p2/9/3pp4/P3P1P2/1CN3NC1/9/R1BAKAB1R w';
+const BASE = 'r1bakab1r/9/1cn3nc1/p1p1p1p1p/9/9/P1P1P1P1P/1CN3NC1/9/R1BAKAB1R w';
+const CHECK = '3k1a3/4a4/2n1b1n2/p1p1p1p1p/R8/9/P1P1P1P1P/2N1C1N2/9/2BAKAB2 w';
+const MATE = '4k4/R8/9/p1p3p2/9/8R/P1P1P1P2/1C7/9/3K5 w';
+const flip = (board) => board.map((_, r) => board[9 - r].map((__, c) => { const p = board[9 - r][8 - c]; return p ? { id: `f-${p.id}`, type: p.type, color: opposite(p.color) } : null; }));
+const flipMove = (board, m) => mv(board, 9 - m.from.row, 8 - m.from.col, 9 - m.to.row, 8 - m.to.col);
+// When the child sits as black, every scene is turned so that "me" is still the bottom side.
+const seat = (board) => (state.bottom === 'red' ? board : flip(board));
+const seatMove = (board, m) => (state.bottom === 'red' ? m : flipMove(board, m));
+
+/** A position in which the red `type` can make one quiet move or one capture (as seen by red). */
+function arena(type, capture) {
+  const spec = {
+    rook: { from: [8, 1], to: [3, 1], victim: 'horse' },
+    horse: { from: [7, 2], to: [5, 3], victim: 'cannon' },
+    cannon: capture ? { from: [7, 7], to: [2, 7], victim: 'rook', screen: [5, 7] } : { from: [7, 7], to: [7, 3] },
+    elephant: { from: [9, 2], to: [7, 4], victim: 'pawn' },
+    advisor: { from: [9, 3], to: [8, 4], victim: 'horse' },
+    king: { from: [9, 4], to: [8, 4], victim: 'pawn' },
+    pawn: { from: [6, 4], to: [5, 4], victim: 'pawn' },
+    river: { from: [5, 4], to: [4, 4], type: 'pawn' },
+  }[type];
+  const kind = spec.type ?? type;
+  const board = fenToBoard(BASE).board.map((row) => row.slice());
+  const [fr, fc] = spec.from, [tr, tc] = spec.to;
+  for (let row = 0; row < 10; row++) for (let col = 0; col < 9; col++) {
+    const p = board[row][col];
+    const between = (row === fr && row === tr && (col - fc) * (col - tc) <= 0) || (col === fc && col === tc && (row - fr) * (row - tr) <= 0);
+    if (between || (p && p.color === 'red' && p.type === kind && (kind === 'king' || (row === fr && col === fc)))) board[row][col] = null;
+  }
+  if (kind === 'horse') board[fr + Math.sign(tr - fr)][fc] = null;
+  if (kind === 'elephant') board[(fr + tr) / 2][(fc + tc) / 2] = null;
+  board[fr][fc] = { id: `red-${kind}-demo`, type: kind, color: 'red' };
+  board[tr][tc] = capture && spec.victim ? { id: `black-${spec.victim}-demo`, type: spec.victim, color: 'black' } : null;
+  if (spec.screen && capture) board[spec.screen[0]][spec.screen[1]] = { id: 'black-pawn-screen', type: 'pawn', color: 'black' };
+  return { board, move: mv(board, fr, fc, tr, tc), crossed: type === 'river' };
+}
+/** The same scene for `actor`: the rival's version is the half-turned board with the colours swapped. */
+function scene(actor, type, capture) {
+  const a = arena(type, capture);
+  const mineIsRed = (actor === 'me') === (state.bottom === 'red');
+  const board = mineIsRed ? a.board : flip(a.board);
+  return { board, move: mineIsRed ? a.move : flipMove(board, a.move), flags: { ...QUIET, crossed: a.crossed } };
+}
+async function playScene(actor, type, capture) {
+  const s = scene(actor, type, capture);
+  await reset(s.board, { turn: actor === 'me' ? state.bottom : opposite(state.bottom), scene: true });
+  await sleep(250);
+  await view.playMove(s.move, { actor, flags: s.flags });
+  phase(actor === 'me' ? 'opponentTurn' : 'childTurn');
+}
+async function trialScene(type, capture) {
+  const s = scene('me', type, capture);
+  await reset(s.board, { scene: true });
+  view.setSelection(s.move.from, [s.move], []);
+  await sleep(350);
+  phase('tentative');
+  await view.showTentative(s.move, { aim: capture, liftStep: demo.step++ });
+  return s;
+}
+async function commitScene(type, capture) {
+  const s = await trialScene(type, capture);
+  await sleep(700);
+  await view.commitTentative({ flags: s.flags });
+  phase('opponentTurn');
+}
+async function eventScene(fen, from, to, actor, opts = {}) {
+  let board = fenToBoard(fen).board, move = mv(board, ...from, ...to);
+  const mineIsRed = (actor === 'me') === (state.bottom === 'red');
+  if (!mineIsRed) { board = flip(board); move = flipMove(board, move); }
+  const flags = flagsOf(applyMove(board, move), move);
+  await reset(board, { turn: actor === 'me' ? state.bottom : opposite(state.bottom), scene: true });
+  await sleep(250);
+  log('flags', flags);
+  await view.playMove(move, { actor, flags, soft: !!opts.soft });
+  if (flags.mate) { phase('over'); if (actor === 'rival') host.classList.add('is-lost'); }
+}
+/** Board and moves of a short line from the start, as real Move objects. */
+function line(board, steps) {
+  const moves = [];
+  let b = board;
+  for (const [fr, fc, tr, tc] of steps) { const m = mv(b, fr, fc, tr, tc); moves.push(m); b = applyMove(b, m); }
+  return moves;
+}
+const start = () => seat(createInitialBoard());
+/** A move given in red's coordinates on a red-view board, as the seated board has it. */
+const S = (redBoard, fr, fc, tr, tc) => (state.bottom === 'red' ? mv(redBoard, fr, fc, tr, tc) : mv(flip(redBoard), 9 - fr, 8 - fc, 9 - tr, 8 - tc));
+
+const demo = {
+  step: 0,
+  deal: () => reset(start(), { deal: true, turn: 'red' }).then(() => { game.opening = true; }),
+  start: () => reset(start(), { turn: 'red' }).then(() => { game.opening = true; }),
+  mid: () => reset(seat(fenToBoard(MID).board)),
+  cancel: () => view.cancelAnimations(),
+  recreate() { view.destroy(); view = createBoardView(host, { fx, audio, bottom: state.bottom, theme: state.theme, reducedMotion: state.reduced }); window.view = view; return demo.start(); },
+  interactive(on) { view.setInteractive(on); },
+  lost() { host.classList.toggle('is-lost'); },
+  nudge() { view.nudge(game.selected ?? kingSquare(game.board, state.bottom)); },
+  move: (type) => playScene('me', type, false),
+  capture: (type) => playScene('me', type, true),
+  rivalMove: (type) => playScene('rival', type, false),
+  rivalCapture: (type) => playScene('rival', type, true),
+  trial: (type = 'cannon') => trialScene(type, false),
+  aim: (type = 'cannon') => trialScene(type, true),
+  commit: (type = 'cannon') => commitScene(type, false),
+  commitCapture: (type = 'cannon') => commitScene(type, true),
+  async select() {                                           // a rook with quiet targets, capture targets and two forbidden ones
+    const board = seat(fenToBoard(MID).board);
+    await reset(board);
+    const from = state.bottom === 'red' ? sq(9, 8) : sq(0, 0);
+    const moves = getPieceLegalMoves(board, from.row, from.col);
+    game.selected = from; game.targets = moves.slice(2);
+    phase('selected');
+    view.setSelection(from, game.targets, moves.slice(0, 2));
+  },
+  deselect() { deselect(); },
+  async switchTrial() {                                      // D3: hover -> another hover -> an aim -> back to a hover
+    const board = seat(fenToBoard(MID).board);
+    await reset(board, { scene: true });
+    const from = state.bottom === 'red' ? sq(7, 7) : sq(2, 1);
+    const moves = getPieceLegalMoves(board, from.row, from.col);
+    const quiet = moves.filter((m) => !m.captured), hit = moves.find((m) => m.captured);
+    view.setSelection(from, moves, []);
+    await sleep(300);
+    phase('tentative');
+    await view.showTentative(quiet[0], { liftStep: 0 });
+    await sleep(500);
+    await view.showTentative(quiet[quiet.length - 1], { liftStep: 1 });
+    await sleep(500);
+    if (hit) { await view.showTentative(hit, { aim: true, liftStep: 2 }); await sleep(600); }
+    await view.showTentative(quiet[1], { liftStep: 3 });
+  },
+  retract: (reselect = true) => { phase(reselect ? 'selected' : 'childTurn'); return view.retractTentative({ reselect }); },
+  guard() { view.setTrialGuard(700, true); log('guard 700 ms + wobble'); },
+  check: () => eventScene(CHECK, [4, 0], [4, 3], 'me'),
+  checked: () => eventScene(CHECK, [4, 0], [4, 3], 'rival'),
+  softCheck: () => eventScene(CHECK, [4, 0], [4, 3], 'rival', { soft: true }),
+  mate: () => eventScene(MATE, [5, 8], [0, 8], 'me'),
+  mated: () => eventScene(MATE, [5, 8], [0, 8], 'rival'),
+  river: () => playScene('me', 'river', false),
+  rivalRiver: () => playScene('rival', 'river', false),
+  async undo(n = 1) {                                        // play a capture (and a reply), then take them back
+    const red = fenToBoard(MID).board, before = seat(red);
+    await reset(before, { scene: true });
+    const first = S(red, 7, 2, 5, 3);                        // 马 takes a pawn
+    await view.playMove(first, { actor: 'me', flags: QUIET });
+    const steps = [first];
+    if (n > 1) {
+      const reply = S(applyMove(red, mv(red, 7, 2, 5, 3)), 5, 4, 6, 4);     // a pawn takes a pawn back
+      await view.playMove(reply, { actor: 'rival', flags: QUIET });
+      steps.unshift(reply);
+    }
+    await sleep(500);
+    await view.undoMoves(steps, before);
+  },
+  // the hint scenes are written for the opening position
+  async opening() { if (!game.opening) { await reset(start(), { turn: 'red' }); game.opening = true; } },
+  async hlPieces() { await demo.opening(); view.highlight({ pieces: [S(createInitialBoard(), 7, 7, 7, 4).from, S(createInitialBoard(), 9, 7, 7, 6).from], dim: true }); },
+  async hlArea() { await demo.opening(); const a = S(createInitialBoard(), 7, 3, 9, 5); view.highlight({ squares: [a.from, a.to], dim: true }); },
+  async hlPlain() { await demo.opening(); view.highlight({ pieces: [S(createInitialBoard(), 9, 1, 7, 2).from], squares: [S(createInitialBoard(), 6, 0, 5, 2).from, S(createInitialBoard(), 6, 0, 5, 2).to] }); },
+  hlOff() { view.highlight(null); },
+  async lastMove() {                                         // setLastMove / setCheck called directly, as the stage does after a restore
+    await demo.opening();
+    const b = createInitialBoard();
+    demo.marksOn = !demo.marksOn;
+    view.setLastMove(demo.marksOn ? S(b, 2, 7, 2, 4) : null, 'rival');
+    const king = S(b, 9, 4, 8, 4).from, attacker = S(b, 2, 7, 2, 4).to;
+    view.setCheck(demo.marksOn ? state.bottom : null, [attacker]);
+    log('setLastMove + setCheck', demo.marksOn ? 'on' : 'off', king);
+  },
+  async arrowHint() { await demo.opening(); const m = S(createInitialBoard(), 7, 7, 7, 4); view.showArrows([{ from: m.from, to: m.to, style: 'hint', demo: true }], { group: 'hint' }); },
+  async arrowHorse() { await demo.opening(); const m = S(createInitialBoard(), 9, 7, 7, 6); view.showArrows([{ from: m.from, to: m.to, style: 'hint', demo: true }], { group: 'hint' }); },
+  async arrowCannon() { await demo.opening(); const m = S(createInitialBoard(), 7, 1, 0, 1); view.showArrows([{ from: m.from, to: m.to, style: 'idea' }], { group: 'ask' }); },
+  async arrowKinds() {
+    await demo.opening();
+    const b = createInitialBoard();
+    const list = [[7, 1, 7, 2, 'idea', '1'], [2, 7, 2, 4, 'threat', '2'], [0, 1, 2, 2, 'reply', '3'], [6, 4, 5, 4, 'last']];
+    view.showArrows(list.map(([fr, fc, tr, tc, style, badge]) => { const m = S(b, fr, fc, tr, tc); return { from: m.from, to: m.to, style, badge }; }), { group: 'ask' });
+  },
+  async arrowTtl() { await demo.opening(); const m = S(createInitialBoard(), 9, 0, 8, 0); view.showArrows([{ from: m.from, to: m.to, style: 'reply' }], { group: 'ttl', ttl: 1500 }); },
+  arrowsOff() { view.clearArrows(); },
+  async preview() {
+    await reset(start());
+    const b = start();
+    const steps = state.bottom === 'red' ? [[7, 7, 7, 4], [0, 7, 2, 6], [9, 7, 7, 6]] : [[2, 1, 2, 4], [9, 1, 7, 2], [0, 1, 2, 2]];
+    await view.previewLine(line(b, steps), { from: 'now' });
+  },
+  async previewTrial() {                                     // an aim on the board, then the reply that takes the piece back, played by ghosts
+    const b = start();
+    await reset(b, { scene: true });
+    const steps = state.bottom === 'red' ? [[7, 1, 0, 1], [0, 0, 0, 1], [9, 1, 7, 2]] : [[2, 7, 9, 7], [9, 8, 9, 7], [0, 7, 2, 6]];
+    const moves = line(b, steps);
+    view.setSelection(moves[0].from, [moves[0]], []);
+    phase('tentative');
+    await view.showTentative(moves[0], { aim: true });
+    await sleep(400);
+    await view.previewLine(moves.slice(1), { from: 'trial' });
+  },
+  async previewNow() {                                       // a hover trial on the board; ghosts show another move of the same piece from the committed position
+    const b = start();
+    await reset(b, { scene: true });
+    const from = state.bottom === 'red' ? sq(7, 7) : sq(2, 1);
+    const moves = getPieceLegalMoves(b, from.row, from.col);
+    const to = (col) => moves.find((m) => m.to.row === from.row && m.to.col === col);
+    view.setSelection(from, moves, []);
+    phase('tentative');
+    await view.showTentative(to(4));
+    await sleep(400);
+    await view.previewLine([to(state.bottom === 'red' ? 5 : 3)], { from: 'now' });
+  },
+};
+window.demo = demo;
+window.game = game;
+// for scripted checks (work with ?bare so that taps are not played by the tiny game)
+window.lab = { createInitialBoard, fenToBoard, getPieceLegalMoves, getLegalMoves, applyMove, mv, flagsOf, QUIET, MID, CHECK, MATE, flip, state, fx, audio, tap };
+
+// ---- controls -------------------------------------------------------------------------------------------------------------
+function button(row, label, fn, cls = '') {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = `b ${cls}`.trim(); b.textContent = label;
+  b.addEventListener('click', () => { const r = fn(b); if (r && r.catch) r.catch((e) => log('ERROR', String(e))); });
+  $(row).append(b);
+  return b;
+}
+function choice(row, options, current, apply) {
+  const buttons = options.map(([value, label]) => button(row, label, () => { apply(value); for (const [i, o] of options.entries()) buttons[i].setAttribute('aria-pressed', String(o[0] === value)); }));
+  for (const [i, o] of options.entries()) buttons[i].setAttribute('aria-pressed', String(o[0] === current));
+}
+choice('r-theme', [['chibi', '赤壁'], ['longzhong', '隆中'], ['shachang', '沙场']], state.theme, (t) => { state.theme = t; root.dataset.theme = t; view.setTheme(t); });
+choice('r-motion', [['full', '动效 full'], ['reduced', '减弱 reduced']], state.reduced ? 'reduced' : 'full', (m) => {
+  state.reduced = m === 'reduced'; root.dataset.motion = m; view.setReducedMotion(state.reduced); fx.setReducedMotion(state.reduced);
+});
+choice('r-seat', [['red', '红在下'], ['black', '黑在下']], state.bottom, (b) => { state.bottom = b; view.setOrientation(b); demo.start(); });
+choice('r-phase', [['childTurn', '我方回合'], ['opponentTurn', '对方回合'], ['over', '无']], 'childTurn', phase);
+$('tension').addEventListener('input', (e) => view.setTension(Number(e.target.value)));
+
+button('r-life', '开局 deal', demo.deal, 'go');
+button('r-life', '开局 snap', demo.start);
+button('r-life', '中局', demo.mid);
+button('r-life', '悔一步 undo', () => demo.undo(1));
+button('r-life', '悔两步', () => demo.undo(2));
+button('r-life', 'cancelAnimations', demo.cancel);
+button('r-life', '惜败 veil', demo.lost);
+button('r-life', 'interactive off', (b) => { const on = b.getAttribute('aria-pressed') === 'true'; b.setAttribute('aria-pressed', String(!on)); demo.interactive(on); });
+button('r-life', 'destroy + create', demo.recreate);
+
+const TYPES = [['rook', '车'], ['horse', '马'], ['cannon', '炮'], ['elephant', '相'], ['advisor', '仕'], ['king', '帅'], ['pawn', '兵']];
+for (const [type, glyph] of TYPES) {
+  button('r-me', `${glyph}走`, () => demo.move(type));
+  button('r-mecap', `${glyph}吃`, () => demo.capture(type));
+  button('r-rival', `对方${glyph}走`, () => demo.rivalMove(type));
+  button('r-rivalcap', `对方${glyph}吃`, () => demo.rivalCapture(type));
+}
+button('r-sel', '选子 + 禁着点', demo.select);
+button('r-sel', '取消选择', demo.deselect);
+button('r-sel', '摇头 nudge', demo.nudge);
+button('r-sel', '上一步 + 将军圈', demo.lastMove);
+for (const [type, glyph] of TYPES) button('r-trial', `试${glyph}`, () => demo.trial(type));
+button('r-trial', '换目标 D3', demo.switchTrial);
+button('r-trial', '换一步 retract', () => demo.retract(true));
+button('r-trial', '收回 no reselect', () => demo.retract(false));
+button('r-trial', '700ms guard + wobble', demo.guard);
+button('r-trial', '试 → 落子 D5', () => demo.commit('cannon'), 'go');
+for (const [type, glyph] of TYPES) button('r-aim', `瞄${glyph}`, () => demo.aim(type));
+for (const [type, glyph] of TYPES) button('r-aim', `${glyph}吃 D6`, () => demo.commitCapture(type), type === 'cannon' ? 'go' : '');
+button('r-event', '将军 (我)', demo.check, 'go');
+button('r-event', '被将军', demo.checked);
+button('r-event', '连将 soft', demo.softCheck);
+button('r-event', '绝杀 (我)', demo.mate, 'go');
+button('r-event', '被将死', demo.mated);
+button('r-event', '兵过河', demo.river);
+button('r-event', '卒过河', demo.rivalRiver);
+button('r-hint', '锦囊2 聚光棋子', demo.hlPieces);
+button('r-hint', '聚光区域', demo.hlArea);
+button('r-hint', '高亮 no dim', demo.hlPlain);
+button('r-hint', '关闭高亮', demo.hlOff);
+button('r-hint', '沙盘推演 F6', demo.preview, 'go');
+button('r-hint', '试走后推演', demo.previewTrial);
+button('r-hint', '试走中看别的走法', demo.previewNow);
+button('r-arrow', '锦囊3 箭头 + 演示', demo.arrowHint, 'go');
+button('r-arrow', '马的箭头', demo.arrowHorse);
+button('r-arrow', '炮打隔子', demo.arrowCannon);
+button('r-arrow', '四种箭头 + 标号', demo.arrowKinds);
+button('r-arrow', '箭头 ttl 1.5s', demo.arrowTtl);
+button('r-arrow', '清除箭头', demo.arrowsOff);
+
+await (params.has('nodeal') ? demo.start() : demo.deal());
+root.dataset.ready = '1';
+</script>
+</body>
+</html>

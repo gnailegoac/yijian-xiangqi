@@ -1,0 +1,1255 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="chibi" data-motion="reduced">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f1d">
+<title>弈间 · 军乐台 (audio.js)</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../styles/tokens.css">
+<link rel="stylesheet" href="../styles/themes.css">
+<style>
+/* Dev harness for src/ui/audio.js and src/ui/speech.js (package X4). Not part of the game: never built into dist/.
+ *
+ *   audio.html              the sound desk: a pad for every effect, the music bed, every switch of the engine,
+ *                           read-aloud, and a level meter on the real output
+ *   audio.html?measure=1    the measuring bench: renders every recipe, the music bed and the worst-case mixes
+ *                           through OfflineAudioContext and prints peak, length and loudness next to the contract;
+ *                           it also proves the two rules of CONTRACT-NOTES K-98: nothing, however it is stacked,
+ *                           reaches 0 dBFS (the soft limiter), and the bed is no louder at high tension
+ *
+ * X4 has no stylesheet of its own (sound has no look), so this page carries its styles inline. */
+
+html { height: 100%; }
+body { min-height: 100%; overscroll-behavior: none; }
+
+.desk {
+  /* "all is well" green that reads on the chrome of every theme (the themes' own greens are made for their boards) */
+  --calm: color-mix(in srgb, var(--arrow-idea) 60%, var(--ink));
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 12px;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  color: var(--ink);
+  background:
+    radial-gradient(75% 46% at 50% 106%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 100%),
+    radial-gradient(80% 50% at 78% -14%, var(--surface-2), transparent 100%),
+    var(--page);
+  background-attachment: fixed;
+}
+
+/* ---- top bar -------------------------------------------------------------------------------------------------------- */
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-width: 0; }
+.brand { display: flex; align-items: center; gap: 10px; margin-right: auto; min-width: 0; }
+.seal {
+  flex: none; width: 44px; height: 44px; border-radius: 10px; display: grid; place-items: center;
+  font: 700 26px/1 var(--font-kai); color: var(--red-glyph);
+  background: radial-gradient(circle at 35% 30%, var(--red-a), var(--red-b) 60%, var(--red-c));
+  box-shadow: inset 0 0 0 2px var(--red-rim), 0 3px 0 var(--piece-edge);
+}
+.brand h1 { margin: 0; font: 700 26px/1.1 var(--font-kai); letter-spacing: .08em; white-space: nowrap; }
+.brand p { margin: 2px 0 0; font-size: 12px; line-height: 1.2; color: var(--ink-2); white-space: nowrap; }
+
+.seg { display: inline-flex; padding: 2px; border-radius: 14px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--edge); }
+.seg button {
+  min-width: 48px; min-height: 44px; padding: 0 12px; border: 0; border-radius: 12px;
+  background: transparent; color: var(--ink-2); font-weight: 700; font-size: 15px; cursor: pointer; white-space: nowrap;
+}
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.seg--wide { display: flex; }
+.seg--wide button { flex: 1; padding: 0 6px; }
+.anchors button { min-width: 0; padding: 0 2px; font-size: 14px; }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; border-radius: 22px;
+  background: var(--surface); box-shadow: inset 0 0 0 1px var(--edge); font-weight: 700; font-size: 14px; white-space: nowrap;
+}
+.pill i { width: 10px; height: 10px; border-radius: 50%; background: var(--ink-2); }
+.pill[data-state="running"] i { background: var(--calm); box-shadow: 0 0 0 4px color-mix(in srgb, var(--calm) 25%, transparent); }
+.pill[data-state="muted"] i { background: var(--danger); }
+.pill[data-state="suspended"] i { background: var(--accent); }
+
+/* ---- buttons -------------------------------------------------------------------------------------------------------- */
+.btn {
+  min-height: 44px; padding: 0 14px; border-radius: var(--r-btn); border: 1px solid var(--edge);
+  background: var(--surface-2); color: var(--ink); font-weight: 700; font-size: var(--fs-button); cursor: pointer; white-space: nowrap;
+}
+.btn:active { transform: translateY(2px); }
+.btn--primary {
+  border-color: transparent; background: var(--accent); color: var(--accent-ink);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--accent) 55%, #000);
+}
+.btn--primary:active { box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 55%, #000); }
+.btn--danger { border-color: transparent; background: var(--danger); color: var(--danger-ink); box-shadow: 0 3px 0 color-mix(in srgb, var(--danger) 55%, #000); }
+.btn--danger:active { box-shadow: 0 1px 0 color-mix(in srgb, var(--danger) 55%, #000); }
+.btn[aria-pressed="true"] { border-color: transparent; background: var(--accent); color: var(--accent-ink); }
+:root[data-motion="full"] .btn { transition: transform 60ms var(--e-out), box-shadow 60ms var(--e-out); }
+
+/* a switch: the whole row is the button */
+.sw {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 44px; padding: 4px 2px;
+  border: 0; background: transparent; color: var(--ink); font-weight: 600; font-size: 15px; text-align: left; cursor: pointer;
+}
+.sw small { display: block; font-weight: 400; font-size: 12px; line-height: 1.25; color: var(--ink-2); }
+.sw::after {
+  content: ""; flex: none; width: 50px; height: 30px; border-radius: 15px;
+  background: radial-gradient(circle at 15px 15px, var(--ink-2) 0 11px, transparent 11.5px), var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--edge);
+}
+.sw[aria-pressed="true"]::after {
+  background: radial-gradient(circle at 35px 15px, var(--accent-ink) 0 11px, transparent 11.5px), var(--accent);
+  box-shadow: none;
+}
+
+input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 44px; margin: 0; background: transparent; cursor: pointer; }
+input[type="range"]::-webkit-slider-runnable-track { height: 10px; border-radius: 5px; background: linear-gradient(90deg, var(--accent) var(--fill, 50%), var(--surface-2) var(--fill, 50%)); box-shadow: inset 0 0 0 1px var(--edge); }
+input[type="range"]::-moz-range-track { height: 10px; border-radius: 5px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--edge); }
+input[type="range"]::-moz-range-progress { height: 10px; border-radius: 5px; background: var(--accent); }
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 30px; height: 30px; margin-top: -10px; border-radius: 50%;
+  background: var(--accent); border: 3px solid var(--surface); box-shadow: 0 2px 0 color-mix(in srgb, var(--accent) 55%, #000);
+}
+input[type="range"]::-moz-range-thumb { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); border: 3px solid var(--surface); }
+
+/* ---- cards ---------------------------------------------------------------------------------------------------------- */
+.card {
+  min-width: 0; padding: 12px 14px 14px; border-radius: var(--r-card);
+  background: var(--surface); box-shadow: inset 0 0 0 1px var(--edge), 0 3px 0 color-mix(in srgb, var(--edge) 45%, #000);
+}
+.card > h2, .group > h2 {
+  display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px;
+  font: 700 19px/1.2 var(--font-kai); letter-spacing: .06em;
+}
+.card > h2::before, .group > h2::before { content: ""; flex: none; align-self: center; width: 6px; height: 18px; border-radius: 3px; background: var(--accent); }
+.card > h2 small, .group > h2 small { font: 400 12px/1.2 var(--font-ui); letter-spacing: 0; color: var(--ink-2); }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.card > * + .row, .card > * + .field, .card > * + .seg, .card > * + .sw { margin-top: 8px; }
+.field .seg { margin-top: 4px; }
+.field label { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; line-height: 1.3; color: var(--ink-2); }
+.field label b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.note { margin: 8px 0 0; font-size: 12px; line-height: 1.4; color: var(--ink-2); }
+.code { font: 600 11px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--ink-2); }
+
+/* ---- level meter ---------------------------------------------------------------------------------------------------- */
+.meter { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 6px 8px; align-items: center; }
+.meter b { font: 700 12px/1 var(--font-ui); color: var(--ink-2); text-align: center; }
+.meter__track {
+  position: relative; height: 16px; border-radius: 8px; overflow: hidden;
+  background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--edge);
+}
+.meter__fill {
+  position: absolute; inset: 0; clip-path: inset(0 calc(100% - var(--v, 0) * 100%) 0 0);
+  /* -60 dB .. 0 dB: calm below -18, warm to -6, hot above */
+  background: linear-gradient(90deg, var(--calm) 0 70%, var(--fx-spark) 70% 90%, var(--danger) 90% 100%);
+  -webkit-mask: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 7px); mask: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 7px);
+}
+.meter__hold { position: absolute; top: 0; bottom: 0; left: calc(var(--h, 0) * 100%); width: 3px; margin-left: -3px; border-radius: 2px; background: var(--ink); opacity: var(--ho, 0); }
+:root[data-motion="full"] .meter__fill { transition: clip-path 60ms linear; }
+.meter__scale { grid-column: 2; position: relative; height: 14px; font: 600 10px/14px var(--font-ui); color: var(--ink-2); }
+.meter__scale span { position: absolute; transform: translateX(-50%); }
+.meter__scale span:first-child { transform: none; }
+.meter__scale span:last-child { transform: translateX(-100%); }
+.readout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.readout .wide { grid-column: 1 / -1; }
+.readout div { padding: 6px 8px; border-radius: 10px; background: var(--surface-2); min-width: 0; }
+.readout dt, .readout .k { display: block; font-size: 11px; line-height: 1.2; color: var(--ink-2); white-space: nowrap; }
+.readout .v { display: block; font: 700 18px/1.25 var(--font-ui); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.readout .v small { font-size: 11px; font-weight: 600; color: var(--ink-2); }
+.readout .is-hot .v { color: var(--danger); }
+.scope { display: block; width: 100%; height: 52px; margin-top: 10px; border-radius: 10px; background: var(--surface-2); }
+:root[data-motion="reduced"] .scope { display: none; }
+.last { margin: 8px 0 0; min-height: 18px; font-size: 13px; line-height: 18px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.last b { color: var(--ink); }
+
+/* the call to unlock */
+.wake {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 10px 12px; border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface)); box-shadow: inset 0 0 0 1px var(--accent);
+  font-weight: 700; font-size: 15px; line-height: 1.3;
+}
+.wake small { display: block; font-weight: 400; font-size: 12px; color: var(--ink-2); }
+.wake i { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font: 700 18px/1 var(--font-kai); font-style: normal; background: var(--accent); color: var(--accent-ink); }
+:root[data-motion="full"] .wake i { animation: wake-beat 1.2s var(--e-inout) infinite; }
+@keyframes wake-beat { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.14); } }
+
+/* ---- pads ----------------------------------------------------------------------------------------------------------- */
+.group + .group { margin-top: 14px; }
+.group > h2 { margin-bottom: 8px; }
+.group__tools { margin-left: auto; display: flex; align-items: center; gap: 8px; font: 400 12px/1.2 var(--font-ui); letter-spacing: 0; color: var(--ink-2); }
+.group__tools input[type="range"] { width: 130px; }
+.group__tools b { color: var(--ink); min-width: 52px; font-variant-numeric: tabular-nums; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.pad {
+  position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center; column-gap: 10px;
+  min-height: 60px; padding: 8px 10px; border-radius: var(--r-btn); border: 1px solid var(--edge);
+  background: var(--surface-2); color: var(--ink); text-align: left; cursor: pointer;
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--edge) 55%, #000);
+}
+.pad:active { transform: translateY(2px); box-shadow: 0 1px 0 color-mix(in srgb, var(--edge) 55%, #000); }
+.pad__glyph {
+  width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+  font: 700 22px/1 var(--font-kai); color: var(--blk-glyph);
+  background: radial-gradient(circle at 35% 30%, var(--blk-a), var(--blk-b) 60%, var(--blk-c));
+  box-shadow: inset 0 0 0 2px var(--blk-rim), 0 2px 0 var(--piece-edge);
+}
+.pad--warm .pad__glyph { color: var(--red-glyph); background: radial-gradient(circle at 35% 30%, var(--red-a), var(--red-b) 60%, var(--red-c)); box-shadow: inset 0 0 0 2px var(--red-rim), 0 2px 0 var(--piece-edge); }
+.pad__name { display: block; font-weight: 700; font-size: 15px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pad__code { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin-top: 2px; font: 600 11px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--ink-2); white-space: nowrap; }
+.pad__code em { font: 700 10px/14px var(--font-ui); font-style: normal; padding: 0 5px; border-radius: 7px; background: var(--accent); color: var(--accent-ink); }
+.pad__hint { display: block; margin-top: 2px; font-size: 12px; line-height: 1.35; color: var(--ink-2); }
+.pad.is-hit { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 20%, var(--surface-2)); }
+:root[data-motion="full"] .pad { transition: transform 60ms var(--e-out), box-shadow 60ms var(--e-out), background-color var(--t-2) var(--e-out); }
+:root[data-motion="full"] .pad.is-hit .pad__glyph { animation: pad-pop var(--t-3) var(--e-back); }
+@keyframes pad-pop { 0% { transform: scale(.82); } 100% { transform: scale(1); } }
+.pad.combo { grid-template-columns: minmax(0, 1fr); min-height: 60px; }
+.combo .pad__name { white-space: normal; }
+
+/* ---- log ------------------------------------------------------------------------------------------------------------ */
+.log { margin: 0; padding: 0; list-style: none; font: 600 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--ink-2); min-height: 58px; }
+.log li:first-child { color: var(--ink); }
+
+/* ---- layout ---------------------------------------------------------------------------------------------------------
+ * .desk > .top, .card--meter, .rack (music, switches, read-aloud, log), .pads
+ * The page scrolls and the meter stays in view (sticky); in landscape the meter is fixed above the rack instead. */
+.rack, .pads { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.pads { display: block; }
+.card--meter {
+  position: sticky; top: 8px; z-index: 3;
+  box-shadow: inset 0 0 0 1px var(--edge), 0 3px 0 color-mix(in srgb, var(--edge) 45%, #000), 0 14px 24px -10px #000a;
+}
+
+/* iPad portrait and other wide-but-tall screens: the cards sit two by two */
+@media (min-width: 600px) {
+  .rack { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .card--meter .meterwrap { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 0 16px; align-items: start; }
+  .card--meter .readout { margin-top: 0; }
+  .card--meter .scope { grid-column: 1 / -1; height: 40px; }
+}
+/* phones: one column; the meter is a compact strip */
+@media (max-width: 599.98px) {
+  .desk { gap: 10px; padding-left: max(10px, env(safe-area-inset-left)); padding-right: max(10px, env(safe-area-inset-right)); }
+  .brand h1 { font-size: 22px; }
+  .brand p { display: none; }
+  .seg button { padding: 0 9px; font-size: 14px; }
+  .card { padding: 10px 12px 12px; }
+  .card > h2, .group > h2 { flex-wrap: wrap; row-gap: 2px; }
+  .card--meter { top: 6px; padding-top: 10px; }
+  .card--meter > h2, .card--meter .scope, .card--meter #vSrcMax { display: none; }
+  .card--meter .readout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.9fr); gap: 6px; margin-top: 6px; }
+  .card--meter .readout .wide { grid-column: auto; }
+  .card--meter .readout div { padding: 4px 6px; min-height: 44px; display: flex; flex-direction: column; justify-content: center; }
+  .card--meter .readout .k { font-size: 10px; overflow: hidden; text-overflow: ellipsis; }
+  .card--meter .readout .v { font-size: 14px; }
+  .card--meter .last { margin-top: 6px; font-size: 12px; }
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pad { grid-template-columns: 34px minmax(0, 1fr); column-gap: 8px; padding: 8px; }
+  .pad__glyph { width: 34px; height: 34px; font-size: 19px; }
+  .pad__code { font-size: 10px; }
+  .group__tools input[type="range"] { width: 96px; }
+}
+/* iPad landscape and desktop: the rack on the left, the pads on the right, each scrolling by itself */
+@media (min-width: 900px) and (min-aspect-ratio: 21/20) {
+  html, body { height: 100%; overflow: hidden; }
+  .desk { height: 100dvh; grid-template-columns: 372px minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); gap: 12px 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+  .top { grid-column: 1 / -1; }
+  .card--meter { grid-column: 1; grid-row: 2; position: static; box-shadow: inset 0 0 0 1px var(--edge), 0 3px 0 color-mix(in srgb, var(--edge) 45%, #000); }
+  .rack { grid-column: 1; grid-row: 3; grid-template-columns: minmax(0, 1fr); }
+  .pads { grid-column: 2; grid-row: 2 / 4; }
+  .rack, .pads { overflow-y: auto; overscroll-behavior: contain; padding: 0 2px 8px 0; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
+  .card--meter .meterwrap { display: block; }
+  .card--meter .readout { margin-top: 10px; }
+  .card--meter .scope { height: 52px; }
+}
+
+/* ---- the measuring bench (?measure=1) -------------------------------------------------------------------------------- */
+.bench { display: flex; flex-direction: column; gap: 12px; min-width: 0; grid-column: 1 / -1; }
+.bench .card { flex: none; overflow-x: auto; }
+.bench .card > h2 { flex-wrap: wrap; }
+.bench .card > h2 small { flex-basis: 100%; line-height: 1.4; }
+.verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; font-weight: 700; }
+.verdict .stamp {
+  padding: 6px 14px; border-radius: 10px; font: 700 20px/1.2 var(--font-kai); letter-spacing: .1em;
+  color: var(--red-glyph); background: var(--shu); box-shadow: inset 0 0 0 2px var(--red-rim);
+}
+.verdict[data-ok="0"] .stamp { background: var(--danger); color: var(--danger-ink); box-shadow: none; }
+.verdict[data-ok="run"] .stamp { background: var(--surface-2); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--edge); }
+.verdict p { margin: 0; font-weight: 400; font-size: 13px; color: var(--ink-2); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.35; font-variant-numeric: tabular-nums; }
+th, td { padding: 5px 8px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--edge); }
+th { font-weight: 600; font-size: 12px; color: var(--ink-2); position: sticky; top: 0; background: var(--surface); }
+th:first-child, td:first-child { text-align: left; }
+table.code td:first-child { font: 600 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+td.ok { color: var(--calm); font-weight: 700; }
+td.bad { color: var(--danger); font-weight: 700; }
+td.dim { color: var(--ink-2); }
+@media (min-width: 900px) and (min-aspect-ratio: 21/20) { .bench { grid-row: 2 / 4; overflow-y: auto; padding: 0 2px 8px 0; } }
+</style>
+</head>
+<body>
+<div class="desk" id="desk">
+  <header class="top">
+    <div class="brand">
+      <div class="seal" aria-hidden="true">乐</div>
+      <div>
+        <h1>军乐台</h1>
+        <p>audio.js · speech.js 试音</p>
+      </div>
+    </div>
+    <div class="seg" id="theme" role="group" aria-label="主题">
+      <button type="button" data-theme-id="chibi" aria-pressed="true">赤壁</button>
+      <button type="button" data-theme-id="longzhong" aria-pressed="false">隆中</button>
+      <button type="button" data-theme-id="shachang" aria-pressed="false">沙场</button>
+    </div>
+    <div class="seg" id="motion" role="group" aria-label="动态效果">
+      <button type="button" data-motion-id="full" aria-pressed="false">动效</button>
+      <button type="button" data-motion-id="reduced" aria-pressed="true">精简</button>
+    </div>
+    <span class="pill" id="state" data-state="locked" role="status"><i></i><span>未解锁</span></span>
+    <button type="button" class="btn" id="mute" aria-pressed="false">静音</button>
+  </header>
+</div>
+
+<script type="module">
+import { createAudio, RECIPE_SOURCES, PRERENDERED, bedVoices } from '../src/ui/audio.js';
+import { createSpeech } from '../src/ui/speech.js';
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+/** Builds an element. */
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props)) {
+    if (key === 'class') node.className = value;
+    else if (key === 'text') node.textContent = value;
+    else if (key.startsWith('data-') || key.startsWith('aria-') || key === 'role' || key === 'for' || key === 'type' || key === 'min' || key === 'max' || key === 'step' || key === 'value' || key === 'id' || key === 'href' || key === 'colspan') node.setAttribute(key, String(value));
+    else node[key] = value;
+  }
+  for (const child of children.flat()) if (child != null) node.append(child);
+  return node;
+}
+
+const desk = $('#desk');
+const root = document.documentElement;
+const THEMES = ['chibi', 'longzhong', 'shachang'];
+const THEME_NAME = { chibi: '赤壁', longzhong: '隆中', shachang: '沙场' };
+const query = new URLSearchParams(location.search);
+
+// ---- theme and motion (shared by both modes) --------------------------------------------------------------------------
+const themeListeners = [];
+function setTheme(id) {
+  root.dataset.theme = id;
+  for (const b of $$('#theme button')) b.setAttribute('aria-pressed', String(b.dataset.themeId === id));
+  const meta = $('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', getComputedStyle(root).getPropertyValue('--page').trim());
+  for (const cb of themeListeners) cb(id);
+}
+function setMotion(id) {
+  root.dataset.motion = id;
+  for (const b of $$('#motion button')) b.setAttribute('aria-pressed', String(b.dataset.motionId === id));
+}
+$('#theme').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setTheme(b.dataset.themeId); });
+$('#motion').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setMotion(b.dataset.motionId); });
+setMotion(query.get('motion') === 'reduced' || matchMedia('(prefers-reduced-motion: reduce)').matches ? 'reduced' : 'full');
+if (THEMES.includes(query.get('theme'))) setTheme(query.get('theme'));
+
+const dB = x => (x > 0 ? 20 * Math.log10(x) : -Infinity);
+const fmtDb = x => (Number.isFinite(x) ? x.toFixed(1) : '−∞').replace('-', '−');
+
+if (query.has('measure')) runBench(); else runDesk();
+
+// =======================================================================================================================
+// The sound desk
+// =======================================================================================================================
+
+function runDesk() {
+  // ---- a tap on the real Web Audio API: counts contexts and live sources, and meters the output --------------------
+  // audio.js is used exactly as the game uses it; the page only listens in from outside.
+  const probe = {
+    contexts: 0, ctorMs: 0, ctx: null, split: null, left: null, right: null,
+    bufL: new Float32Array(2048), bufR: new Float32Array(2048),
+    tag: 'music', sources: new Map(), maxSfx: 0, maxMusic: 0, peakDb: -Infinity, maxDb: -Infinity,
+  };
+  const NativeContext = window.AudioContext || window.webkitAudioContext;
+  if (NativeContext) {
+    const nativeConnect = AudioNode.prototype.connect;
+    class TapContext extends NativeContext {
+      constructor(...args) {
+        const t = performance.now();
+        super(...args);
+        probe.ctorMs = performance.now() - t;             // the browser's own share of the first tap
+        probe.contexts++;
+        probe.ctx = this;
+        probe.sources.clear();
+        probe.split = this.createChannelSplitter(2);
+        probe.left = this.createAnalyser();
+        probe.right = this.createAnalyser();
+        probe.left.fftSize = probe.right.fftSize = 2048;
+        nativeConnect.call(probe.split, probe.left, 0);
+        nativeConnect.call(probe.split, probe.right, 1);
+      }
+    }
+    window.AudioContext = TapContext;
+    if (window.webkitAudioContext) window.webkitAudioContext = TapContext;
+    // whatever feeds the destination also feeds the meter
+    AudioNode.prototype.connect = function (...args) {
+      const result = nativeConnect.apply(this, args);
+      if (probe.ctx && args[0] === probe.ctx.destination && probe.split) nativeConnect.call(this, probe.split);
+      return result;
+    };
+    const track = proto => {
+      const nativeStart = proto.start;
+      proto.start = function (...args) {
+        if (this.context === probe.ctx) {
+          const rec = { s: typeof args[0] === 'number' ? args[0] : this.context.currentTime, e: Infinity, tag: probe.tag };
+          probe.sources.set(this, rec);
+          this.addEventListener('ended', () => probe.sources.delete(this), { once: true });
+        }
+        return nativeStart.apply(this, args);
+      };
+    };
+    track(AudioScheduledSourceNode.prototype);
+    if (Object.hasOwn(AudioBufferSourceNode.prototype, 'start')) track(AudioBufferSourceNode.prototype);
+    const nativeStop = AudioScheduledSourceNode.prototype.stop;
+    AudioScheduledSourceNode.prototype.stop = function (...args) {
+      const rec = probe.sources.get(this);
+      if (rec) rec.e = typeof args[0] === 'number' ? args[0] : this.context.currentTime;
+      return nativeStop.apply(this, args);
+    };
+  }
+  /** Source nodes alive right now, by kind. */
+  function liveSources() {
+    const out = { sfx: 0, music: 0 };
+    if (!probe.ctx) return out;
+    const now = probe.ctx.currentTime;
+    for (const [node, rec] of probe.sources) {
+      if (rec.e < now - 1) probe.sources.delete(node);
+      else if (rec.s <= now && now < rec.e) out[rec.tag]++;
+    }
+    probe.maxSfx = Math.max(probe.maxSfx, out.sfx);
+    probe.maxMusic = Math.max(probe.maxMusic, out.music);
+    return out;
+  }
+
+  // ---- the engine -----------------------------------------------------------------------------------------------------
+  let audio = createAudio();
+  let speech = createSpeech({ audio });
+  const settings = { sfx: true, music: true, volume: 1 };
+  const params = { ms: 300, when: 0, gain: 1, step: 0 };
+  let musicOn = false;
+  let tension = 0.15;
+
+  // like the stage: every gesture unlocks (cheap when already running)
+  /**
+   * The gesture that created the context of this engine: when it came, how long unlock() kept its handler, and how much
+   * of that was the browser building the AudioContext (M-121 bounds what is left: about 25 ms).
+   */
+  let firstTouch = null;
+  const unlockNow = () => {
+    const contexts = probe.contexts;
+    const at = performance.now();
+    audio.unlock().then(refreshState);
+    if (probe.contexts > contexts) firstTouch = { at, ms: performance.now() - at, ctor: probe.ctorMs };
+  };
+  window.addEventListener('pointerdown', unlockNow, true);
+  window.addEventListener('keydown', unlockNow, true);
+
+  /**
+   * Resolves as soon as the engine is unlocked. It does not wait for the stingers to be rendered, which is what the
+   * promise of unlock() does: the sound of the first tap is due when the context runs, a stinger live (M-121).
+   */
+  const unlockedSoon = () => new Promise(resolve => {
+    const done = () => { window.removeEventListener('audio:unlocked', done); resolve(); };
+    window.addEventListener('audio:unlocked', done);
+    audio.unlock().then(done);
+  });
+
+  /** Plays an effect from a pad: on the very first tap it waits for the unlock that the same tap started. */
+  async function hit(name, opts) {
+    if (!audio.unlocked) await unlockedSoon();
+    const o = { ...opts };
+    if (params.when > 0 && o.when === undefined) o.when = params.when;
+    if (params.gain !== 1) o.gain = params.gain;
+    probe.tag = 'sfx';
+    try { audio.play(name, o); } finally { probe.tag = 'music'; }
+    const shown = Object.entries(o).map(([k, v]) => `${k}: ${typeof v === 'number' ? +v.toFixed(2) : v}`).join(', ');
+    lastEl.replaceChildren('刚才 ', el('b', { text: name }), shown ? ` { ${shown} }` : '');
+  }
+
+  // ---- markup ---------------------------------------------------------------------------------------------------------
+  const sw = (id, label, hint, pressed = false) => el('button', { type: 'button', class: 'sw', id, 'aria-pressed': String(pressed) },
+    el('span', {}, label, hint ? el('small', { text: hint }) : null));
+  const toggle = (button, fn) => button.addEventListener('click', () => {
+    const on = button.getAttribute('aria-pressed') !== 'true';
+    button.setAttribute('aria-pressed', String(on));
+    fn(on);
+  });
+  const range = (id, min, max, step, value) => {
+    const input = el('input', { type: 'range', id, min, max, step, value });
+    const paint = () => input.style.setProperty('--fill', `${((input.value - min) / (max - min)) * 100}%`);
+    input.addEventListener('input', paint);
+    paint();
+    return input;
+  };
+
+  // meter card
+  const lastEl = el('p', { class: 'last', id: 'last', text: '点一个音，听听看。' });
+  const wake = el('div', { class: 'wake', id: 'wake' }, el('i', { text: '鼓' }), el('span', {}, '轻点任意处，擂鼓开场', el('small', { text: '浏览器要等到第一次触碰才许出声 · 此刻 AudioContext 0 个' })));
+  const scale = el('div', { class: 'meter__scale' }, [-60, -48, -36, -24, -12, -6, 0].map(v => el('span', { text: String(v).replace('-', '−'), style: `left:${((v + 60) / 60) * 100}%` })));
+  const meterCard = el('section', { class: 'card card--meter' },
+    el('h2', {}, '总线电平', el('small', { text: '压限器与软限幅之后 · dBFS' })),
+    wake,
+    el('div', { class: 'meterwrap' },
+      el('div', { class: 'meter' },
+        el('b', { text: '左' }), el('div', { class: 'meter__track' }, el('div', { class: 'meter__fill', id: 'mL' }), el('div', { class: 'meter__hold', id: 'hL' })),
+        el('b', { text: '右' }), el('div', { class: 'meter__track' }, el('div', { class: 'meter__fill', id: 'mR' }), el('div', { class: 'meter__hold', id: 'hR' })),
+        scale),
+      el('div', { class: 'readout' },
+        el('div', { id: 'boxPeak' }, el('span', { class: 'k', text: '峰值' }), el('span', { class: 'v', id: 'vPeak', text: '−∞' })),
+        el('div', { id: 'boxMax', role: 'button', title: '点一下清零' }, el('span', { class: 'k', text: '最高 · 清零' }), el('span', { class: 'v', id: 'vMax', text: '−∞' })),
+        el('div', { class: 'wide' }, el('span', { class: 'k', text: '声源（上限 48 / 20）' }), el('span', { class: 'v', id: 'vSrc' }, '效果 0 · 音乐 0', el('small', { id: 'vSrcMax', text: '  最多 0 / 0' })))),
+      el('canvas', { class: 'scope', id: 'scope', width: 600, height: 104 })),
+    lastEl);
+
+  // music card
+  const tensionInput = range('tension', 0, 1, 0.01, tension);
+  const tensionInfo = el('b', { id: 'tensionInfo' });
+  const anchors = [['开局', 0.15], ['接触', 0.4], ['攻势', 0.6], ['将军', 0.8], ['杀着', 0.95]];
+  const musicBtn = el('button', { type: 'button', class: 'btn btn--primary', id: 'musicToggle', text: '奏乐' });
+  const sceneSeg = el('div', { class: 'seg seg--wide', id: 'scene', role: 'group', 'aria-label': '场景' },
+    [['game', '对局'], ['victory', '大捷'], ['defeat', '惜败']].map(([id, label], i) => el('button', { type: 'button', 'data-scene': id, 'aria-pressed': String(i === 0), text: label })));
+  const paletteSeg = el('div', { class: 'seg seg--wide', id: 'palette', role: 'group', 'aria-label': '音色' },
+    THEMES.map((id, i) => el('button', { type: 'button', 'data-palette': id, 'aria-pressed': String(i === 0), text: THEME_NAME[id] })));
+  const musicCard = el('section', { class: 'card' },
+    el('h2', {}, '行军乐', el('small', { text: '随局势起伏的琴、鼓、号' })),
+    el('div', { class: 'row' }, musicBtn, el('button', { type: 'button', class: 'btn', id: 'musicFade', text: '渐收 2 秒' })),
+    el('div', { class: 'field' }, el('label', { for: 'tension' }, '张力 setTension', tensionInfo), tensionInput),
+    el('div', { class: 'seg seg--wide anchors', id: 'anchors', role: 'group', 'aria-label': '局势' }, anchors.map(([label, v]) => el('button', { type: 'button', 'data-tension': v, 'aria-pressed': 'false', text: label }))),
+    el('div', { class: 'field' }, el('label', {}, '场景 music.setScene'), sceneSeg),
+    el('div', { class: 'field' }, el('label', {}, '音色 setPalette（随主题）'), paletteSeg),
+    sw('suspense', '悬念', '试走险着时，音乐闷到 1.6 kHz'),
+    sw('duck', '压低 10 dB', '军师朗读时，音乐让一让'));
+
+  // switches card
+  const volumeInput = range('volume', 0, 1, 0.01, 1);
+  const volumeInfo = el('b', { text: '100%' });
+  const switchCard = el('section', { class: 'card' },
+    el('h2', {}, '总开关', el('small', { text: 'applySettings · setMuted · setHidden' })),
+    sw('sfx', '音效', null, true),
+    sw('music', '音乐', null, true),
+    el('div', { class: 'field' }, el('label', { for: 'volume' }, '音量（按 v² 作用于总线）', volumeInfo), volumeInput),
+    sw('hidden', '切到后台', '停乐、150 毫秒收声、挂起'),
+    el('div', { class: 'row' },
+      el('button', { type: 'button', class: 'btn', id: 'book', text: '预约六响' }),
+      el('button', { type: 'button', class: 'btn', id: 'cancel', text: '取消预约' }),
+      el('button', { type: 'button', class: 'btn btn--danger', id: 'rebuild', text: '拆台重搭' })),
+    el('p', { class: 'note', text: '预约六响：五声落子与一声炮响排在 0.6 – 2.6 秒后；取消预约只撤掉还没响的。' }));
+
+  // speech card
+  const speakDot = el('span', { class: 'pill', id: 'speaking', 'data-state': 'locked' }, el('i'), el('span', { text: '安静' }));
+  const speechCard = el('section', { class: 'card' },
+    el('h2', {}, '军师朗读', el('small', { text: speech.supported ? 'speechSynthesis · 默认关闭' : '此浏览器不支持朗读' })),
+    sw('readAloud', '朗读', '第一位 zh-CN 嗓音 · 语速 1.05'),
+    el('div', { class: 'row' },
+      el('button', { type: 'button', class: 'btn', id: 'say1', text: '念一句' }),
+      el('button', { type: 'button', class: 'btn', id: 'say3', text: '念三句' }),
+      el('button', { type: 'button', class: 'btn', id: 'hush', text: '打断' }),
+      speakDot));
+
+  // log card
+  const logEl = el('ul', { class: 'log', id: 'log' });
+  const logCard = el('section', { class: 'card' }, el('h2', {}, '动静', el('small', { text: 'window 事件 audio:unlocked · audio:state' })), logEl,
+    el('p', { class: 'note' }, el('a', { href: '?measure=1', class: 'btn', style: 'display:inline-flex;align-items:center;text-decoration:none' }, '去测量台 →')));
+
+  const rack = el('aside', { class: 'rack' }, musicCard, switchCard, speechCard, logCard);
+
+  // pads
+  const GROUPS = [
+    { title: '界面', hint: '轻、短、不抢戏', pads: [
+      ['ui.tap', '点', '轻点'], ['ui.open', '开', '展开'], ['ui.close', '合', '收起'],
+      ['chat.send', '问', '发问'], ['chat.receive', '答', '军师开口'], ['chat.tick', '字', '打字声 ×12', { burst: 12 }]] },
+    { title: '选子与试走', hint: '试走是悬着的音程，落子才回到主音', pads: [
+      ['select', '选', '选子'], ['deselect', '放', '放下'], ['illegal', '禁', '不能走'], ['place', '啪', '落子'],
+      ['trial.lift', '试', '提子试走', { step: true }], ['trial.retract', '回', '换一步'], ['trial.confirm', '定', '确定落子']] },
+    { title: '行棋', hint: '子越重，声越沉', tool: 'ms', pads: [
+      ['move.rook', '车', '车 · 冲锋', { ms: true, warm: true }], ['move.horse', '马', '马 · 腾跃', { ms: true, warm: true }], ['move.cannon', '炮', '炮 · 滚动', { ms: true, warm: true }],
+      ['move.elephant', '相', '相 · 踏步', { ms: true, warm: true }], ['move.advisor', '仕', '仕 · 闪身', { ms: true, warm: true }], ['move.king', '帅', '帅 · 稳步', { ms: true, warm: true }],
+      ['move.pawn', '兵', '兵 · 小跳', { ms: true, warm: true }], ['river', '河', '渡河']] },
+    { title: '吃子', hint: 'capture 的 scale = 被吃的子有多大', pads: [
+      ['capture', '卒', '吃卒 ×0.6', { opts: { scale: 0.6 } }], ['capture', '马', '吃马 ×1.0', { opts: { scale: 1 } }],
+      ['capture', '车', '吃车 ×1.25', { opts: { scale: 1.25 } }], ['capture', '将', '擒王 ×1.4', { opts: { scale: 1.4 } }],
+      ['cannon.fire', '火', '点火'], ['blast', '轰', '炮响']] },
+    { title: '将军与终局', hint: '锣、鼓、筝', pads: [
+      ['check.give', '将', '将军！', { warm: true }], ['check.take', '危', '被将军'], ['check.soft', '轻', '连将（轻）'],
+      ['win', '胜', '绝杀', { warm: true }], ['lose', '负', '惜败'], ['draw', '和', '握手言和'], ['deal', '摆', '摆棋开局', { warm: true }], ['undo', '悔', '悔棋']] },
+    { title: '锦囊与军师', hint: '提示与夸奖', pads: [
+      ['hint.1', '一', '锦囊一'], ['hint.2', '二', '锦囊二'], ['hint.3', '三', '锦囊三'], ['fan.sweep', '扇', '羽扇一挥'],
+      ['stamp', '印', '招式印', { warm: true }], ['praise.good', '好', '好棋'], ['praise.great', '妙', '妙手'], ['praise.brilliant', '绝', '神来之笔', { warm: true }],
+      ['warn', '嗯', '且慢……'], ['arrow', '箭', '箭头'], ['turn.yours', '请', '该你了']] },
+  ];
+  const COMBOS = [
+    ['炮击', 'cannon.fire，0.2 秒后 blast：一帧不差', () => { hit('cannon.fire'); hit('blast', { when: 0.2 }); }],
+    ['炮击将军', '最响的一刻：炮、落子、将军叠在一起', () => { hit('cannon.fire'); hit('blast', { when: 0.2 }); hit('place', { when: 0.2 }); hit('check.give', { when: 0.25 }); }],
+    ['绝杀', 'win，然后场景转「大捷」', () => { hit('win'); setScene('victory'); }],
+    ['惜败', 'lose，然后场景转「惜败」', () => { hit('lose'); setScene('defeat'); }],
+    ['主公英明！', 'stamp + praise.brilliant', () => { hit('stamp'); hit('praise.brilliant', { when: 0.15 }); }],
+    ['锦囊三', 'fan.sweep + hint.3', () => { hit('fan.sweep'); hit('hint.3'); }],
+    ['五雷齐发', '五个最响的音落在同一瞬：软限幅收住，峰值不到 0 dBFS', () => {
+      hit('win'); hit('capture', { scale: 1.4 }); hit('move.king', { ms: 0 }); hit('blast'); hit('trial.confirm');
+    }],
+    ['连珠四十响', '一口气四十个音：声源封顶 48，先让出打字声', () => {
+      const names = Object.keys(RECIPE_SOURCES).filter(n => !['win', 'lose', 'deal'].includes(n));
+      names.slice(0, 40).forEach(n => hit(n));
+    }],
+  ];
+
+  const msInput = range('ms', 120, 600, 10, params.ms);
+  const msInfo = el('b', { text: '300 ms' });
+  const whenInput = range('when', 0, 1, 0.05, 0);
+  const whenInfo = el('b', { text: '立刻' });
+  const gainInput = range('gain', 0.2, 1.5, 0.05, 1);
+  const gainInfo = el('b', { text: '×1.00' });
+
+  const padEl = ([name, glyph, label, extra = {}]) => {
+    const pre = PRERENDERED.includes(name);
+    const button = el('button', { type: 'button', class: `pad${extra.warm ? ' pad--warm' : ''}`, 'data-sfx': name, title: name },
+      el('span', { class: 'pad__glyph', text: glyph }),
+      el('span', {},
+        el('span', { class: 'pad__name', text: label }),
+        el('span', { class: 'pad__code' }, name, pre ? el('em', { text: '预制' }) : null, el('span', { text: `${RECIPE_SOURCES[name]} 源` }))));
+    button.addEventListener('click', () => {
+      flash(button);
+      if (extra.burst) {
+        for (let i = 0; i < extra.burst; i++) setTimeout(() => hit(name), i * 75);
+      } else if (extra.step) {
+        hit(name, { step: params.step });
+        params.step++;
+        $('.pad__name', button).textContent = `试走 · 第 ${params.step} 步`;
+      } else if (extra.ms) {
+        hit(name, { ms: params.ms });
+      } else {
+        hit(name, extra.opts);
+      }
+    });
+    return button;
+  };
+  function flash(button) {
+    button.classList.remove('is-hit');
+    void button.offsetWidth;
+    button.classList.add('is-hit');
+    clearTimeout(button._t);
+    button._t = setTimeout(() => button.classList.remove('is-hit'), 260);
+  }
+
+  const pads = el('main', { class: 'pads' },
+    el('section', { class: 'card group' },
+      el('h2', {}, '手感', el('small', { text: 'play(name, { when, gain })' })),
+      el('div', { class: 'row', style: 'gap:0 28px' },
+        el('div', { class: 'field', style: 'flex:1 1 180px;margin:0' }, el('label', { for: 'when' }, '延后 when', whenInfo), whenInput),
+        el('div', { class: 'field', style: 'flex:1 1 180px;margin:0' }, el('label', { for: 'gain' }, '力度 gain', gainInfo), gainInput))),
+    GROUPS.map(group => el('section', { class: 'card group' },
+      el('h2', {}, group.title, el('small', { text: group.hint }),
+        group.tool === 'ms' ? el('span', { class: 'group__tools' }, '行程', msInput, msInfo) : null),
+      el('div', { class: 'grid' }, group.pads.map(padEl)))),
+    el('section', { class: 'card group' },
+      el('h2', {}, '连招', el('small', { text: '棋盘上真会同时响起的组合' })),
+      el('div', { class: 'grid' }, COMBOS.map(([label, hint, fn]) => {
+        const button = el('button', { type: 'button', class: 'pad combo pad--warm', 'data-combo': label },
+          el('span', {}, el('span', { class: 'pad__name', text: label }), el('span', { class: 'pad__hint', text: hint })));
+        button.addEventListener('click', () => { flash(button); fn(); });
+        return button;
+      }))));
+
+  desk.append(meterCard, rack, pads);
+
+  // ---- wiring ---------------------------------------------------------------------------------------------------------
+  const stateEl = $('#state');
+  const STATE_TEXT = { locked: '未解锁', running: '运行中', suspended: '已挂起', muted: '已静音' };
+  let lastState = 'locked';
+  function refreshState() {
+    const state = !audio.unlocked ? (muted ? 'muted' : 'locked') : lastState === 'locked' ? 'running' : lastState;
+    stateEl.dataset.state = state;
+    stateEl.lastElementChild.textContent = STATE_TEXT[state];
+    wake.hidden = audio.unlocked;
+    if (!audio.unlocked) wake.querySelector('small').textContent = `浏览器要等到第一次触碰才许出声 · 此刻 AudioContext ${probe.contexts} 个`;
+  }
+  const log = (text, ...more) => {
+    const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    logEl.prepend(el('li', {}, `${time}  ${text}`, ...more));
+    while (logEl.children.length > 4) logEl.lastElementChild.remove();
+  };
+  window.addEventListener('audio:unlocked', () => {
+    lastState = 'running';
+    log('audio:unlocked');
+    refreshState();
+    // What the first tap cost, to be read on the device itself (CONTRACT-NOTES M-121). unlock() resolves when the six
+    // stingers are rendered. It is asked in a microtask: this event can fire inside the unlock() of the gesture, before
+    // that call has returned and before the engine has started the renders.
+    const engine = audio;
+    Promise.resolve().then(() => {
+      const touch = firstTouch;
+      firstTouch = null;
+      if (touch) engine.unlock().then(ok => {
+        if (ok && engine === audio) log(`首次触碰  unlock() ${touch.ms.toFixed(1)} 毫秒 · `,
+          el('span', { style: 'white-space:nowrap', text: `其中建上下文 ${touch.ctor.toFixed(1)} · 预制音效 ${Math.round(performance.now() - touch.at)} 毫秒后就绪` }));
+      });
+    });
+  });
+  window.addEventListener('audio:state', e => { lastState = e.detail.state; log(`audio:state  ${e.detail.state}`); refreshState(); });
+
+  let muted = false;
+  const muteBtn = $('#mute');
+  function setMuted(on) {
+    muted = on;
+    muteBtn.setAttribute('aria-pressed', String(on));
+    muteBtn.textContent = on ? '已静音' : '静音';
+    if (on) speech.cancel();
+    audio.setMuted(on);
+    refreshState();
+  }
+  muteBtn.addEventListener('click', () => setMuted(!muted));
+
+  // music
+  function paintTension() {
+    const bpm = 66 + 30 * tension;
+    for (const b of $$('#anchors button', musicCard)) b.setAttribute('aria-pressed', String(Math.abs(Number(b.dataset.tension) - tension) < 0.005));
+    tensionInfo.textContent = `${tension.toFixed(2)} · ${bpm.toFixed(0)} 拍 · ${tension >= 0.55 ? '羽调' : '宫调'} · 至多 ${bedVoices(tension)} 源`;
+  }
+  function setTension(x) {
+    tension = x;
+    tensionInput.value = String(x);
+    tensionInput.dispatchEvent(new Event('input'));
+  }
+  tensionInput.addEventListener('input', () => { tension = Number(tensionInput.value); audio.setTension(tension); paintTension(); });
+  paintTension();
+  $('#anchors', musicCard).addEventListener('click', e => { const b = e.target.closest('button'); if (b) setTension(Number(b.dataset.tension)); });
+  function setMusic(on, fadeMs) {
+    musicOn = on;
+    musicBtn.textContent = on ? '停乐' : '奏乐';
+    if (on) audio.music.start(); else audio.music.stop(fadeMs);
+  }
+  musicBtn.addEventListener('click', async () => { if (!audio.unlocked) await audio.unlock(); setMusic(!musicOn); });
+  $('#musicFade', musicCard).addEventListener('click', () => setMusic(false, 2000));
+  function setScene(id) {
+    for (const b of $$('button', sceneSeg)) b.setAttribute('aria-pressed', String(b.dataset.scene === id));
+    audio.music.setScene(id);
+  }
+  sceneSeg.addEventListener('click', e => { const b = e.target.closest('button'); if (b) setScene(b.dataset.scene); });
+  function setPalette(id) {
+    for (const b of $$('button', paletteSeg)) b.setAttribute('aria-pressed', String(b.dataset.palette === id));
+    audio.setPalette(id);
+  }
+  paletteSeg.addEventListener('click', e => { const b = e.target.closest('button'); if (b) setPalette(b.dataset.palette); });
+  themeListeners.push(setPalette);
+  toggle($('#suspense', musicCard), on => audio.setSuspense(on));
+  toggle($('#duck', musicCard), on => audio.duck(10, on));
+
+  // switches
+  const apply = () => audio.applySettings(settings);
+  toggle($('#sfx', switchCard), on => { settings.sfx = on; apply(); });
+  toggle($('#music', switchCard), on => { settings.music = on; apply(); });
+  volumeInput.addEventListener('input', () => { settings.volume = Number(volumeInput.value); volumeInfo.textContent = `${Math.round(settings.volume * 100)}%`; apply(); });
+  toggle($('#hidden', switchCard), on => { if (on) speech.cancel(); audio.setHidden(on); });
+  document.addEventListener('visibilitychange', () => audio.setHidden(document.hidden || $('#hidden', switchCard).getAttribute('aria-pressed') === 'true'));
+  $('#book', switchCard).addEventListener('click', async () => {
+    if (!audio.unlocked) await audio.unlock();
+    probe.tag = 'sfx';
+    try {
+      [0.6, 1.0, 1.4, 1.8, 2.2].forEach((when, i) => audio.play(i % 2 ? 'place' : 'move.pawn', { when, ms: 0 }));
+      audio.play('blast', { when: 2.6 });
+    } finally { probe.tag = 'music'; }
+    lastEl.replaceChildren('已预约 ', el('b', { text: '六响' }), '（0.6 – 2.6 秒后）');
+  });
+  $('#cancel', switchCard).addEventListener('click', () => { audio.cancelScheduled(); lastEl.replaceChildren(el('b', { text: 'cancelScheduled()' }), ' · 还没响的都撤了'); });
+  $('#rebuild', switchCard).addEventListener('click', () => {
+    speech.cancel();
+    audio.dispose();
+    audio = createAudio();
+    speech = createSpeech({ audio });
+    speech.onSpeaking(onSpeaking);
+    speech.setEnabled($('#readAloud', speechCard).getAttribute('aria-pressed') === 'true');
+    audio.setPalette(root.dataset.theme);
+    audio.applySettings(settings);
+    audio.setTension(tension);
+    audio.setMuted(muted);
+    musicOn = false;
+    musicBtn.textContent = '奏乐';
+    setScene('game');
+    lastState = 'locked';
+    log('dispose() · 新引擎，等下一次触碰');
+    refreshState();
+  });
+
+  // hand-feel sliders
+  msInput.addEventListener('input', () => { params.ms = Number(msInput.value); msInfo.textContent = `${params.ms} ms`; });
+  whenInput.addEventListener('input', () => { params.when = Number(whenInput.value); whenInfo.textContent = params.when > 0 ? `${params.when.toFixed(2)} 秒后` : '立刻'; });
+  gainInput.addEventListener('input', () => { params.gain = Number(gainInput.value); gainInfo.textContent = `×${params.gain.toFixed(2)}`; });
+
+  // speech
+  const LINES = ['小主公，这一步走得稳。', '先看看对面的炮，它正瞄着你的马。', '把车开出来，亮替你压阵。'];
+  let lineNo = 0;
+  function onSpeaking(on) {
+    speakDot.dataset.state = on ? 'running' : 'locked';
+    speakDot.lastElementChild.textContent = on ? '正在朗读' : '安静';
+    log(`speech  ${on ? '开口' : '说完'}`);
+  }
+  speech.onSpeaking(onSpeaking);
+  toggle($('#readAloud', speechCard), on => speech.setEnabled(on));
+  /** Why a line stays unread, for the person at the desk (the engine itself just stays quiet). */
+  function whyQuiet() {
+    if (!speech.supported) return '此浏览器不支持朗读。';
+    if ($('#readAloud', speechCard).getAttribute('aria-pressed') !== 'true') return '先打开「朗读」开关。';
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length && !voices.some(v => /^(zh|cmn)/i.test(v.lang))) return '这台设备没有中文嗓音：军师不念，音乐也不让路。';
+    return '';
+  }
+  function say(lines) {
+    const id = `line-${++lineNo}`;
+    for (const text of lines) speech.feed(id, text);
+    speech.flush(id);
+    const why = whyQuiet();
+    if (why) lastEl.replaceChildren(el('b', { text: '朗读 ' }), why);
+  }
+  $('#say1', speechCard).addEventListener('click', () => say([LINES[lineNo % LINES.length]]));
+  $('#say3', speechCard).addEventListener('click', () => say(LINES));
+  $('#hush', speechCard).addEventListener('click', () => speech.cancel());
+
+  // ---- the meter ------------------------------------------------------------------------------------------------------
+  const mL = $('#mL'), mR = $('#mR'), hL = $('#hL'), hR = $('#hR');
+  const vPeak = $('#vPeak'), vMax = $('#vMax'), vSrc = $('#vSrc'), vSrcMax = $('#vSrcMax'), boxPeak = $('#boxPeak'), boxMax = $('#boxMax');
+  const scope = $('#scope');
+  const pen = scope.getContext('2d');
+  let scopeColor = '#fff';
+  const readColor = () => { scopeColor = getComputedStyle(root).getPropertyValue('--accent').trim() || '#fff'; };
+  themeListeners.push(readColor);
+  readColor();
+  const hold = { l: 0, r: 0, tl: 0, tr: 0 };
+  const pos = db => Math.min(1, Math.max(0, (db + 60) / 60));
+  boxMax.addEventListener('click', () => { probe.maxDb = -Infinity; probe.maxSfx = 0; probe.maxMusic = 0; vMax.textContent = '−∞'; boxMax.classList.remove('is-hot'); });
+  let lastPaint = 0;
+  let seenL = 0, seenR = 0;                      // the loudest sample since the last paint
+  function frame(now) {
+    requestAnimationFrame(frame);
+    // The output is read on every frame: 2048 samples span more than two frames, so no peak slips through.
+    // With reduced motion the meter is only painted four times a second; it still shows the loudest sample between.
+    if (probe.left && probe.ctx && probe.ctx.state === 'running') {
+      probe.left.getFloatTimeDomainData(probe.bufL);
+      probe.right.getFloatTimeDomainData(probe.bufR);
+      for (let i = 0; i < probe.bufL.length; i++) {
+        const a = Math.abs(probe.bufL[i]), b = Math.abs(probe.bufR[i]);
+        if (a > seenL) seenL = a;
+        if (b > seenR) seenR = b;
+      }
+    }
+    const reduced = root.dataset.motion === 'reduced';
+    if (reduced && now - lastPaint < 240) return;
+    const dt = Math.min(0.5, (now - lastPaint) / 1000);
+    lastPaint = now;
+    const pl = seenL, pr = seenR;
+    seenL = 0;
+    seenR = 0;
+    const dl = dB(pl), dr = dB(pr), peak = Math.max(dl, dr);
+    probe.peakDb = peak;
+    if (peak > probe.maxDb) probe.maxDb = peak;
+    mL.style.setProperty('--v', pos(dl).toFixed(3));
+    mR.style.setProperty('--v', pos(dr).toFixed(3));
+    // peak hold: stays 0.8 s, then falls 20 dB per second
+    for (const [key, tkey, value, node] of [['l', 'tl', pos(dl), hL], ['r', 'tr', pos(dr), hR]]) {
+      if (value >= hold[key]) { hold[key] = value; hold[tkey] = now; }
+      else if (now - hold[tkey] > 800) hold[key] = Math.max(value, hold[key] - dt * (20 / 60));
+      node.style.setProperty('--h', hold[key].toFixed(3));
+      node.style.setProperty('--ho', hold[key] > 0.004 ? '1' : '0');
+    }
+    vPeak.textContent = fmtDb(peak);
+    boxPeak.classList.toggle('is-hot', peak >= -1);
+    vMax.textContent = fmtDb(probe.maxDb);
+    boxMax.classList.toggle('is-hot', probe.maxDb >= 0);
+    const live = liveSources();
+    const srcText = `效果 ${live.sfx} · 音乐 ${live.music}`;
+    if (vSrc.firstChild.nodeValue !== srcText) vSrc.firstChild.nodeValue = srcText;
+    const maxText = `  最多 ${probe.maxSfx} / ${probe.maxMusic}`;
+    if (vSrcMax.textContent !== maxText) vSrcMax.textContent = maxText;
+    if (!reduced) {
+      const w = scope.width, h = scope.height;
+      pen.clearRect(0, 0, w, h);
+      pen.lineWidth = 3;
+      pen.lineJoin = 'round';
+      pen.strokeStyle = scopeColor;
+      pen.beginPath();
+      const n = probe.bufL.length;
+      for (let x = 0; x <= w; x += 2) {
+        const v = pl > 0 ? probe.bufL[Math.floor((x / w) * (n - 1))] : 0;
+        const y = h / 2 - v * (h / 2 - 4) * 1.6;
+        if (x === 0) pen.moveTo(x, y); else pen.lineTo(x, y);
+      }
+      pen.stroke();
+    }
+  }
+  requestAnimationFrame(frame);
+  refreshState();
+
+  // for the checks that drive this page (tools/shot.mjs steps)
+  window.__desk = {
+    audio: () => audio,
+    speech: () => speech,
+    contexts: () => probe.contexts,
+    contextState: () => (probe.ctx ? probe.ctx.state : 'none'),
+    live: liveSources,
+    max: () => ({ sfx: probe.maxSfx, music: probe.maxMusic }),
+    peakDb: () => probe.peakDb,
+    maxDb: () => probe.maxDb,
+    resetMax: () => { probe.maxDb = -Infinity; probe.maxSfx = 0; probe.maxMusic = 0; },
+    time: () => (probe.ctx ? probe.ctx.currentTime : 0),
+    pending: () => { const now = probe.ctx ? probe.ctx.currentTime : 0; let n = 0; for (const rec of probe.sources.values()) if (rec.s > now && rec.e > rec.s) n++; return n; },
+  };
+}
+
+// =======================================================================================================================
+// The measuring bench: every recipe through OfflineAudioContext
+// =======================================================================================================================
+
+async function runBench() {
+  document.title = '弈间 · 测量台 (audio.js)';
+  $('#state').hidden = true;
+  $('#mute').hidden = true;
+  $('.brand h1').textContent = '测量台';
+  $('.brand p').textContent = 'OfflineAudioContext · 44.1 kHz · 整条总线';
+
+  const SR = 44100;
+  // The contract's table (SPEC §10.5.3): [peak dBFS, length ms]. Three rows are marked there as estimates.
+  const CONTRACT = {
+    'ui.tap': [-25.8, 27], 'ui.open': [-29.9, 90], 'ui.close': [-28.6, 78], 'chat.tick': [-37.9, 8], 'chat.send': [-25.6, 47],
+    'chat.receive': [-24.6, 83], 'select': [-22.3, 56], 'deselect': [-25.5, 47], 'illegal': [-16.2, 78], 'place': [-12.7, 53],
+    'move.rook': [-7.0, 355], 'move.horse': [-9.0, 395], 'move.cannon': [-7.5, 355], 'move.elephant': [-5.0, 162],
+    'move.advisor': [-9.6, 205], 'move.king': [-4.4, 736], 'move.pawn': [-11.5, 52], 'river': [-20.6, 316],
+    'capture': [-5.5, 145], 'capture ×0.6': [-10.1, null], 'capture ×1.25': [-3.5, null], 'capture ×1.4': [null, null],
+    'cannon.fire': [null, null], 'blast': [null, null], 'cannon.fire + blast @200ms': [-3.3, 912],
+    'trial.lift': [-14.6, 780], 'trial.retract': [-22.5, 129], 'trial.confirm': [-3.5, 805],
+    'check.give': [-4.5, 1283], 'check.take': [-5.4, 1288], 'check.soft': [-14, 900], 'win': [-2.1, 2191], 'lose': [-14.6, 1957],
+    'draw': [-8.0, 1209], 'hint.1': [-15.9, 720], 'hint.2': [-10.5, 921], 'hint.3': [-10.5, 1013], 'fan.sweep': [-27, 160],
+    'stamp': [-5, 820], 'praise.good': [-12.2, 774], 'praise.great': [-11.4, 961], 'praise.brilliant': [-8.9, 1155],
+    'warn': [-15.5, 779], 'arrow': [-28.6, 79], 'undo': [-25.8, 149], 'deal': [-5.1, 1744], 'turn.yours': [-14.8, 842],
+  };
+  const ESTIMATES = ['check.soft', 'fan.sweep', 'stamp'];
+  // travel times the contract's lengths were measured with (ms + 55)
+  const TRAVEL = { 'move.rook': 300, 'move.horse': 340, 'move.cannon': 300, 'move.elephant': 300, 'move.advisor': 150, 'move.king': 320, 'move.pawn': 200 };
+  // §10.5.5: the loudness of the bed at five tensions. Between them the figure is interpolated, outside them it is held.
+  const BED_FIGURES = [[0.05, -26.2], [0.3, -26.6], [0.5, -27.1], [0.7, -27.0], [0.95, -26.6]];
+  const BED_TENSIONS = [0, 0.05, 0.15, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 1];
+  const BED_TOLERANCE = 0.5;                               // CONTRACT-NOTES K-98: tension is not volume
+  const bedFigure = T => {
+    if (T <= BED_FIGURES[0][0]) return BED_FIGURES[0][1];
+    for (let i = 1; i < BED_FIGURES.length; i++) {
+      const [a, va] = BED_FIGURES[i - 1], [b, vb] = BED_FIGURES[i];
+      if (T <= b) return va + (vb - va) * (T - a) / (b - a);
+    }
+    return BED_FIGURES[BED_FIGURES.length - 1][1];
+  };
+  const LIMIT_KNEE_DB = -2;                                // the soft limiter of audio.js is linear below this
+
+  // ---- the engine believes it runs live: a context facade, virtual timers, a seeded Math.random ---------------------
+  const realTimeout = window.setTimeout.bind(window);
+  const realClear = window.clearTimeout.bind(window);
+  const NativeContext = window.AudioContext || window.webkitAudioContext;
+  const clock = { now: 0, seq: 1, timers: new Map() };
+  window.setTimeout = (fn, ms = 0) => { const id = -(clock.seq++); clock.timers.set(id, { at: clock.now + Math.max(0, Number(ms) || 0), fn }); return id; };
+  window.clearTimeout = id => { if (!clock.timers.delete(id)) realClear(id); };
+  /** Runs the engine's timers up to `ms` on the virtual clock. */
+  function advanceTimers(ms) {
+    for (;;) {
+      let next = null;
+      for (const [id, timer] of clock.timers) if (timer.at <= ms && (!next || timer.at < next[1].at)) next = [id, timer];
+      if (!next) break;
+      clock.timers.delete(next[0]);
+      clock.now = next[1].at;
+      next[1].fn();
+    }
+    clock.now = ms;
+  }
+  const realRandom = Math.random;
+  function seedRandom(seed) { let s = seed >>> 0; Math.random = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
+
+  /** @returns the facade and what it saw: every source node with its start and stop time */
+  function facadeOf(off) {
+    const seen = [];
+    const watch = node => {
+      const rec = { s: 0, e: Infinity };
+      const start = node.start.bind(node), stop = node.stop.bind(node);
+      node.start = (...args) => { rec.s = args[0] ?? 0; seen.push(rec); return start(...args); };
+      node.stop = (...args) => { rec.e = args[0] ?? 0; return stop(...args); };
+      return node;
+    };
+    const facade = new Proxy(off, {
+      get(target, prop) {
+        if (prop === 'state') return 'running';
+        if (prop === 'resume' || prop === 'suspend' || prop === 'close') return () => Promise.resolve();
+        if (prop === 'addEventListener' || prop === 'removeEventListener') return () => {};
+        if (prop === 'createOscillator') return () => watch(target.createOscillator());
+        if (prop === 'createBufferSource') return () => watch(target.createBufferSource());
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    return { facade, seen };
+  }
+  function peakOverlap(seen) {
+    const events = [];
+    for (const { s, e } of seen) if (e > s) { events.push([s, 1]); events.push([e, -1]); }
+    events.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    let n = 0, max = 0;
+    for (const [, d] of events) { n += d; if (n > max) max = n; }
+    return max;
+  }
+
+  /**
+   * One render through the whole chain of audio.js.
+   * job(audio): what to play; times are from the start of the buffer.
+   * stepped: the music scheduler needs its timers, so the render stops every 100 ms and lets them run.
+   */
+  async function render({ seconds, palette = 'chibi', stepped = false, seed = 7, job }) {
+    const off = new OfflineAudioContext(2, Math.ceil(SR * seconds), SR);
+    const { facade, seen } = facadeOf(off);
+    window.AudioContext = function OfflineAsLive() { return facade; };
+    clock.now = 0;
+    clock.timers.clear();
+    seedRandom(seed);
+    const audio = createAudio();
+    audio.setPalette(palette);
+    const t0 = performance.now();
+    const unlocking = audio.unlock();                      // renders the six stingers for this palette ...
+    advanceTimers(0);                                      // ... set up in timer tasks after the gesture (M-121): virtual ones here
+    const unlocked = await unlocking;
+    const unlockMs = performance.now() - t0;
+    if (!unlocked) throw new Error('unlock() failed on the offline facade');
+    const before = seen.length;
+    job(audio);
+    const created = seen.length - before;
+    const firstStart = Math.min(...seen.slice(before).map(rec => rec.s));
+    if (stepped) {
+      const step = 0.1;
+      const stopAt = t => off.suspend(t).then(() => {
+        advanceTimers(t * 1000);
+        if (t + step < seconds - 0.05) stopAt(t + step);
+        return off.resume();
+      });
+      stopAt(step);
+    }
+    const buffer = await off.startRendering();
+    const live = peakOverlap(seen);                        // before dispose() stops what is left
+    audio.dispose();
+    Math.random = realRandom;
+    window.AudioContext = NativeContext;
+    return { buffer, created, firstStart, live, unlockMs };
+  }
+
+  /** Peak over both channels, RMS and the audible length (above -60 dBFS) of [from, to) seconds. */
+  function stats(buffer, from = 0, to = buffer.duration) {
+    const a = buffer.getChannelData(0), b = buffer.getChannelData(1);
+    const i0 = Math.max(0, Math.floor(from * SR)), i1 = Math.min(a.length, Math.ceil(to * SR));
+    let peak = 0, sum = 0, first = -1, last = -1;
+    for (let i = i0; i < i1; i++) {
+      const v = Math.max(Math.abs(a[i]), Math.abs(b[i]));
+      if (v > peak) peak = v;
+      sum += a[i] * a[i];
+      if (v > 0.001) { last = i; if (first < 0) first = i; }
+    }
+    return { peak: dB(peak), rms: dB(Math.sqrt(sum / Math.max(1, i1 - i0))), ms: first < 0 ? 0 : Math.round(((last - first) / SR) * 1000), firstMs: first < 0 ? null : (first / SR) * 1000 };
+  }
+
+  // ---- the page -------------------------------------------------------------------------------------------------------
+  const verdict = el('div', { class: 'verdict', 'data-ok': 'run' }, el('span', { class: 'stamp', text: '测量中' }), el('p', { text: '逐个离线渲染，约一两分钟……' }));
+  const head = (...cols) => el('thead', {}, el('tr', {}, cols.map(c => el('th', { text: c }))));
+  const sfxBody = el('tbody');
+  const bedBody = el('tbody');
+  const mixBody = el('tbody');
+  const bench = el('main', { class: 'bench' },
+    el('section', { class: 'card' }, verdict,
+      el('p', { class: 'note' }, el('a', { href: './audio.html', class: 'btn', style: 'display:inline-flex;align-items:center;text-decoration:none' }, '← 回军乐台'))),
+    el('section', { class: 'card' }, el('h2', {}, '音效', el('small', { text: '每个配方单独渲染 · 契约口径：赤壁音色，新建的总线第 50 毫秒起音 · 对局中：压限器站稳之后（第 1 秒起音），三种音色、两种起点里最响的 · 都须低于 −2 dBFS：软限幅在此之下一个采样也不动' })),
+      el('table', { class: 'code' }, head('名称', '声源', '峰值 契约口径', '契约', '差', '长度 ms', '契约', '差', '对局中峰值', '结论'), sfxBody)),
+    el('section', { class: 'card' }, el('h2', {}, '行军乐', el('small', { text: '四小节 · 契约的数字是把四小节放进 16 秒缓冲再求 RMS，「同口径」一栏照此折算；契约只给了五个张力，其间按直线插值、两端取平 · 张力不是音量：赤壁音色须在契约 ±0.5 dB 之内 · 声源上限 20' })),
+      el('table', {}, head('张力 / 场景', '拍速', 'RMS 四小节', '同口径', '契约', '差', '峰值', '最多声源', '隆中 RMS', '沙场 RMS', '结论'), bedBody)),
+    el('section', { class: 'card' }, el('h2', {}, '最坏情况', el('small', { text: '音乐 + 最响的音效叠在一起 · 每格是两种起点里较响的峰值 · 每一行都必须低于 0 dBFS：压限器之后有软限幅，「极端」几行是对局里叠不出来的，专为试它' })),
+      el('table', {}, head('混合', '赤壁', '隆中', '沙场', '契约（赤壁）', '结论'), mixBody)));
+  desk.append(bench);
+
+  const td = (text, cls) => el('td', cls ? { class: cls, text } : { text });
+  const num = (x, digits = 1) => (x == null || !Number.isFinite(x) ? '—' : x.toFixed(digits).replace('-', '−'));
+  const signed = x => (x == null || !Number.isFinite(x) ? '—' : (x >= 0 ? '+' : '') + num(x));
+  const result = { sfx: [], bed: [], mix: [], problems: [], prerenderMs: null, lead: null };
+  const problem = text => { result.problems.push(text); };
+  const breathe = () => new Promise(resolve => realTimeout(resolve, 0));
+
+  try {
+    // Two ways to measure a peak, and they differ.
+    // "Contract": as the contract's table was made: the sound starts exactly 50 ms into a brand-new context. The
+    //   DynamicsCompressor needs about 0.2 s to settle after it is created, so a sound measured there comes out up
+    //   to 4 dB quieter than it ever will in a game. Good for comparing with the contract, not for "does it clip".
+    // "In play": the sound starts one second in, the compressor settled, as in a game. The level of a short sound
+    //   also depends on where in a 128-frame render quantum it starts (a dB or two), so two starting points are
+    //   tried, in all three palettes, and the loudest counts.
+    // The engine starts a sound a few milliseconds after it is asked to; `lead` takes that out.
+    const trial = await render({ seconds: 0.3, job: audio => audio.play('ui.tap', { when: 0.05 }) });
+    const lead = trial.firstStart - 0.05;
+    result.lead = lead;
+    result.prerenderMs = Math.round(trial.unlockMs);
+    const COLD = 0.05;
+    const WARM = [1.0, 1.0037];
+
+    // ---- 1. every effect --------------------------------------------------------------------------------------------
+    const rows = [];
+    for (const name of Object.keys(RECIPE_SOURCES)) {
+      const opts = TRAVEL[name] ? { ms: TRAVEL[name] } : {};
+      rows.push({ label: name, plays: [[name, opts]] });
+      if (name === 'capture') for (const scale of [0.6, 1.25, 1.4]) rows.push({ label: `capture ×${scale}`, plays: [['capture', { scale }]] });
+      if (name === 'blast') rows.push({ label: 'cannon.fire + blast @200ms', plays: [['cannon.fire', {}], ['blast', { when: 0.2 }]] });
+    }
+    for (const row of rows) {
+      const run = async (palette, start) => {
+        const out = await render({ seconds: start + 4.2, palette, job: audio => { for (const [name, opts] of row.plays) audio.play(name, { ...opts, when: start - lead + (opts.when ?? 0) }); } });
+        return { ...stats(out.buffer), created: out.created };
+      };
+      const m = await run('chibi', COLD);
+      const per = { cold: m, chibi: await run('chibi', WARM[0]), chibiLate: await run('chibi', WARM[1]), longzhong: await run('longzhong', WARM[0]), shachang: await run('shachang', WARM[0]) };
+      const worst = Math.max(per.chibi.peak, per.chibiLate.peak, per.longzhong.peak, per.shachang.peak);
+      const [cPeak, cMs] = CONTRACT[row.label] ?? [null, null];
+      const single = row.plays.length === 1 ? row.plays[0][0] : null;
+      const expectSources = single ? (PRERENDERED.includes(single) ? 1 : RECIPE_SOURCES[single]) : null;
+      const silent = Object.values(per).some(x => !(x.ms > 0) || !Number.isFinite(x.peak));
+      const clips = !(Math.max(worst, m.peak) < 0);
+      const wrongCount = expectSources !== null && m.created !== expectSources;
+      const dPeak = cPeak == null ? null : m.peak - cPeak;
+      const dMs = cMs == null ? null : m.ms - cMs;
+      if (silent) problem(`${row.label}: silent`);
+      if (clips) problem(`${row.label}: peak at or above 0 dBFS`);
+      if (!(worst < LIMIT_KNEE_DB)) problem(`${row.label}: peaks at ${num(worst)} dBFS in play, inside the knee of the limiter`);
+      if (wrongCount) problem(`${row.label}: ${m.created} sources created, RECIPE_SOURCES says ${expectSources}`);
+      const farPeak = dPeak != null && Math.abs(dPeak) > 1;
+      const farMs = dMs != null && Math.abs(dMs) > Math.max(15, 0.05 * cMs);
+      const note = [];
+      if (ESTIMATES.includes(row.label)) note.push('契约为估值');
+      else if (farPeak || farMs) note.push('有别');
+      const ok = !silent && !clips && !wrongCount;
+      sfxBody.append(el('tr', {},
+        td(row.label), td(String(m.created) + (single && PRERENDERED.includes(single) ? `（预制 ${RECIPE_SOURCES[single]}）` : '')),
+        td(num(m.peak)), td(num(cPeak), 'dim'), td(signed(dPeak), farPeak ? 'bad' : 'dim'),
+        td(String(m.ms)), td(cMs == null ? '—' : String(cMs), 'dim'), td(dMs == null ? '—' : (dMs >= 0 ? '+' : '−') + Math.abs(dMs), farMs ? 'bad' : 'dim'),
+        td(num(worst)),
+        td(ok ? (note.length ? `✓ ${note.join(' · ')}` : '✓') : '✗', ok ? 'ok' : 'bad')));
+      result.sfx.push({ name: row.label, sources: m.created, peak: m.peak, ms: m.ms, contractPeak: cPeak, contractMs: cMs, worst,
+        chibi: per.chibi.peak, chibiLate: per.chibiLate.peak, longzhong: per.longzhong.peak, shachang: per.shachang.peak,
+        msInPlay: per.chibi.ms, msLongzhong: per.longzhong.ms, msShachang: per.shachang.ms });
+      await breathe();
+    }
+
+    // ---- 2. the music bed -------------------------------------------------------------------------------------------
+    const beds = [
+      ...BED_TENSIONS.map(T => ({ label: `T = ${T}`, T, bpm: 66 + 30 * T, scene: 'game' })),
+      { label: '大捷 victory', T: 0.4, bpm: 88, scene: 'victory' },
+      { label: '惜败 defeat', T: 0.05, bpm: 60, scene: 'defeat' },
+    ];
+    for (const bed of beds) {
+      const bars = 4 * 16 * (60 / bed.bpm / 4);
+      const per = {};
+      for (const palette of THEMES) {
+        const out = await render({
+          seconds: bars + 1.6, palette, stepped: true,
+          job: audio => { audio.setTension(bed.T); audio.music.setScene(bed.scene); audio.music.start(); },
+        });
+        // the piece begins 60 ms after start(); the window is exactly four bars
+        per[palette] = { ...stats(out.buffer, 0.06, 0.06 + bars), live: out.live };
+      }
+      const m = per.chibi;
+      const like = m.rms + 10 * Math.log10(bars / 16);        // the same energy spread over the prototype's 16 s buffer
+      const contract = bed.scene === 'game' ? bedFigure(bed.T) : null;
+      const stated = BED_FIGURES.some(([T]) => T === bed.T);
+      const over = THEMES.some(p => per[p].live > 20);
+      const clips = THEMES.some(p => !(per[p].peak < 0));
+      const quiet = THEMES.some(p => !Number.isFinite(per[p].rms) || per[p].rms < -40);
+      if (over) problem(`bed ${bed.label}: more than 20 sources at once`);
+      if (clips) problem(`bed ${bed.label}: clips`);
+      if (quiet) problem(`bed ${bed.label}: silent`);
+      const d = contract == null ? null : like - contract;
+      const loud = d != null && Math.abs(d) > BED_TOLERANCE;
+      if (loud) problem(`bed ${bed.label}: ${signed(d)} dB from the loudness of §10.5.5`);
+      const ok = !over && !clips && !quiet && !loud;
+      bedBody.append(el('tr', {},
+        td(bed.label), td(num(bed.bpm)), td(num(m.rms)), td(num(like)), td(contract == null ? '—' : num(contract) + (stated ? '' : ' 插值'), 'dim'), td(signed(d), loud ? 'bad' : 'dim'),
+        td(num(m.peak)), td(bed.scene === 'game' ? `${m.live}（表算 ${bedVoices(bed.T)}）` : String(m.live)),
+        td(num(per.longzhong.rms)), td(num(per.shachang.rms)),
+        td(ok ? '✓' : loud ? '✗ 与契约差得多' : '✗', ok ? 'ok' : 'bad')));
+      result.bed.push({ label: bed.label, T: bed.T, bpm: bed.bpm, scene: bed.scene, rms: m.rms, rmsLikeContract: like, peak: m.peak, live: m.live, model: bed.scene === 'game' ? bedVoices(bed.T) : null,
+        contract, stated, longzhong: per.longzhong.rms, shachang: per.shachang.rms, peakLongzhong: per.longzhong.peak, peakShachang: per.shachang.peak, liveLongzhong: per.longzhong.live, liveShachang: per.shachang.live });
+      await breathe();
+    }
+
+    // ---- 3. the worst cases -----------------------------------------------------------------------------------------
+    const stack = (audio, list, at) => { for (const [name, opts] of list) audio.play(name, { ...opts, when: at - lead + (opts.when ?? 0) }); };
+    // the twelve loudest rows of the table above
+    const LOUDEST = [['win', {}], ['capture', { scale: 1.4 }], ['blast', {}], ['trial.confirm', {}], ['stamp', {}], ['check.give', {}], ['deal', {}],
+      ['move.king', { ms: 0 }], ['check.take', {}], ['move.elephant', { ms: 0 }], ['draw', {}], ['move.rook', { ms: 0 }]];
+    const mixes = [
+      { label: '音乐 T=.95 + 炮击 + 将军 + 落子', contract: -2.0,
+        job: (audio, shift) => { audio.setTension(0.95); audio.music.start(); stack(audio, [['cannon.fire', {}], ['blast', { when: 0.2 }], ['place', { when: 0.2 }], ['check.give', { when: 0.25 }]], 1.05 + shift); } },
+      { label: '音乐 T=.95 + win', contract: -2.6,
+        job: (audio, shift) => { audio.setTension(0.95); audio.music.start(); stack(audio, [['win', {}]], 0.55 + shift); } },
+      // what the choreography of §10.3 can really pile up, over the bed at full tension
+      { label: '音乐 T=1 + 车吃车（吃子、40 毫秒后落子与确定、再将军）', contract: null,
+        job: (audio, shift) => { audio.setTension(1); audio.music.start(); stack(audio, [['capture', { scale: 1.25 }], ['move.rook', { ms: 40 }], ['trial.confirm', { when: 0.04 }], ['check.give', { when: 0.22 }]], 1.05 + shift); } },
+      { label: '音乐 T=1 + 炮击绝杀（点火、炮响、确定、win）', contract: null,
+        job: (audio, shift) => { audio.setTension(1); audio.music.start(); stack(audio, [['cannon.fire', {}], ['blast', { when: 0.2 }], ['trial.confirm', { when: 0.56 }], ['win', { when: 0.7 }]], 1.05 + shift); } },
+      { label: '音乐 T=.7 + 妙手成招（确定、招式印、神来之笔）', contract: null,
+        job: (audio, shift) => { audio.setTension(0.7); audio.music.start(); stack(audio, [['trial.confirm', {}], ['stamp', { when: 0.2 }], ['praise.brilliant', { when: 0.2 }]], 1.05 + shift); } },
+      // What no choreography does, to prove the soft limiter: before it existed the first of these peaked at +0.6 dBFS.
+      { label: '极端：音乐 T=1 + win + 擒王 + 帅落地 + 炮响 + 确定（同一瞬）', contract: null, extreme: true,
+        job: (audio, shift) => { audio.setTension(1); audio.music.start(); stack(audio, [['win', {}], ['capture', { scale: 1.4 }], ['move.king', { ms: 0 }], ['blast', {}], ['trial.confirm', {}]], 1.05 + shift); } },
+      { label: '极端：同上五声，力度 gain 2（play 所许的最大）', contract: null, extreme: true,
+        job: (audio, shift) => { audio.setTension(1); audio.music.start(); stack(audio, [['win', { gain: 2 }], ['capture', { scale: 1.4, gain: 2 }], ['move.king', { ms: 0, gain: 2 }], ['blast', { gain: 2 }], ['trial.confirm', { gain: 2 }]], 1.05 + shift); } },
+      { label: '极端：十二个最响的音同一瞬，力度 gain 2', contract: null, extreme: true,
+        job: (audio, shift) => { audio.setTension(1); audio.music.start(); stack(audio, LOUDEST.map(([name, opts]) => [name, { ...opts, gain: 2 }]), 1.05 + shift); } },
+      { label: '极端：四十三种音效同一瞬（声源封顶 48）', contract: null, extreme: true,
+        job: (audio, shift) => { audio.setTension(1); audio.music.start(); stack(audio, Object.keys(RECIPE_SOURCES).map(name => [name, {}]), 1.05 + shift); } },
+    ];
+    for (const mix of mixes) {
+      const per = {};
+      for (const palette of THEMES) {
+        let peak = -Infinity;
+        for (const shift of [0, 0.0037]) {
+          const out = await render({ seconds: 5.5, palette, stepped: true, job: audio => mix.job(audio, shift) });
+          peak = Math.max(peak, stats(out.buffer).peak);
+        }
+        per[palette] = peak;
+      }
+      const clips = THEMES.some(p => !(per[p] < 0));
+      if (clips) problem(`mix "${mix.label}": peak at or above 0 dBFS`);
+      mixBody.append(el('tr', {}, td(mix.label), td(num(per.chibi, 2)), td(num(per.longzhong, 2)), td(num(per.shachang, 2)), td(num(mix.contract), 'dim'),
+        td(clips ? '✗' : mix.extreme ? '✓ 软限幅收住' : '✓ 不削波', clips ? 'bad' : 'ok')));
+      result.mix.push({ label: mix.label, chibi: per.chibi, longzhong: per.longzhong, shachang: per.shachang, contract: mix.contract, extreme: !!mix.extreme });
+      await breathe();
+    }
+
+    const ok = result.problems.length === 0;
+    verdict.dataset.ok = ok ? '1' : '0';
+    verdict.firstElementChild.textContent = ok ? '合格' : '不合格';
+    verdict.lastElementChild.textContent = ok
+      ? `${result.sfx.length} 行音效都有声、都不削波（对局中最响 ${num(Math.max(...result.sfx.map(s => s.worst)))} dBFS）；行军乐同时在响的声源至多 ${Math.max(...result.bed.flatMap(b => [b.live, b.liveLongzhong, b.liveShachang]))} 个；对局里最坏的混合峰值 ${num(Math.max(...result.mix.filter(m => !m.extreme).flatMap(m => [m.chibi, m.longzhong, m.shachang])))} dBFS，硬叠出来的极端也只到 ${num(Math.max(...result.mix.filter(m => m.extreme).flatMap(m => [m.chibi, m.longzhong, m.shachang])), 2)} dBFS；行军乐各张力与契约相差至多 ${num(Math.max(...result.bed.filter(b => b.contract != null).map(b => Math.abs(b.rmsLikeContract - b.contract))), 2)} dB。六个长音预制一次约 ${result.prerenderMs} 毫秒。`
+      : result.problems.join('； ');
+    result.ok = ok;
+  } catch (error) {
+    verdict.dataset.ok = '0';
+    verdict.firstElementChild.textContent = '出错';
+    verdict.lastElementChild.textContent = String(error && error.stack ? error.stack : error);
+    result.ok = false;
+    result.error = String(error && error.stack ? error.stack : error);
+  } finally {
+    Math.random = realRandom;
+    window.AudioContext = NativeContext;
+    window.setTimeout = realTimeout;
+    window.clearTimeout = realClear;
+  }
+  window.__measure = result;
+}
+</script>
+</body>
+</html>

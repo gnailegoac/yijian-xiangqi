@@ -1,0 +1,17 @@
+{
+  "schema": 3,
+  "id": "g-future0001",
+  "humanColor": "red",
+  "moves": [{"m":"7774","t":1200},{"m":"0726","t":900}],
+  "clock": {"red":61000,"black":58000},
+  "result": null,
+  "startedAt": 1790000000000,
+  "endedAt": null,
+  "activeMs": 12000,
+  "counted": false,
+  "drawFrom": 0,
+  "seed": 77,
+  "skill": null,
+  "memory": null,
+  "start": null
+}

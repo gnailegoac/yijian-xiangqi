@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "mode": "ai",
+  "difficulty": "hard",
+  "humanColor": "black",
+  "flipped": true,
+  "sound": false,
+  "moves": [
+    {"from":{"row":7,"col":7},"to":{"row":7,"col":4}},
+    {"from":{"row":0,"col":7},"to":{"row":2,"col":6}},
+    {"from":{"row":9,"col":7},"to":{"row":7,"col":6}}
+  ],
+  "startedAt": 1790000000000,
+  "endedAt": null,
+  "result": null
+}

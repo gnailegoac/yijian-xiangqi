@@ -1,0 +1,14 @@
+{ "v": 1,
+  "turn": { "ply": 2, "me": "red", "phase": "opening", "check": false, "n": 35, "back": null, "eval": { "b": "even" },
+    "mat": { "me": "R2H2C2P5A2E2", "opp": "R2H2C2P5A2E2", "cp": 0 }, "level": 3,
+    "moments": [], "taught": [],
+    "mine": { "move": "炮二平五", "cat": "best", "waited": true, "self": true },
+    "opp": { "move": "马8进7", "check": false, "quality": "normal", "name": "horse_open",
+      "does": [ { "k": "develop", "by": { "s": "opp", "t": "H", "f": 7 } },
+                { "k": "defend", "on": { "s": "opp", "t": "P", "f": 5 } } ] },
+    "threats": [], "chance": null, "known": { "threats": true, "chance": false } },
+  "events": [
+    { "i": 0, "kind": "opp", "said": "llm",
+      "reply": { "text": "对方跳马出动，顺手护住了中卒。", "sig": "p3JmQ0c7Yk1xV2h0ZUpLQ3dNc0RkUjZ2QmE5ZkxuVHo" } },
+    { "i": 1, "kind": "ask", "ask": "intent" }
+  ] }

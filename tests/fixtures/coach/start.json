@@ -1,0 +1,6 @@
+{ "v": 1,
+  "turn": { "ply": 0, "me": "red", "phase": "opening", "check": false, "n": 44, "back": null, "eval": { "b": "even" },
+    "mat": { "me": "R2H2C2P5A2E2", "opp": "R2H2C2P5A2E2", "cp": 0 }, "level": 2,
+    "moments": [], "taught": [], "mine": null, "opp": null, "threats": [], "chance": null,
+    "known": { "threats": true, "chance": false } },
+  "events": [ { "i": 0, "kind": "start", "first": true, "cue": "go" } ] }

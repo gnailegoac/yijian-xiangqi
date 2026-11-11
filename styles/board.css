@@ -1,0 +1,382 @@
+/* 弈间 — the board (SPEC §10.2 the board, §10.3 its animation catalogue). Package X2.
+ *
+ * Everything inside .bv sizes from --c, the cell pitch in px that board-view measures (9.2 c x 10.6 c).
+ * Colours are the tokens of themes.css; .bv carries its own data-theme, so the board themes its subtree.
+ *
+ * Motion: one-shot choreography is WAAPI in board-view.js. What lives here are the resting states of every
+ * class, the transitions of selection (A1, A2) and the loops. Loops and entrance keyframes are written as
+ *   :root[data-motion="full"] .x { animation: … }
+ * so the reduced state is the default (§10.1): every mark is then simply shown, still.
+ * Only transform and opacity are animated; `filter` appears on resting states only (the ghost, the fallen king).
+ */
+
+.bv {
+  position: relative; aspect-ratio: 920 / 1060; isolation: isolate;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  --gold: var(--fx-spark);                 /* hint rings and spotlight: the theme's gold */
+  --trial-ink: #2a1600;                    /* text of the 试 tag on --trial */
+  /* A mark that stands for a side (E1 ring, E11 edge) has to show on the field: on 赤壁's dark field the rim
+     colours do; on the two light fields they vanish, so there the side's camp colour is used. */
+  --red-mark: var(--red-rim); --blk-mark: var(--blk-rim);
+  --rival-mark: var(--blk-mark);
+  --danger-mark: var(--danger);            /* reticles, aim line, check ring, threat lines */
+}
+.bv[data-bottom="black"] { --rival-mark: var(--red-mark); }
+.bv:is([data-theme="longzhong"], [data-theme="shachang"]) { --red-mark: var(--shu); --blk-mark: var(--wei); }
+/* 沙场: --danger is a light coral with almost no contrast on sand (1.3 : 1), so the marks drawn in it on the
+   field take the theme's own threat colour (4.2 : 1) */
+.bv[data-theme="shachang"] { --danger-mark: var(--arrow-threat); }
+/* --trial is dark in these two themes, so the tag's text is light there */
+.bv[data-theme="longzhong"] { --trial-ink: #fff6e2; }
+.bv[data-theme="shachang"] { --trial-ink: #f6ead2; }
+
+/* ---- layers (§10.2.4) --------------------------------------------------------------------------------------------- */
+
+.bv-art, .bv-glow, .bv-deco, .bv-river, .bv-tension, .bv-edge, .bv-marks, .bv-pieces, .bv-over, .bv-veil, .bv-fx, .bv-hit {
+  position: absolute; inset: 0; pointer-events: none;
+}
+svg.bv-art, svg.bv-marks, svg.bv-over { display: block; width: 100%; height: 100%; overflow: visible; }
+.bv-art, .bv-glow, .bv-deco, .bv-river, .bv-tension, .bv-edge { z-index: var(--z-art); }
+.bv-marks  { z-index: var(--z-marks); }
+.bv-pieces { z-index: var(--z-pieces); }
+.bv-over, .bv-veil { z-index: var(--z-over); }
+.bv-fx     { z-index: var(--z-fx); }
+.bv-hit    { z-index: var(--z-hit); }
+
+/* ---- board art (§10.2.1) ------------------------------------------------------------------------------------------ */
+
+.bv-frame { fill: var(--frame); }
+.bv-field { stroke: var(--frame-edge); stroke-width: 4; }
+.bv-stop-fa { stop-color: var(--field-a); }
+.bv-stop-fb { stop-color: var(--field-b); }
+.bv-stop-ra { stop-color: var(--river-a); }
+.bv-stop-rb { stop-color: var(--river-b); }
+.bv-band { opacity: var(--river-opacity); }
+.bv-border { fill: none; stroke: var(--line); stroke-width: 6; }
+.bv-grid { fill: none; stroke: var(--line); stroke-width: 3; stroke-linecap: square; }
+.bv-gridglow { fill: none; stroke: var(--line-glow); stroke-width: 12; stroke-linecap: square; }   /* chibi: an ember glow, no filter */
+.bv-rivertext {
+  font: 400 52px var(--font-kai); letter-spacing: 34px;
+  fill: var(--river-text); fill-opacity: .8; text-anchor: middle;
+}
+/* vertical centring of every text in the SVG layers is a dy of .36em on the element (see artMarkup) */
+.bv-label { font: 600 27px var(--font-ui); fill: var(--label); text-anchor: middle; }
+/* 沙场: --label is a light sand tone and the margins are sand too, so the file numbers get a dark edge to stay readable */
+.bv[data-theme="shachang"] .bv-label, .bv-art[data-theme="shachang"] .bv-label { stroke: var(--frame); stroke-width: 5; stroke-linejoin: round; paint-order: stroke; }
+
+/* camp seals (§10.2.2): 蜀 for red, 魏 for black. 32 units in the outer corner of the frame (K-96), so the glyph is 21 */
+.bv-seal rect { stroke-width: 2; }
+.bv-seal text { font: 700 21px var(--font-kai); fill: #fff3d6; text-anchor: middle; }
+.bv-seal--red rect { fill: var(--shu); stroke: var(--red-rim); }
+.bv-seal--black rect { fill: var(--wei); stroke: var(--blk-rim); }
+
+/* theme decoration inside the art */
+.bv-bamboo { fill: #7fa27a; opacity: .55; }
+.bv-sand { fill: #8a6a3a; opacity: .25; }
+.bv-rivets { fill: #b08d57; stroke: #5a3a17; stroke-width: 1.2; }
+
+/* G3: the old art fades out on top of the new one */
+.bv-art.is-leaving { z-index: var(--z-art); }
+
+/* ---- theme decoration in sibling layers (§10.2.2) ------------------------------------------------------------------ */
+
+/* 赤壁: fire glow at the two ends of the river, plus a faint ember gradient from below; it follows the tension */
+.bv-glow { display: none; border-radius: calc(.26 * var(--c)); }
+.bv[data-theme="chibi"] .bv-glow {
+  display: block;
+  background:
+    radial-gradient(circle calc(2.6 * var(--c)) at calc(.6 * var(--c)) calc(5.3 * var(--c)), #ff7a3d38, transparent),
+    radial-gradient(circle calc(2.6 * var(--c)) at calc(8.6 * var(--c)) calc(5.3 * var(--c)), #ff7a3d38, transparent),
+    linear-gradient(to top, #ff7a3d1f, transparent 42%);
+  opacity: calc(.25 + .5 * var(--tension, 0));
+  transition: opacity 800ms linear;
+}
+
+/* the drifting river: one band, its child 200 % wide, moved by transform only (compositor) */
+.bv-river {
+  inset: auto; left: calc(.6 * var(--c)); top: calc(4.8 * var(--c)); width: calc(8 * var(--c)); height: var(--c);
+  overflow: hidden;
+}
+.bv-river > i { display: block; width: 200%; height: 100%; background-repeat: repeat-x; background-size: 50% 100%; }
+.bv[data-theme="shachang"] .bv-river { display: none; }                 /* a dry riverbed: no motion */
+:root[data-motion="full"] .bv-river > i { animation: bv-drift 16s linear infinite; }
+:root[data-motion="full"] .bv[data-theme="longzhong"] .bv-river > i { animation-duration: 60s; }
+@keyframes bv-drift { to { transform: translateX(-50%); } }
+/* What drifts in the river never runs through 楚河 / 汉界 (K-96): 隆中's white mist washes their ink out when it lies
+   on them, and 赤壁's wave lines cut through their strokes. So the band has two soft windows over the characters
+   (x 131..269 and 531..669 of the 800-unit band) through which the drifting layer never shows.
+   The mask is static and sits on the band, not on the moving child. */
+.bv-river {
+  -webkit-mask-image: linear-gradient(to right, #000 11%, transparent 16%, transparent 34%, #000 39%, #000 61%, transparent 66%, transparent 84%, #000 89%);
+  mask-image: linear-gradient(to right, #000 11%, transparent 16%, transparent 34%, #000 39%, #000 61%, transparent 66%, transparent 84%, #000 89%);
+}
+
+/* 沙场: two pennants, each in the free corner of its camp's edge. The contract's 46 x 26 units covered the nearest
+   file label, so they are 31 x 22 (K-96): the tip stops 5 units short of the label and, fluttering, stays clear of
+   the corner piece. */
+.bv-pennant { position: absolute; width: calc(.31 * var(--c)); height: calc(.22 * var(--c)); }
+.bv-pennant--top { left: calc(.10 * var(--c)); top: calc(.18 * var(--c)); clip-path: polygon(0 0, 100% 50%, 0 100%); transform-origin: 0 50%; }
+.bv-pennant--bottom { right: calc(.10 * var(--c)); bottom: calc(.18 * var(--c)); clip-path: polygon(100% 0, 0 50%, 100% 100%); transform-origin: 100% 50%; }
+.bv-pennant--red { background: var(--shu); }
+.bv-pennant--black { background: var(--wei); }
+:root[data-motion="full"] .bv-pennant { animation: bv-flutter 1.8s ease-in-out infinite; }
+@keyframes bv-flutter { 0%, 100% { transform: skewY(-5deg); } 50% { transform: skewY(5deg); } }
+
+/* 赤壁: the three ships lie at anchor in gaps between the grid points (board-view places and sizes them, K-96);
+   they only bob, by about one unit, so they never reach a piece or the river characters */
+.bv-ship { position: absolute; background: center / 100% 100% no-repeat; }
+:root[data-motion="full"] .bv-ship { animation: bv-bob-ship 3.6s ease-in-out infinite alternate; }
+@keyframes bv-bob-ship {
+  from { transform: translateY(calc(-.01 * var(--c))) rotate(-1.5deg); }
+  to { transform: translateY(calc(.01 * var(--c))) rotate(1.5deg); }
+}
+
+/* G5: tension vignette, a red inner glow on the frame */
+.bv-tension {
+  border-radius: calc(.26 * var(--c));
+  box-shadow: inset 0 0 calc(1.2 * var(--c)) #ff3b2f;
+  opacity: var(--vignette, 0); transition: opacity 800ms linear;
+}
+
+/* E10 / E11: whose turn it is — the child's edge (bottom) or the rival's edge (top) of the frame glows.
+ * The phase is the data-phase of #app (§4.28.9). The lit strip is the frame's own border (.05 c), so the file
+ * labels next to it stay readable; only a soft halo reaches over them. The child's edge is in --sel, the colour
+ * of everything the child may act on (it has contrast on the field in every theme); the rival's in its mark colour. */
+.bv-edge { border-radius: calc(.26 * var(--c)); overflow: hidden; }
+.bv-edge::before, .bv-edge::after {
+  content: ""; position: absolute; left: 5%; right: 5%; height: calc(.05 * var(--c)); opacity: 0;
+  background: var(--edge-glow);
+  box-shadow: 0 0 calc(.1 * var(--c)) 0 var(--edge-glow),
+              0 0 calc(.8 * var(--c)) calc(.1 * var(--c)) color-mix(in srgb, var(--edge-glow) 36%, transparent);
+}
+.bv-edge::before { top: 0; border-radius: 0 0 calc(.05 * var(--c)) calc(.05 * var(--c)); --edge-glow: var(--rival-mark); }
+.bv-edge::after { bottom: 0; border-radius: calc(.05 * var(--c)) calc(.05 * var(--c)) 0 0; --edge-glow: var(--sel); }
+:is([data-phase="childTurn"], [data-phase="selected"], [data-phase="tentative"]) .bv-edge::after,
+[data-phase="opponentTurn"] .bv-edge::before { opacity: .6; }
+:root[data-motion="full"] :is([data-phase="childTurn"], [data-phase="selected"], [data-phase="tentative"]) .bv-edge::after,
+:root[data-motion="full"] [data-phase="opponentTurn"] .bv-edge::before {
+  animation: bv-edge-in 400ms var(--e-out), bv-edge-breathe 2.4s ease-in-out 400ms infinite;
+}
+@keyframes bv-edge-in { 0% { opacity: 0; } 50% { opacity: .8; } 100% { opacity: .45; } }
+@keyframes bv-edge-breathe { 0%, 100% { opacity: .45; } 50% { opacity: .7; } }
+
+/* E7: the lost board dims under an overlay in the page colour (opacity only, no filter) */
+.bv-veil { background: var(--page); border-radius: calc(.26 * var(--c)); opacity: 0; }
+.bv.is-lost .bv-veil { opacity: .28; }
+:root[data-motion="full"] .bv-veil { transition: opacity 600ms var(--e-out); }
+
+/* ---- pieces (§10.2.3) --------------------------------------------------------------------------------------------- */
+
+.piece {
+  position: absolute; left: calc((.6 + var(--vx)) * var(--c)); top: calc((.8 + var(--vy)) * var(--c));
+  width: calc(.88 * var(--c)); height: calc(.88 * var(--c)); margin: calc(-.44 * var(--c)) 0 0 calc(-.44 * var(--c)); z-index: 1;
+}
+.piece__shadow {
+  position: absolute; inset: 8% -4% -12% 0; border-radius: 50%;
+  background: radial-gradient(closest-side, var(--shadow) 55%, transparent);       /* no filter: blur */
+}
+.piece__body { position: absolute; inset: 0; }
+.piece__disc {
+  position: absolute; inset: 0; border-radius: 50%; border: calc(.063 * var(--c)) solid var(--rim);
+  background: radial-gradient(circle at 34% 26%, var(--a), var(--b) 58%, var(--cc) 100%);
+  box-shadow: 0 calc(.055 * var(--c)) 0 var(--piece-edge), 0 0 calc(.28 * var(--c)) var(--glow),
+              inset 0 calc(-.04 * var(--c)) calc(.07 * var(--c)) #0005, inset 0 calc(.04 * var(--c)) calc(.055 * var(--c)) #fff5;
+}
+.piece__ring { position: absolute; inset: 0; width: 100%; height: 100%; }
+.piece__ring * { fill: none; stroke: var(--ring); stroke-width: 3.2; opacity: .85; }
+.piece__glyph {
+  position: absolute; inset: 0; display: grid; place-items: center; padding-bottom: 4%;
+  font: 700 calc(.50 * var(--c))/1 var(--font-kai); color: var(--glyph); text-shadow: 0 calc(.025 * var(--c)) 0 #0006;
+}
+.piece.red   { --a: var(--red-a); --b: var(--red-b); --cc: var(--red-c); --rim: var(--red-rim); --glyph: var(--red-glyph); --ring: var(--red-rim); --glow: var(--red-glow); }
+.piece.black { --a: var(--blk-a); --b: var(--blk-b); --cc: var(--blk-c); --rim: var(--blk-rim); --glyph: var(--blk-glyph); --ring: var(--blk-rim); --glow: var(--blk-glow); }
+
+/* A1 / A2: the selected piece is lifted; E1: the rival's piece lifts the same way before it moves */
+.piece.is-selected, .piece.is-lifted, .piece.is-trial { z-index: 3; }
+.piece.is-selected .piece__body, .piece.is-lifted .piece__body { transform: translateY(calc(-.12 * var(--c))) scale(1.10); }
+.piece.is-selected .piece__shadow, .piece.is-lifted .piece__shadow { transform: translateY(calc(.07 * var(--c))) scale(1.12); opacity: .7; }
+:root[data-motion="full"] .piece__body { transition: transform 100ms var(--e-out); }
+:root[data-motion="full"] .piece__shadow { transition: transform 100ms var(--e-out), opacity 100ms var(--e-out); }
+:root[data-motion="full"] .piece.is-selected .piece__body,
+:root[data-motion="full"] .piece.is-lifted .piece__body { transition: transform 140ms var(--e-back); }
+:root[data-motion="full"] .piece.is-selected .piece__shadow,
+:root[data-motion="full"] .piece.is-lifted .piece__shadow { transition: transform 140ms var(--e-back), opacity 140ms var(--e-out); }
+
+/* A8: a mouse over one of the child's pieces */
+.piece.is-hover:not(.is-selected):not(.is-trial) .piece__body { transform: translateY(calc(-.04 * var(--c))); }
+
+/* D1 / D2: on trial the piece hovers, and bobs under full motion (the bob starts when the piece arrives) */
+.piece.is-trial .piece__body { transform: translateY(calc(-.12 * var(--c))) scale(1.06); }
+.piece.is-trial .piece__shadow { transform: translateY(calc(.072 * var(--c))) scale(1.06); opacity: .88; }
+:root[data-motion="full"] .piece.is-trial:not(.is-aim) .piece__body { animation: bv-bob 2.4s ease-in-out var(--hover-delay, 0ms) infinite; }
+@keyframes bv-bob {
+  0%, 100% { transform: translateY(calc(-.12 * var(--c))) scale(1.06); }
+  25% { transform: translateY(calc(-.14 * var(--c))) scale(1.06); }
+  75% { transform: translateY(calc(-.10 * var(--c))) scale(1.06); }
+}
+
+/* D1a: an aim — the piece stays on its square, lifted, leaning 6 degrees towards its target */
+.piece.is-trial.is-aim .piece__body { transform: translateY(calc(-.14 * var(--c))) scale(1.08) rotate(var(--lean, 0deg)); }
+.piece.is-trial.is-aim .piece__shadow { transform: translateY(calc(.084 * var(--c))) scale(1.07); opacity: .86; }
+:root[data-motion="full"] .piece.is-trial.is-aim .piece__body { transition: transform 140ms var(--e-back); }
+
+/* while WAAPI moves a piece its class changes must not start a transition underneath */
+.piece.is-moving .piece__body, .piece.is-moving .piece__shadow { transition: none !important; }
+
+/* the trial guard: a touch on the piece shows, but does not confirm yet */
+.piece.is-pressed .piece__body { scale: .97; }
+
+/* A6: dragging */
+.piece.is-dragging { z-index: 6; will-change: translate; }
+.piece.is-dragging .piece__body { transform: scale(1.15); }
+.piece.is-dragging .piece__shadow { transform: translateY(calc(.14 * var(--c))) scale(1.2); opacity: .55; }
+
+/* E5: the mated king lies on its side; the grey comes once it has fallen */
+.piece.is-fallen .piece__body { rotate: 90deg; opacity: .7; }
+.piece.is-grey .piece__body { filter: grayscale(1); }
+
+/* the 试 tag: a .40 c circle at the piece's top right */
+.piece__tag {
+  position: absolute; right: -9%; top: -9%; width: calc(.40 * var(--c)); height: calc(.40 * var(--c)); border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--trial); color: var(--trial-ink);
+  font: 700 calc(.25 * var(--c))/1 var(--font-ui);
+  box-shadow: 0 calc(.02 * var(--c)) calc(.05 * var(--c)) #0007, inset 0 0 0 calc(.018 * var(--c)) #fff4;
+}
+
+/* D1: the ghost left on the origin square — a faded copy with a dashed outline */
+.piece.is-ghost { opacity: .35; filter: grayscale(.6); z-index: 0; }
+.piece.is-ghost::after {
+  content: ""; position: absolute; inset: -5%; border-radius: 50%;
+  border: calc(.035 * var(--c)) dashed var(--trial);
+}
+.piece.is-ghost .piece__shadow { display: none; }
+/* F6: ghost play — copies that move on top of the real position */
+.piece.is-ghost.is-preview { opacity: .82; filter: none; z-index: 4; }
+.piece.is-ghost.is-preview::after { border-color: var(--gold); border-style: dashed; }
+/* F3: the demo ghost that slides along a hint arrow (shown only while WAAPI runs it) */
+.piece.is-ghost.is-demo { opacity: 0; filter: none; z-index: 4; }
+.piece.is-ghost.is-demo::after { display: none; }
+/* a real piece that ghost play has captured */
+.piece.is-dimmed { opacity: .3; }
+
+/* ---- marks under the pieces (§10.2.4) ------------------------------------------------------------------------------ */
+
+/* selection ring: r 51, dashed 10 8, rotating 8 s per turn */
+.bv-selring { fill: none; stroke: var(--sel); stroke-width: 4; stroke-dasharray: 10 8; transform-box: fill-box; transform-origin: center; }
+:root[data-motion="full"] .bv-selring { animation: bv-fade-in 140ms var(--e-out), bv-spin 8s linear infinite; }
+
+/* legal empty target: a dot r 13 with a 25 % halo out to r 24 (one circle: the halo is its stroke) */
+.bv-dot {
+  fill: var(--sel); stroke: var(--sel); stroke-opacity: .25; stroke-width: 22; paint-order: stroke;
+  transform-box: fill-box; transform-origin: center;
+}
+:root[data-motion="full"] .bv-dot { animation: bv-pop 160ms var(--e-back) calc(var(--i, 0) * 16ms) backwards; }
+
+/* forbidden target (perpetual check): the dot at 35 % with a diagonal bar */
+.bv-forbid { opacity: .35; }
+.bv-forbid .bv-dot { animation: none; }
+.bv-bar { stroke: var(--sel); stroke-width: 7; stroke-linecap: round; }
+:root[data-motion="full"] .bv-forbid { animation: bv-fade-in 160ms var(--e-out) calc(var(--i, 0) * 16ms) backwards; }
+
+/* D1 step 6: while a trial is on the board the other targets dim to 40 % and the selection ring rests */
+.bv.is-trialing .bv-g-sel > * { opacity: .4; }
+.bv.is-trialing .bv-g-sel > .bv-forbid { opacity: .2; }
+.bv.is-trialing .bv-g-sel > .bv-selring { opacity: 0; }
+:root[data-motion="full"] .bv-g-sel > * { transition: opacity 100ms var(--e-out); }
+
+/* last move: a hollow dot on the origin, four corner brackets on the destination */
+.bv-lastfrom { fill: none; stroke: var(--line); stroke-width: 3; opacity: .7; }
+.bv-lastto { fill: none; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+/* a darker casing under the brackets: the rival's rim colour alone is lost on the two light fields */
+.bv-lastto-edge { fill: none; stroke: var(--piece-edge); stroke-width: 8; stroke-linecap: round; stroke-linejoin: round; opacity: .5; }
+.bv-lastto[data-by="me"] { stroke: var(--sel); }
+.bv-lastto[data-by="red"] { stroke: var(--red-rim); }
+.bv-lastto[data-by="black"] { stroke: var(--blk-rim); }
+:root[data-motion="full"] .bv-g-last > * { animation: bv-fade-in 160ms var(--e-out); }
+
+/* trial ring (r 52, dashed, rotating 6 s per turn) and the dotted trail */
+.bv-trialring { fill: none; stroke: var(--trial); stroke-width: 4; stroke-dasharray: 10 8; transform-box: fill-box; transform-origin: center; }
+:root[data-motion="full"] .bv-trialring { animation: bv-spin 6s linear infinite; }
+.bv-trail { fill: none; stroke: var(--trial); stroke-width: 4; stroke-linecap: round; }
+.bv-trail.is-aim { stroke: var(--danger-mark); stroke-width: 5; }
+
+/* E1: the rival's origin square pulses twice in the rival's colour */
+.bv-anticipate { fill: none; stroke-width: 5; transform-box: fill-box; transform-origin: center; }
+.bv-anticipate[data-color="red"] { stroke: var(--red-mark); }
+.bv-anticipate[data-color="black"] { stroke: var(--blk-mark); }
+:root[data-motion="full"] .bv-anticipate { animation: bv-anticipate 65ms var(--e-out) 4 alternate; }
+
+/* ---- marks over the pieces ------------------------------------------------------------------------------------------- */
+
+/* capture reticle: four corner brackets (A4); the lock of an aim comes in from 1.6 (D1a) */
+.bv-reticle path { fill: none; stroke: var(--danger-mark); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; transform-box: fill-box; transform-origin: center; }
+:root[data-motion="full"] .bv-reticle path { animation: bv-reticle-in 180ms var(--e-out) backwards, bv-pulse 600ms ease-in-out 180ms infinite alternate; }
+:root[data-motion="full"] .bv-reticle.is-lock path { animation-name: bv-lock-in, bv-pulse; }
+.bv-reticle.is-lock path { stroke-width: 6; }
+
+/* check: the king's ring pulses, a dashed line runs from each attacker */
+.bv-checkring { fill: none; stroke: var(--danger-mark); stroke-width: 6; transform-box: fill-box; transform-origin: center; }
+:root[data-motion="full"] .bv-checkring { animation: bv-check 1.1s ease-in-out infinite; }
+.bv-threat { stroke: var(--danger-mark); stroke-width: 5; stroke-dasharray: 10 12; stroke-linecap: round; opacity: .6; }
+:root[data-motion="full"] .bv-threat.is-flash { animation: bv-threat 500ms linear; }
+
+/* hint spotlight (F2) */
+.bv-spot { fill: #000; opacity: .45; }
+.bv-hlring { fill: none; stroke: var(--gold); stroke-width: 5; transform-box: fill-box; transform-origin: center; }
+:root[data-motion="full"] .bv-hlring { animation: bv-hl 1.2s ease-in-out infinite; }
+.bv-hlarea { fill: none; stroke: var(--gold); stroke-width: 4; stroke-dasharray: 14 10; stroke-linecap: round; opacity: .9; }
+/* without the dim there is no dark ground for the gold: the hint colour shows on every field */
+.bv-hlring.is-plain, .bv-hlarea.is-plain { stroke: var(--arrow-hint); }
+
+/* arrows (F4): a 9-unit line over a 15-unit underlay, a triangular head, an optional badge */
+.arrow { --arrow: var(--line); }
+.arrow[data-style="hint"] { --arrow: var(--arrow-hint); }
+.arrow[data-style="idea"] { --arrow: var(--arrow-idea); }
+.arrow[data-style="threat"] { --arrow: var(--arrow-threat); }
+.arrow[data-style="reply"] { --arrow: var(--arrow-reply); }
+.arrow__under { fill: none; stroke: var(--arrow); stroke-width: 15; stroke-linecap: round; stroke-linejoin: round; opacity: .25; }
+.arrow__line { fill: none; stroke: var(--arrow); stroke-width: 9; stroke-linecap: round; stroke-linejoin: round; opacity: .92; }
+.arrow__head { fill: var(--arrow); stroke: var(--arrow); stroke-width: 3; stroke-linejoin: round; opacity: .96; transform-box: fill-box; transform-origin: center; }
+.arrow__ring { fill: none; stroke: var(--arrow); stroke-width: 4; transform-box: fill-box; transform-origin: center; }
+:root[data-motion="full"] .arrow__ring { animation: bv-hl 1.2s ease-in-out infinite; }
+.arrow__badge circle { fill: var(--arrow); stroke: var(--field-b); stroke-width: 2; }
+.arrow__badge text { font: 700 20px var(--font-ui); fill: var(--field-b); text-anchor: middle; }
+
+/* A6: the magnet ring of a drag; reduced-motion capture ring; the counter of ghost play (F6) */
+.bv-magnet { fill: none; stroke: var(--sel); stroke-width: 5; }
+.bv-flashring { fill: none; stroke: var(--sel); stroke-width: 6; }
+.bv-counter rect { fill: var(--accent); }
+.bv-counter text { font: 700 22px var(--font-ui); fill: var(--accent-ink); text-anchor: middle; }
+
+/* ---- hit cells (§10.2.4, §10.2.5) ----------------------------------------------------------------------------------- */
+
+.board-cell {
+  position: absolute; left: calc((.1 + var(--vx)) * var(--c)); top: calc((.3 + var(--vy)) * var(--c));
+  width: var(--c); height: var(--c); margin: 0; padding: 0; border: 0; border-radius: 0;
+  background: none; color: inherit; -webkit-appearance: none; appearance: none;
+  pointer-events: auto; touch-action: manipulation; cursor: default;
+}
+/* The cell stays a full square: a rounded box does not take pointer events outside its curve, which would leave a
+   dead spot between every four intersections. Only the focus ring is round (drawn by a pseudo-element). */
+/* a drag from one of the child's pieces is never taken over by the browser */
+.bv.is-interactive .board-cell.is-mine { touch-action: none; }
+.bv.is-interactive .board-cell:is(.is-mine, .is-legal, .is-trial-to, .is-trial-from) { cursor: pointer; }
+.board-cell:focus-visible { outline: none; }
+.board-cell:focus-visible::after {
+  content: ""; position: absolute; inset: 3px; border-radius: 50%; pointer-events: none;
+  outline: 3px solid var(--accent);
+}
+
+/* ---- keyframes -------------------------------------------------------------------------------------------------------- */
+
+@keyframes bv-spin { to { transform: rotate(360deg); } }
+@keyframes bv-fade-in { from { opacity: 0; } }
+@keyframes bv-pop { from { transform: scale(0); } }
+@keyframes bv-reticle-in { from { transform: scale(1.25); } }
+@keyframes bv-lock-in { from { transform: scale(1.6); } }
+@keyframes bv-pulse { from { opacity: 1; } to { opacity: .7; } }
+@keyframes bv-check { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+@keyframes bv-threat { 0% { opacity: 0; } 25% { opacity: 1; } 50% { opacity: 0; } 75% { opacity: 1; } 100% { opacity: .6; } }
+@keyframes bv-hl { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.1); opacity: .6; } }
+@keyframes bv-anticipate { from { transform: scale(.85); opacity: .35; } to { transform: scale(1.08); opacity: 1; } }

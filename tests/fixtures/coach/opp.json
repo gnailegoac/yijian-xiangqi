@@ -1,0 +1,11 @@
+{ "v": 1,
+  "turn": { "ply": 2, "me": "red", "phase": "opening", "check": false, "n": 35, "back": null, "eval": { "b": "even" },
+    "mat": { "me": "R2H2C2P5A2E2", "opp": "R2H2C2P5A2E2", "cp": 0 }, "level": 3,
+    "moments": [], "taught": [],
+    "mine": { "move": "炮二平五", "cat": "best", "waited": true, "self": true },
+    "opp": { "move": "炮8平5", "check": false, "quality": "strong", "name": "same_cannons",
+      "does": [ { "k": "cannon_mount", "by": { "s": "opp", "t": "C", "f": 5 }, "on": { "s": "me", "t": "P", "f": 5 }, "on2": { "s": "opp", "t": "P", "f": 5 } } ] },
+    "threats": [ { "k": "cannon_mount", "by": { "s": "opp", "t": "C", "f": 5 }, "on": { "s": "me", "t": "P", "f": 5 },
+                   "move": "炮5进4", "net": { "gain": [], "lose": ["P"], "cp": -100 }, "sev": "pawn" } ],
+    "chance": null, "known": { "threats": true, "chance": false } },
+  "events": [ { "i": 0, "kind": "opp" } ] }

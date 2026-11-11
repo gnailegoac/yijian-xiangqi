@@ -1,0 +1,835 @@
+/* 弈间 — everything around the board (SPEC §12.3, §12.5, §12.6; chrome §10.1). Package X7.
+ *
+ * Load order: tokens.css, themes.css, layout.css, …, then this file. src/ui/hud.js builds the DOM.
+ *
+ *   #topbar.hud-top        ≡ #menu-button · .hud-top__rival (the plate of rival-view.js) · .hud-top__info
+ *                          (第 N 回合, trophies) · ♪ #mute-button
+ *   #underbar.hud-under    #undo-button · #retry-opponent + .hud-status (rival failed) · .hud-last (the last move)
+ *   #actions.hud-actions   .hud-slot--hint (#hint-button with the three pouches; in compact + failed its retry
+ *                          button instead) · --trial (#retract-button, #confirm-button) · --over (#newgame-button);
+ *                          one grid cell, cross-faded
+ *   #overlays              .hud-layer wrappers: --menu, --sheet, --dialog, --start, --over, --blocking; #toast;
+ *                          .hud-rotate
+ *
+ * Read from the shell: --top, --bar, --panel-w, --group-x, --group-y (where the landscape group stands in a wide
+ * window, layout.css) and #app[data-layout="landscape|portrait|compact"].
+ * Outside its own regions this file touches one thing: the coach column's figure (.coach__buddy .buddy-fig,
+ * styles/buddy.css) is transparent while the start overlay is up, because the greeter stands in front of it, and
+ * hidden in landscape while the game-over card is up, because the card stands over the column and does not cover
+ * all of him.
+ * Motion: every transition and loop is written under :root[data-motion="full"]; without it each state is shown
+ * at once (the pressed state of a button is the one exception: a 60 ms push is feedback, not motion).
+ * Stacking inside #overlays: game-over card (--z-sheet) < landscape-phone card < start overlay < menu and sheets
+ * < dialogs (--z-dialog) < blocking notice < toast (--z-toast).
+ */
+
+/* ===== atoms ============================================================================================================ */
+
+.hud-ico { display: inline-grid; flex: none; width: 24px; height: 24px; }
+.hud-ico svg {
+  display: block; width: 100%; height: 100%;
+  fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.hud-ico__slash { display: none; }
+
+/* Buttons are thick and tactile: a darker bottom edge that collapses while pressed. */
+.hud-btn {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-width: 44px; min-height: 44px; margin: 0; padding: 0 18px;
+  border: 0; border-radius: var(--r-btn);
+  font: 700 var(--fs-button) / 1.2 var(--font-ui); letter-spacing: .04em; white-space: nowrap;
+  cursor: pointer; -webkit-user-select: none; user-select: none;
+  transition: transform 60ms linear;
+}
+.hud-btn__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.hud-btn .hud-ico { width: 22px; height: 22px; }
+
+.hud-btn--primary {
+  background: var(--accent); color: var(--accent-ink);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--accent) 55%, #000);
+}
+.hud-btn--primary:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 55%, #000); }
+.hud-btn--danger {
+  background: var(--danger); color: var(--danger-ink);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--danger) 55%, #000);
+}
+.hud-btn--danger:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 color-mix(in srgb, var(--danger) 55%, #000); }
+.hud-btn--secondary {
+  background: var(--surface-2); color: var(--ink);
+  border: 1px solid var(--edge);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--edge) 72%, #000);
+}
+.hud-btn--secondary:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 color-mix(in srgb, var(--edge) 72%, #000); }
+.hud-btn--text { background: none; color: var(--ink-2); font-weight: 600; padding: 0 12px; }
+.hud-btn--text:active { color: var(--ink); }
+
+.hud-btn:disabled { cursor: default; }
+.hud-btn--primary:disabled {
+  background: var(--surface-2); color: var(--ink-2);
+  box-shadow: inset 0 0 0 1px var(--edge), 0 3px 0 color-mix(in srgb, var(--edge) 72%, #000);
+}
+.hud-btn--secondary:disabled { color: color-mix(in srgb, var(--ink-2) 62%, var(--surface-2)); box-shadow: 0 3px 0 color-mix(in srgb, var(--edge) 45%, transparent); }
+
+/* Icon-only buttons: a 44 x 44 target with a smaller drawn key. */
+.hud-iconbtn {
+  position: relative; flex: none; display: grid; place-items: center;
+  width: 44px; height: 44px; margin: 0; padding: 0;
+  border: 0; border-radius: 12px; background: none; color: var(--ink);
+  cursor: pointer;
+}
+.hud-iconbtn::before {
+  content: ""; position: absolute; inset: 2px 0; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--edge);
+  box-shadow: 0 2px 0 color-mix(in srgb, var(--edge) 72%, #000);
+}
+.hud-iconbtn:active::before { transform: translateY(1px); box-shadow: 0 1px 0 color-mix(in srgb, var(--edge) 72%, #000); background: var(--surface-2); }
+.hud-iconbtn > .hud-ico { position: relative; }
+
+/* A piece as a micro-disc (trophies, pickers, headings). --d = diameter. */
+.hud-disc {
+  --d: 20px;
+  display: inline-grid; place-items: center; flex: none;
+  width: var(--d); height: var(--d); border-radius: 50%;
+  font: 700 calc(var(--d) * .6) / 1 var(--font-kai); text-indent: 0; letter-spacing: 0;
+  background: radial-gradient(circle at 36% 30%, var(--red-a), var(--red-b) 58%, var(--red-c));
+  color: var(--red-glyph);
+  box-shadow: inset 0 0 0 max(1.5px, var(--d) * .07) var(--red-rim), 0 max(1px, var(--d) * .06) 0 var(--piece-edge);
+}
+.hud-disc[data-color="black"] {
+  background: radial-gradient(circle at 36% 30%, var(--blk-a), var(--blk-b) 58%, var(--blk-c));
+  color: var(--blk-glyph);
+  box-shadow: inset 0 0 0 max(1.5px, var(--d) * .07) var(--blk-rim), 0 max(1px, var(--d) * .06) 0 var(--piece-edge);
+}
+
+/* ===== top bar ========================================================================================================== */
+
+.hud-top { display: flex; align-items: center; gap: 8px; }
+.hud-top .hud-iconbtn::before { inset: max(0px, (44px - (var(--top, 48px) - 8px)) / 2) 0; }
+
+#mute-button[aria-pressed="true"] { color: var(--ink-2); }
+#mute-button[aria-pressed="true"] .hud-ico__slash { display: inline; stroke: var(--danger); stroke-width: 2.4; }
+
+/* The plate (rival-view.js) is as high as the bar and hangs its disc from the bar's top edge; its host is made a
+ * flex box so that no line box can push it off that edge. */
+.hud-top__rival { flex: 0 1 auto; align-self: stretch; min-width: 0; display: flex; }
+.hud-top__rival > * { display: flex; min-width: 0; }
+.hud-top__info {
+  flex: 0 0 auto; max-width: 62%; min-width: 0; margin-left: auto;
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+}
+
+.hud-round {
+  flex: none; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--edge); background: color-mix(in srgb, var(--surface) 72%, transparent);
+  font: 600 13px / 16px var(--font-ui); color: var(--ink-2); white-space: nowrap;
+}
+.hud-round b { color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.hud-tray {
+  flex: none; display: inline-flex; align-items: center; gap: 3px;
+  padding: 3px 7px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--edge));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+.hud-tray--lost { display: none; border-color: var(--edge); background: color-mix(in srgb, var(--surface) 72%, transparent); }
+.hud-tray--lost .hud-disc { opacity: .5; }
+#app[data-layout="landscape"] .hud-tray--lost { display: inline-flex; }
+.hud-tray__more { padding: 0 1px 0 2px; font: 700 12px / 1 var(--font-ui); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+#app[data-layout="compact"] .hud-top { gap: 4px; }
+#app[data-layout="compact"] .hud-top__info { flex-direction: column; align-items: flex-end; gap: 2px; }
+#app[data-layout="compact"] .hud-round { padding: 0; border: 0; background: none; font-size: 11px; line-height: 12px; }
+#app[data-layout="compact"] .hud-tray { padding: 0; border: 0; background: none; gap: 2px; }
+#app[data-layout="compact"] .hud-tray .hud-disc { --d: 16px; }
+#app[data-layout="compact"] .hud-tray__more { font-size: 11px; }
+
+/* A phone narrower than 416 px: right of 司马懿's plate there must stay room for his thinking dots (rival-view.js
+ * puts them there), so the tray shows the newest four discs, or the newest three and a counter of the rest. */
+.hud-tray__more--narrow { display: none; }
+@media (max-width: 415.98px) {
+  #app[data-layout="compact"] .hud-tray .hud-disc.is-extra,
+  #app[data-layout="compact"] .hud-tray__more--wide { display: none; }
+  #app[data-layout="compact"] .hud-tray__more--narrow { display: inline; }
+}
+/* On a phone narrower than 450 px his spoken line (2.4 s; it takes the place of his name) reaches into the round and
+ * the trophies, which step aside for that long (data-say is the plate's documented hook, styles/buddy.css). */
+@media (max-width: 449.98px) {
+  #app[data-layout="compact"] .hud-top:has(.rival[data-say="line"]) .hud-top__info { visibility: hidden; }
+}
+
+/* ===== under-bar ======================================================================================================== */
+
+.hud-under { display: flex; align-items: center; gap: 12px; container-type: inline-size; }
+.hud-undo { flex: none; min-width: 120px; height: 48px; margin-bottom: 3px; }
+.hud-under .hud-retry { flex: none; height: 48px; margin-bottom: 3px; }
+.hud-status { flex: 1 1 0; min-width: 0; margin: 0; font-size: 14px; line-height: 20px; color: var(--ink); }
+
+.hud-last {
+  flex: 0 1 auto; min-width: 0; height: 44px; margin: 0 0 0 auto; padding: 0 14px;
+  display: inline-flex; align-items: center; gap: 2px;
+  border: 1px solid transparent; border-radius: 999px; background: none;
+  font: 500 14px / 1 var(--font-ui); color: var(--ink-2); white-space: nowrap;
+  cursor: pointer;
+}
+.hud-last b { color: var(--ink); font-weight: 700; font-size: 16px; letter-spacing: .04em; }
+.hud-last:active { background: var(--surface); border-color: var(--edge); }
+
+/* a narrow board (a landscape phone, the keyboard up): first the status line goes, then the last move */
+@container (max-width: 439.98px) {
+  .hud-status { display: none; }
+  .hud-undo { min-width: 96px; padding: 0 12px; }
+  .hud-under .hud-retry { flex: 0 1 auto; min-width: 0; padding: 0 12px; }
+}
+@container (max-width: 299.98px) {
+  .hud-last { display: none; }
+}
+
+#app[data-layout="compact"] .hud-under { gap: 0; }
+#app[data-layout="compact"] .hud-undo { width: 100%; min-width: 0; padding: 0 8px; }
+#app[data-layout="compact"] .hud-under .hud-retry,
+#app[data-layout="compact"] .hud-status,
+#app[data-layout="compact"] .hud-last { display: none; }
+
+/* ===== actions ========================================================================================================== */
+
+.hud-actions { display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); align-items: center; }
+.hud-slot {
+  grid-area: 1 / 1; min-width: 0;
+  display: flex; align-items: center; gap: 12px;
+  padding-bottom: 3px;                                 /* room for the buttons' bottom edge */
+  opacity: 0;
+}
+.hud-slot.is-on { opacity: 1; }
+.hud-slot > .hud-btn { flex: 1 1 0; min-width: 0; height: 48px; font-size: 18px; }
+/* 换一步 38 %, 确定落子 62 % (§12.3): a grid, so padding and borders cannot bend the ratio */
+.hud-slot--trial { display: grid; grid-template-columns: minmax(0, 38fr) minmax(0, 62fr); }
+
+/* The rival failed: #retry-opponent and its status line are under the board. The compact under-bar has no room
+ * for them, so there the retry button takes the place of the pouches. */
+.hud-slot > .hud-retry { display: none; }
+#app[data-layout="compact"] .hud-actions[data-failed="1"] .hud-slot > .hud-retry { display: inline-flex; }
+#app[data-layout="compact"] .hud-actions[data-failed="1"] .hud-hint { display: none; }
+
+.hud-hint { gap: 14px; }
+.hud-pouches { display: inline-flex; align-items: center; gap: 5px; flex: none; }
+.hud-pouch { display: block; width: 28px; height: 28px; }
+.hud-pouch svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.hud-pouch .p-bag { fill: var(--shu); stroke: var(--accent-ink); stroke-width: 1.3; stroke-linejoin: round; }
+.hud-pouch .p-in { fill: color-mix(in srgb, var(--shu) 40%, #000); stroke: var(--accent-ink); stroke-width: 1.3; }
+.hud-pouch .p-mark, .hud-pouch .p-knot { fill: #ffe7a6; }
+.hud-pouch .p-knot { stroke: var(--accent-ink); stroke-width: .8; }
+.hud-pouch .p-cord { fill: none; stroke: #ffe7a6; stroke-width: 2.4; stroke-linecap: round; }
+.hud-pouch .p-tassel { fill: none; stroke: #ffe7a6; stroke-width: 1.4; stroke-linecap: round; }
+.hud-pouch .p-slip { fill: #fffaf0; stroke: var(--accent-ink); stroke-width: 1.1; stroke-linejoin: round; }
+.hud-pouch .p-ink { fill: none; stroke: #8a5a24; stroke-width: 1.1; stroke-linecap: round; }
+.hud-pouch__open { display: none; }
+.hud-pouch[data-open="1"] .hud-pouch__open { display: inline; }
+.hud-pouch[data-open="1"] .hud-pouch__tied { display: none; }
+.hud-hint:disabled .p-bag, .hud-hint:disabled .p-in, .hud-hint:disabled .p-knot, .hud-hint:disabled .p-slip { stroke: var(--ink-2); }
+.hud-hint.is-waiting .hud-pouches { opacity: .55; }
+
+#app[data-layout="compact"] .hud-slot { gap: 8px; }
+#app[data-layout="compact"] .hud-slot > .hud-btn { padding: 0 8px; gap: 6px; font-size: 16px; }
+#app[data-layout="compact"] .hud-slot > .hud-btn .hud-ico { width: 18px; height: 18px; }
+#app[data-layout="compact"] .hud-slot > .hud-retract .hud-ico { display: none; }          /* 38 % of a phone row: the label alone */
+#app[data-layout="compact"] .hud-hint { gap: 8px; }
+#app[data-layout="compact"] .hud-pouches { gap: 2px; }
+#app[data-layout="compact"] .hud-pouch { width: 24px; height: 24px; }
+
+/* ===== overlays: the wrappers ============================================================================================ */
+
+.hud-layer {
+  position: absolute; inset: 0; display: grid;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+.hud-layer__scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--page) 66%, transparent); opacity: 0; }
+.hud-layer.is-open > .hud-layer__scrim { opacity: 1; }
+/* The panels are <dialog open> elements that never enter the top layer: undo the browser's dialog box (no
+ * specificity, so each panel's own class decides its box). */
+:where(.hud-layer dialog) {
+  position: relative; inset: auto; width: auto; height: auto; margin: 0; padding: 0; max-width: none; max-height: none;
+  border: 0; background: none; color: var(--ink);
+}
+.hud-layer dialog:focus, .hud-menu:focus { outline: none; }
+
+/* ----- menu ----- */
+
+.hud-layer--menu { z-index: calc(var(--z-sheet) + 4); }
+.hud-layer--menu > .hud-layer__scrim { background: color-mix(in srgb, var(--page) 40%, transparent); }
+.hud-menu {
+  position: absolute; left: var(--menu-x, 8px); top: var(--menu-y, 52px);
+  display: grid; gap: 2px; min-width: 216px; padding: 6px;
+  border: 1.5px solid var(--edge); border-radius: 18px; background: var(--surface);
+  box-shadow: 0 18px 44px #0009;
+  transform-origin: 22px 0; transform: scale(.9) translateY(-6px); opacity: 0;
+}
+.hud-layer.is-open > .hud-menu { transform: none; opacity: 1; }
+.hud-menu__item {
+  display: flex; align-items: center; gap: 12px;
+  min-height: 50px; margin: 0; padding: 0 18px 0 12px;
+  border: 0; border-radius: 12px; background: none; color: var(--ink);
+  font: 600 17px / 1.2 var(--font-ui); text-align: left; white-space: nowrap;
+  cursor: pointer;
+}
+.hud-menu__item .hud-ico { color: var(--ink-2); }
+.hud-menu__item:active:not(:disabled), .hud-menu__item:focus-visible { background: var(--surface-2); }
+.hud-menu__item:focus-visible { outline-offset: -3px; }
+.hud-menu__item[data-menu="resign"], .hud-menu__item[data-menu="resign"] .hud-ico { color: var(--danger); }
+.hud-menu__item[data-menu="resign"] { position: relative; margin-top: 7px; }
+.hud-menu__item[data-menu="resign"]::before {
+  content: ""; position: absolute; left: 8px; right: 8px; top: -4px; height: 1px; background: var(--edge);
+}
+.hud-menu__item:disabled { opacity: .4; cursor: default; }
+
+/* ----- sheets ----- */
+
+.hud-layer--sheet { z-index: calc(var(--z-sheet) + 4); place-items: center; padding: 20px; }
+.hud-sheet {
+  display: flex; flex-direction: column;
+  width: min(560px, 100%); max-height: min(740px, 100%);
+  border: 1.5px solid var(--edge); border-radius: 22px; background: var(--surface);
+  box-shadow: 0 24px 60px #0009;
+  overflow: hidden;
+  transform: translateY(40px); opacity: 0;
+}
+.hud-layer.is-open > .hud-sheet { transform: none; opacity: 1; }
+.hud-sheet__head {
+  flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 12px 8px 22px; border-bottom: 1px solid var(--edge);
+}
+.hud-sheet__title { margin: 0; font: 700 26px / 1.2 var(--font-kai); letter-spacing: .08em; }
+.hud-sheet__close::before { inset: 4px; border-radius: 50%; box-shadow: none; background: var(--surface-2); }
+.hud-sheet__body {
+  flex: 1 1 auto; min-height: 0; padding: 8px 22px 20px;
+  overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+}
+.hud-sheet__foot {
+  flex: none; display: flex; justify-content: flex-end;
+  padding: 12px 22px calc(15px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--edge);
+}
+
+#app[data-layout="compact"] .hud-layer--sheet { place-items: end stretch; padding: 0; }
+#app[data-layout="compact"] .hud-sheet {
+  width: 100%; max-height: 88%;
+  border-radius: 22px 22px 0 0; border-width: 1.5px 0 0;
+  transform: translateY(100%); opacity: 1;
+}
+#app[data-layout="compact"] .hud-layer.is-open > .hud-sheet { transform: none; }
+#app[data-layout="compact"] .hud-sheet__head { padding-left: 16px; }
+#app[data-layout="compact"] .hud-sheet__title { font-size: 22px; }
+#app[data-layout="compact"] .hud-sheet__body { padding: 6px 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
+#app[data-layout="compact"] .hud-sheet__foot { padding-inline: 16px; }
+
+/* ----- settings ----- */
+
+.hud-rank {
+  display: flex; align-items: center; gap: 8px;
+  margin: 6px 0 4px; padding: 10px 16px; border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--edge));
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+}
+.hud-rank .hud-ico { color: var(--accent); }
+.hud-rank .hud-ico svg { fill: currentColor; }
+.hud-rank__label { font-size: 15px; font-weight: 600; color: var(--ink-2); }
+.hud-rank__name { margin-left: auto; font: 700 24px / 1.2 var(--font-kai); letter-spacing: .08em; color: var(--ink); }
+
+.hud-set__group { padding: 6px 0; border-top: 1px solid var(--edge); }
+.hud-set__group:first-of-type, .hud-rank[hidden] + .hud-set__group { border-top: 0; }
+.hud-set__row { display: flex; align-items: center; justify-content: space-between; gap: 6px 16px; min-height: 52px; }
+.hud-set__row--stack { flex-direction: column; align-items: stretch; padding: 8px 0 10px; }
+.hud-set__row--wrap { flex-wrap: wrap; padding: 6px 0; }
+.hud-set__row--tap { cursor: pointer; }
+.hud-set__label { flex: 0 1 auto; font-size: 16px; font-weight: 600; line-height: 22px; }
+.hud-set__note { display: block; font-size: 12px; font-weight: 400; line-height: 16px; color: var(--ink-2); }
+.hud-set__tools { display: flex; flex-wrap: wrap; gap: 10px; padding-bottom: 3px; }
+.hud-set__tools .hud-btn { height: 46px; padding: 0 14px; font-size: 15px; }
+
+.hud-switch {
+  position: relative; flex: none; width: 60px; height: 44px; margin: 0; padding: 0;
+  border: 0; border-radius: 22px; background: none; cursor: pointer;
+}
+.hud-switch::before {
+  content: ""; position: absolute; inset: 6px 2px; border-radius: 16px;
+  border: 1px solid var(--edge); background: var(--surface-2);
+}
+.hud-switch__knob {
+  position: absolute; left: 7px; top: 11px; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--ink-2);
+}
+.hud-switch[aria-checked="true"]::before { border-color: transparent; background: var(--accent); }
+.hud-switch[aria-checked="true"] .hud-switch__knob { transform: translateX(24px); background: var(--accent-ink); }
+
+.hud-seg {
+  display: inline-flex; flex: 0 1 auto; min-width: 0; gap: 3px; padding: 3px;
+  border: 1px solid var(--edge); border-radius: 15px; background: var(--surface-2);
+}
+.hud-seg__opt {
+  flex: 1 1 auto; min-width: 0; min-height: 44px; margin: 0; padding: 0 14px;
+  border: 0; border-radius: 11px; background: none; color: var(--ink-2);
+  font: 600 15px / 1.2 var(--font-ui); white-space: nowrap;
+  cursor: pointer;
+}
+.hud-seg__opt[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); box-shadow: 0 1px 3px #0004; }
+
+.hud-range {
+  flex: 0 1 240px; min-width: 120px; height: 44px; margin: 0; padding: 0;
+  -webkit-appearance: none; appearance: none; background: none; cursor: pointer;
+}
+.hud-range::-webkit-slider-runnable-track {
+  height: 10px; border-radius: 5px; border: 1px solid var(--edge);
+  background: linear-gradient(to right, var(--accent) var(--fill, 100%), var(--surface-2) var(--fill, 100%));
+}
+.hud-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 28px; height: 28px; margin-top: -10px; border-radius: 50%;
+  border: 3px solid var(--accent); background: var(--surface); box-shadow: 0 2px 4px #0005;
+}
+.hud-range::-moz-range-track { height: 8px; border-radius: 5px; border: 1px solid var(--edge); background: var(--surface-2); }
+.hud-range::-moz-range-progress { height: 8px; border-radius: 5px; background: var(--accent); }
+.hud-range::-moz-range-thumb {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 3px solid var(--accent); background: var(--surface); box-shadow: 0 2px 4px #0005;
+}
+
+.hud-themes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.hud-theme {
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+  min-height: 44px; margin: 0; padding: 6px 6px 8px;
+  border: 2px solid var(--edge); border-radius: 16px; background: var(--surface-2); color: var(--ink-2);
+  font: 600 15px / 1.2 var(--font-ui); text-align: center;
+  cursor: pointer;
+}
+.hud-theme[aria-pressed="true"] { border-color: var(--accent); color: var(--ink); box-shadow: 0 0 0 2px var(--accent); }
+.hud-theme__art {
+  position: relative; display: flex; align-items: center; justify-content: center; gap: 12px;
+  height: 58px; border-radius: 10px; overflow: hidden;
+  background: linear-gradient(135deg, var(--field-a), var(--field-b));
+  box-shadow: inset 0 0 0 2px var(--frame-edge);
+}
+.hud-theme__art::before {
+  content: ""; position: absolute; inset: 0; opacity: .32;
+  background:
+    linear-gradient(var(--line) 1.5px, transparent 1.5px) 0 6px / 100% 15px,
+    linear-gradient(90deg, var(--line) 1.5px, transparent 1.5px) 7px 0 / 15px 100%;
+}
+.hud-theme__art .hud-disc { --d: 32px; position: relative; }
+.hud-theme__name { letter-spacing: .1em; }
+
+.hud-coach {
+  margin: 8px 0 4px; padding: 10px 14px; border-radius: 14px;
+  border: 1px solid var(--edge); background: var(--surface-2);
+}
+.hud-coach__line { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 700; line-height: 22px; }
+.hud-coach__line::before { content: ""; flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--ink-2); }
+.hud-coach[data-mode="llm"] .hud-coach__line::before { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+.hud-coach__why { margin: 4px 0 0 18px; font-size: 13px; line-height: 19px; color: var(--ink-2); }
+
+#app[data-layout="compact"] .hud-seg__opt { padding: 0 10px; font-size: 14px; }
+#app[data-layout="compact"] .hud-set__row--wrap .hud-seg { flex: 1 1 100%; }
+
+/* ----- notation ----- */
+
+.hud-moves__head, .hud-moves__row {
+  display: grid; grid-template-columns: 52px minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 8px;
+}
+.hud-moves__head {
+  position: sticky; top: -8px; z-index: 1; margin: -8px 0 0; padding: 10px 8px 8px;
+  border-bottom: 1px solid var(--edge); background: var(--surface);
+}
+.hud-moves__head .hud-disc { --d: 26px; margin-left: 8px; }
+.hud-moves { margin: 0; padding: 6px 0 0; list-style: none; min-height: 120px; }
+.hud-moves__row { min-height: 42px; padding: 0 8px; border-radius: 10px; font-size: 18px; font-variant-numeric: tabular-nums; }
+.hud-moves__row:nth-child(even) { background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
+.hud-moves__no { padding-right: 6px; text-align: right; font-size: 14px; color: var(--ink-2); }
+.hud-moves__move { justify-self: start; padding: 4px 10px; border-radius: 9px; letter-spacing: .06em; }
+.hud-moves__move.is-current { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.hud-moves__move:empty { display: none; }
+
+/* ----- rules, about ----- */
+
+.hud-rules { display: grid; gap: 10px; margin: 0; padding: 6px 0 0; list-style: none; }
+.hud-rules__item {
+  display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: start; gap: 12px;
+  padding: 10px 14px 10px 10px; border: 1px solid var(--edge); border-radius: 16px; background: var(--surface-2);
+}
+.hud-rules__no {
+  display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%;
+  font: 700 17px / 1 var(--font-ui); font-variant-numeric: tabular-nums;
+  background: radial-gradient(circle at 36% 30%, var(--red-a), var(--red-b) 58%, var(--red-c));
+  color: var(--red-glyph);
+  box-shadow: inset 0 0 0 2px var(--red-rim), 0 2px 0 var(--piece-edge);
+}
+.hud-rules__text { padding-top: 4px; font-size: 16px; line-height: 26px; }
+
+.hud-about__mark {
+  margin: 14px 0 16px; text-align: center;
+  font: 700 52px / 1.1 var(--font-kai); letter-spacing: .16em; text-indent: .16em; color: var(--accent);
+  text-shadow: 0 2px 0 color-mix(in srgb, var(--accent) 45%, #000);
+}
+.hud-about__text { margin: 0 0 12px; font-size: 16px; line-height: 27px; }
+.hud-about__privacy {
+  margin: 18px 0 0; padding: 12px 14px; border: 1px solid var(--edge); border-radius: 14px; background: var(--surface-2);
+  font-size: 14px; line-height: 22px; color: var(--ink-2);
+}
+
+/* ----- dialogs ----- */
+
+.hud-layer--dialog { z-index: var(--z-dialog); place-items: center; padding: 24px; }
+.hud-dialog {
+  width: min(430px, 100%); max-height: 100%; padding: 26px 22px 20px; overflow-y: auto;
+  border: 1.5px solid var(--edge); border-radius: 24px; background: var(--surface);
+  box-shadow: 0 24px 60px #000a; text-align: center;
+  transform: scale(.92); opacity: 0;
+}
+.hud-layer.is-open > .hud-dialog { transform: none; opacity: 1; }
+.hud-dialog__title { margin: 0 0 8px; font: 700 28px / 1.25 var(--font-kai); letter-spacing: .06em; }
+.hud-dialog__body { margin: 0 0 20px; font-size: 16px; line-height: 25px; color: var(--ink-2); }
+.hud-dialog__buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding-bottom: 3px; }
+.hud-dialog__buttons .hud-btn { height: 52px; padding: 0 10px; font-size: 17px; }
+
+.hud-dialog__side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; margin: 0 0 20px; text-align: left; }
+.hud-dialog__sidelabel { grid-column: 1 / -1; font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.hud-side {
+  display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 56px; margin: 0; padding: 6px 8px;
+  border: 2px solid var(--edge); border-radius: 16px; background: var(--surface-2); color: var(--ink-2);
+  font: 600 15px / 1.25 var(--font-ui); text-align: left;
+  cursor: pointer;
+}
+.hud-side .hud-disc { --d: 34px; }
+.hud-side[aria-pressed="true"] {
+  border-color: var(--accent); color: var(--ink);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2)); box-shadow: 0 0 0 2px var(--accent);
+}
+#app[data-layout="compact"] .hud-dialog__side { grid-template-columns: minmax(0, 1fr); }
+#app[data-layout="compact"] .hud-layer--dialog { padding: 16px; }
+
+/* ===== start overlay (§12.5) ============================================================================================ */
+
+.hud-layer--start {
+  z-index: calc(var(--z-sheet) + 2); place-items: center; overflow: hidden;
+  background:
+    radial-gradient(46% 40% at 50% 44%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 100%),
+    color-mix(in srgb, var(--page) 88%, transparent);
+}
+.hud-layer--start.is-closing { opacity: 0; }      /* it still takes the taps while it fades (a double tap on 开战！) */
+.hud-start { display: grid; place-items: center; width: 100%; max-height: 100%; padding: 16px; overflow: auto; }
+/* The text column is as wide as what it holds (440 px at most: the longest greeting on one line), so the bubble ends
+ * where its line ends and its tail stays next to the figure, whichever greeting is shown. The figure's column never
+ * gives way (max-content): in a narrow window the greeting takes a second line instead. */
+.hud-start__card {
+  display: grid; grid-template-columns: fit-content(440px) max-content; align-items: center; gap: 0 44px;
+}
+.hud-start__mark { display: flex; align-items: center; gap: 18px; margin: 0 0 22px; font: 700 56px / 1.1 var(--font-kai); }
+.hud-start__word {
+  position: relative; isolation: isolate; padding: .06em .3em .1em .46em;
+  color: var(--red-glyph); letter-spacing: .16em;
+  text-shadow: 0 .05em 0 color-mix(in srgb, var(--shu) 45%, #000), 0 0 .1em color-mix(in srgb, var(--shu) 45%, #000);
+}
+.hud-brush { position: absolute; inset: -4% -3% -6%; z-index: -1; width: 106%; height: 110%; overflow: visible; }
+.hud-brush path { fill: var(--shu); }
+.hud-start__mark .hud-disc { --d: 48px; }
+.hud-start__mark .hud-disc:first-child { transform: rotate(-10deg); }
+.hud-start__mark .hud-disc:last-child { transform: rotate(10deg); }
+
+.hud-start__line {
+  position: relative; margin: 0 0 24px; padding: 13px 18px;
+  border: 1.5px solid var(--edge); border-radius: 18px; background: var(--surface);
+  font-size: 18px; line-height: 28px; box-shadow: 0 8px 24px #0004;
+  text-wrap: balance;                                  /* where it needs two lines: two even ones, not a line and a stub */
+}
+.hud-start.has-figure .hud-start__line::after {
+  content: ""; position: absolute; right: -8.5px; top: 50%; width: 15px; height: 15px; margin-top: -8px;
+  border: solid var(--edge); border-width: 1.5px 1.5px 0 0; background: var(--surface);
+  transform: rotate(45deg);
+}
+.hud-start__buttons { display: flex; flex-wrap: wrap; gap: 12px; padding-bottom: 3px; }
+.hud-start__buttons .hud-btn { height: 64px; padding: 0 26px; border-radius: 18px; font-size: 18px; }
+.hud-start__buttons .hud-start__go { min-width: 240px; font: 700 28px / 1.1 var(--font-kai); letter-spacing: .12em; }
+.hud-start__links { display: flex; flex-wrap: wrap; gap: 4px; margin: 12px 0 0 -12px; }
+.hud-start__links .hud-btn { font-size: 15px; }
+.hud-start__links .hud-ico { width: 18px; height: 18px; }
+
+/* The greeter. buddy.js fills the host (figure + bubble) for the coach column; here only the figure stands.
+ * He stands as he is drawn in every layout (--buddy-face, styles/buddy.css): his fan arm is on the side away from the
+ * text, so the open fan he waves while he cheers can never reach the greeting line or a button. (Mirrored, as in the
+ * coach column of landscape, the fan would be on the text's side.) He looks toward what he says: in landscape, where
+ * the text is on his left, his head leans to it and his eyes rest on it; in portrait and compact it is below him
+ * and his eyes go down to it. The glance of buddy.js is then a look up at the child. */
+#overlays .hud-start__figure {
+  display: block; width: auto; height: auto;
+  --buddy-h: clamp(280px, 44vh, 460px); --buddy-face: 1; --_gaze: -1.8px .3px; --_lean: -5deg;
+  /* The drawing leaves a fifth of his height free on each side of the head (room for a raised arm and the ♪): he
+   * steps half of that closer to the text, so the bubble's tail ends near his face and not in front of a gap. */
+  margin-left: calc(var(--buddy-h) * -.1);
+}
+#overlays .hud-start__figure:empty { display: none; }
+#overlays .hud-start__figure .bubble { display: none; }
+#overlays .hud-start__figure .buddy:not([data-mood="cheering"]) .b-head-act { rotate: var(--_lean); }      /* cheering: head up, as the pose is drawn */
+#overlays .hud-start__figure .buddy .b-eyes { translate: var(--_gaze); }
+#overlays .hud-start__figure .buddy.is-glance .b-eyes { translate: 0 0; }
+/* The pool of light at his feet (.buddy-fig::before, styles/buddy.css). In the coach column it has to end inside the
+ * figure's box, because the chips follow right under it. The title card has room below him, so here the pool is the
+ * fuller one, centred on his feet, in a box 4.5 % higher to fade out in (centres and radii are stated for that box). */
+#overlays .hud-start__figure .buddy-fig::before {
+  inset: 4% -6% -4.5% -6%;
+  background:
+    radial-gradient(50% 8.6% at 50% 91.2%, color-mix(in srgb, var(--accent) 30%, transparent), transparent 100%),
+    radial-gradient(50% 47.8% at 50% 53.5%, color-mix(in srgb, var(--wei) 26%, transparent), transparent 100%);
+}
+/* While the title card is up he stands on it. His figure in the coach column would show through the 88 % backdrop
+ * as a pale double right behind the greeter (the two overlap in landscape), so it waits until the card starts to fade. */
+#app:has(> #overlays > .hud-layer--start:not(.is-closing)) .coach__buddy .buddy-fig { opacity: 0; }
+
+#app[data-layout="portrait"] .hud-start__card,
+#app[data-layout="compact"] .hud-start__card { grid-template-columns: minmax(0, 440px); justify-items: center; text-align: center; }
+#app[data-layout="portrait"] .hud-start__text,
+#app[data-layout="compact"] .hud-start__text { display: contents; }
+#app[data-layout="portrait"] .hud-start__mark,
+#app[data-layout="compact"] .hud-start__mark { order: 1; margin-bottom: 10px; }
+#app[data-layout="portrait"] .hud-start__figure,
+#app[data-layout="compact"] .hud-start__figure { order: 2; margin: 0 0 14px; --_gaze: 0 1.6px; --_lean: 0deg; }
+#app[data-layout="portrait"] .hud-start__line,
+#app[data-layout="compact"] .hud-start__line { order: 3; }
+#app[data-layout="portrait"] .hud-start__buttons,
+#app[data-layout="compact"] .hud-start__buttons { order: 4; justify-content: center; }
+#app[data-layout="portrait"] .hud-start__links,
+#app[data-layout="compact"] .hud-start__links { order: 5; justify-content: center; margin-left: 0; }
+#app[data-layout="portrait"] .hud-start.has-figure .hud-start__line::after,
+#app[data-layout="compact"] .hud-start.has-figure .hud-start__line::after {
+  right: auto; left: 50%; top: -8.5px; margin: 0 0 0 -8px; border-width: 1.5px 0 0 1.5px;
+}
+/* portrait: the longest greeting (22 characters at 20 px) still fits on one line */
+#app[data-layout="portrait"] .hud-start__card { grid-template-columns: minmax(0, 500px); }
+#app[data-layout="portrait"] .hud-start__mark { margin-bottom: 22px; }
+#app[data-layout="portrait"] #overlays .hud-start__figure { --buddy-h: 420px; margin-bottom: 20px; }
+#app[data-layout="portrait"] .hud-start__line { font-size: 20px; line-height: 30px; padding: 14px 22px; }
+#app[data-layout="portrait"] .hud-start__buttons .hud-btn { height: 66px; }
+#app[data-layout="portrait"] .hud-start__buttons .hud-start__go { min-width: 260px; font-size: 28px; }
+
+#app[data-layout="compact"] .hud-start { padding: 12px 16px; }
+#app[data-layout="compact"] .hud-start__mark { font-size: 44px; gap: 12px; }
+#app[data-layout="compact"] .hud-start__mark .hud-disc { --d: 38px; }
+#app[data-layout="compact"] #overlays .hud-start__figure { --buddy-h: 200px; margin-bottom: 12px; }
+#app[data-layout="compact"] .hud-start__line { margin-bottom: 18px; padding: 10px 14px; font-size: 16px; line-height: 25px; }
+#app[data-layout="compact"] .hud-start__buttons { flex-direction: column; align-self: stretch; justify-self: stretch; padding-inline: 12px; }
+#app[data-layout="compact"] .hud-start__buttons .hud-btn { height: 56px; }
+#app[data-layout="compact"] .hud-start__buttons .hud-start__go { min-width: 0; font-size: 24px; }
+
+/* a landscape phone (the `small` landscape of §12.2, a 48 px bar): everything smaller, the figure stays beside the text */
+@media (max-height: 479.98px) and (orientation: landscape) {
+  .hud-undo, .hud-under .hud-retry, .hud-slot > .hud-btn { height: 44px; }
+  .hud-start__mark { margin-bottom: 10px; font-size: 44px; }
+  .hud-start__mark .hud-disc { --d: 38px; }
+  .hud-start__line { margin-bottom: 12px; padding: 8px 14px; font-size: 15px; line-height: 23px; }
+  .hud-start__buttons .hud-btn { height: 48px; }
+  .hud-start__buttons .hud-start__go { font-size: 22px; }
+  .hud-start__links { margin-top: 4px; }
+  #overlays .hud-start__figure { --buddy-h: 200px; }
+}
+
+/* ===== game-over card (§12.6) =========================================================================================== */
+
+:where(#overlays) > .hud-layer--over { pointer-events: none; }
+.hud-layer--over { z-index: var(--z-sheet); place-items: end center; padding: 0; }
+.hud-over {
+  pointer-events: auto;
+  display: flex; flex-direction: column; gap: 12px;
+  width: min(640px, 100%); max-height: 66%; padding: 16px 20px calc(16px + env(safe-area-inset-bottom, 0px));
+  overflow-y: auto; overscroll-behavior: contain;
+  border: solid var(--edge); border-width: 1.5px 1.5px 0; border-radius: 24px 24px 0 0;
+  background: var(--surface); box-shadow: 0 -12px 44px #0008;
+  transform: translateY(100%);
+}
+.hud-layer.is-open > .hud-over { transform: none; }
+.hud-over[data-result="win"] {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--edge));
+  background: radial-gradient(120% 220px at 50% 0, color-mix(in srgb, var(--accent) 24%, transparent), transparent 100%), var(--surface);
+}
+
+/* landscape: a centred card over the coach column, wherever the shell has put the column (--group-x, --group-y) */
+#app[data-layout="landscape"] .hud-layer--over {
+  inset: calc(env(safe-area-inset-top, 0px) + var(--group-y, 0px) + var(--top, 48px))
+         max(var(--group-x, 16px), env(safe-area-inset-right, 0px))
+         calc(env(safe-area-inset-bottom, 0px) + var(--group-y, 0px) + var(--bar, 64px))
+         auto;
+  width: var(--panel-w, 480px); place-items: center; padding: 8px 0;
+}
+#app[data-layout="landscape"] .hud-over {
+  width: min(460px, 100%); max-height: 100%; padding: 18px 20px;
+  border-width: 1.5px; border-radius: 24px; box-shadow: 0 22px 54px #0009;
+  transform: translateY(36px); opacity: 0;
+}
+#app[data-layout="landscape"] .hud-layer.is-open > .hud-over { transform: none; opacity: 1; }
+/* The card stands in front of the coach column's figure and is narrower than his reach: the tip of the fan he waves
+ * when the child has won shows left of the card's edge, and in a tall window his feet show under it. So he steps out
+ * while the card is up, whatever his mood, and is back when it goes (回看棋局, Esc, a new game); the fade is the one
+ * of the start overlay (see "motion" below). Gone means gone: the card is not modal, so a figure that was only
+ * transparent would still take the taps beside and under the card and a stop of the Tab key that nobody can see.
+ * Portrait and compact: the sheet covers the bust entirely, nothing to do. */
+#app[data-layout="landscape"]:has(> #overlays > .hud-layer--over:not(.is-closing)) .coach__buddy .buddy-fig { opacity: 0; visibility: hidden; }
+
+.hud-over__head { display: grid; justify-items: center; gap: 2px; text-align: center; }
+.hud-over__crest { width: 112px; height: 78px; }
+.hud-over__crest svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.hud-over__crest .c-leaf path { fill: var(--accent); }
+.hud-over__crest .c-stem { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
+.hud-over__crest .c-star { fill: var(--accent); stroke: color-mix(in srgb, var(--accent) 50%, #000); stroke-width: 1.4; stroke-linejoin: round; }
+.hud-over__crest .c-ground { fill: var(--edge); }
+.hud-over__crest .c-pole { fill: none; stroke: var(--ink-2); stroke-width: 4; stroke-linecap: round; }
+.hud-over__crest .c-knob { fill: var(--accent); }
+.hud-over__crest .c-flag { fill: var(--shu); stroke: color-mix(in srgb, var(--shu) 55%, #000); stroke-width: 1.5; stroke-linejoin: round; }
+.hud-over__crest .c-fold { fill: none; stroke: #ffffff55; stroke-width: 2; stroke-linecap: round; }
+.hud-over__crest .c-ring { fill: none; stroke-width: 8; }
+.hud-over__crest .c-ring--shu { stroke: var(--shu); }
+.hud-over__crest .c-ring--wei { stroke: var(--wei); }
+
+.hud-over__title { margin: 0; font: 700 40px / 1.2 var(--font-kai); letter-spacing: .08em; text-indent: .08em; }
+.hud-over[data-result="win"] .hud-over__title { color: var(--accent); text-shadow: 0 2px 0 color-mix(in srgb, var(--accent) 42%, #000); }
+.hud-over__sub { margin: 2px 0 0; font-size: 16px; line-height: 24px; color: var(--ink-2); }
+.hud-over__reason {
+  margin: 6px 0 0; padding: 2px 12px; border: 1px solid var(--edge); border-radius: 999px; background: var(--surface-2);
+  font-size: 13px; line-height: 20px; color: var(--ink-2);
+}
+
+.hud-over__body { display: grid; gap: 10px; }
+.hud-over__best { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 10px; margin: 0; }
+.hud-over__tag { padding: 3px 11px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font: 700 13px / 18px var(--font-ui); letter-spacing: .08em; }
+.hud-over__move { font: 700 22px / 1.2 var(--font-kai); letter-spacing: .08em; }
+.hud-over__self { padding: 1px 9px; border: 1px dashed var(--ink-2); border-radius: 999px; font-size: 13px; line-height: 18px; color: var(--ink-2); }
+
+.hud-over__gains { padding: 10px 14px 12px; border: 1px solid var(--edge); border-radius: 16px; background: var(--surface-2); }
+.hud-over__heading { margin: 0 0 4px; font: 700 13px / 20px var(--font-ui); letter-spacing: .12em; color: var(--ink-2); }
+.hud-over__takeaway { position: relative; min-height: 78px; font-size: 17px; line-height: 26px; }
+/* Until the strategist's line arrives: one skeleton line; with full motion a highlight sweeps across it (transform only). */
+.hud-over__takeaway:empty { clip-path: inset(6px 0 calc(100% - 20px) 0 round 7px); }      /* the line's own rounded box */
+.hud-over__takeaway:empty::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 6px; height: 14px; border-radius: 7px; background: var(--edge);
+}
+.hud-over__takeaway:empty::after {
+  content: ""; position: absolute; left: 0; top: 6px; width: 45%; height: 14px; border-radius: 7px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--ink-2) 60%, transparent), transparent);
+  transform: translateX(-110%);
+}
+
+.hud-over__facts { display: grid; gap: 6px; }
+.hud-over__stats { margin: 0; text-align: center; font-size: 15px; line-height: 22px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.hud-over__goal, .hud-over__rank { display: flex; align-items: flex-start; gap: 8px; margin: 0; font-size: 15px; line-height: 22px; }
+.hud-over__goal .hud-ico, .hud-over__rank .hud-ico { width: 20px; height: 20px; margin-top: 1px; color: var(--accent); }
+.hud-over__rank .hud-ico svg { fill: currentColor; }
+.hud-over__rank { align-items: center; color: var(--ink-2); }
+.hud-over__rank strong { font: 700 20px / 22px var(--font-kai); letter-spacing: .08em; color: var(--ink); }
+
+/* When the card has to scroll (a landscape phone), the two buttons stay in view at its bottom. The margins take back
+ * what the padding adds, so the row sits exactly where it would without them; the solid shadow covers the card's
+ * bottom padding under the row, where the scrolling text would otherwise peek out (the card clips it). */
+.hud-over__buttons {
+  flex: none; display: grid; grid-template-columns: minmax(0, 38fr) minmax(0, 62fr); gap: 12px;
+  position: sticky; bottom: 0; z-index: 1;
+  margin: -6px -4px -8px; padding: 6px 4px 11px;       /* 11 = 8 + the 3 px bottom edge of the buttons */
+  background: var(--surface); box-shadow: 0 48px 0 var(--surface);
+}
+.hud-over__buttons .hud-btn { height: 52px; padding: 0 10px; font-size: 17px; }
+
+/* portrait: two columns keep the sheet low, so the board stays in view above it */
+#app[data-layout="portrait"] .hud-over {
+  display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); align-items: center; gap: 12px 24px;
+  width: 100%; padding-inline: max(24px, 50% - 340px);
+}
+#app[data-layout="portrait"] .hud-over__buttons { grid-column: 1 / -1; }
+
+#app[data-layout="compact"] .hud-over { gap: 10px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); max-height: 70%; }
+#app[data-layout="compact"] .hud-over__head { grid-template-columns: auto minmax(0, 1fr); justify-items: start; column-gap: 12px; text-align: left; }
+#app[data-layout="compact"] .hud-over__crest { grid-row: 1 / span 3; align-self: center; width: 72px; height: 50px; }
+#app[data-layout="compact"] .hud-over__title { font-size: 30px; text-indent: 0; }
+#app[data-layout="compact"] .hud-over__sub { font-size: 14px; line-height: 20px; }
+#app[data-layout="compact"] .hud-over__reason { justify-self: start; margin-top: 2px; }
+#app[data-layout="compact"] .hud-over__takeaway { min-height: 66px; font-size: 15px; line-height: 22px; }
+#app[data-layout="compact"] .hud-over__stats, #app[data-layout="compact"] .hud-over__goal, #app[data-layout="compact"] .hud-over__rank { font-size: 14px; line-height: 20px; }
+#app[data-layout="compact"] .hud-over__buttons .hud-btn { height: 48px; font-size: 16px; }
+
+/* ===== blocking notice, toast, landscape-phone card ====================================================================== */
+
+.hud-layer--blocking { z-index: calc(var(--z-dialog) + 4); place-items: center; padding: 24px; }
+.hud-layer--blocking > .hud-layer__scrim { background: color-mix(in srgb, var(--page) 82%, transparent); }
+.hud-blocking { width: min(440px, 100%); transform: scale(.92); opacity: 0; }
+.hud-layer.is-open > .hud-blocking { transform: none; opacity: 1; }
+.hud-blocking__retry {
+  display: grid; justify-items: center; gap: 16px; width: 100%; margin: 0; padding: 28px 24px 24px;
+  border: 1.5px solid var(--edge); border-radius: 24px; background: var(--surface); color: var(--ink);
+  font: 600 17px / 28px var(--font-ui); text-align: center;
+  box-shadow: 0 24px 60px #000a; cursor: pointer;
+}
+.hud-blocking__retry .hud-ico {
+  width: 64px; height: 64px; padding: 15px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-ink);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--accent) 55%, #000);
+}
+.hud-blocking__retry .hud-ico svg { stroke-width: 2.4; }
+.hud-blocking__retry:active .hud-ico { transform: translateY(2px); box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 55%, #000); }
+
+:where(#overlays) > .hud-toast { pointer-events: none; }
+.hud-toast {
+  position: absolute; left: 50%; top: calc(env(safe-area-inset-top, 0px) + var(--group-y, 0px) + var(--top, 48px) + 12px); z-index: var(--z-toast);
+  width: max-content; max-width: min(480px, 100% - 32px); padding: 10px 20px;
+  border-radius: 22px; background: var(--ink); color: var(--page);
+  font: 600 15px / 23px var(--font-ui); text-align: center;
+  box-shadow: 0 10px 30px #0008;
+  transform: translate(-50%, -10px); opacity: 0;
+}
+.hud-toast.is-on { transform: translate(-50%, 0); opacity: 1; }
+
+.hud-rotate {
+  position: absolute; left: 50%; top: calc(env(safe-area-inset-top, 0px) + var(--top, 36px) + 6px); z-index: calc(var(--z-sheet) + 1);
+  display: flex; align-items: center; gap: 12px; max-width: calc(100% - 16px); padding: 6px 8px 9px 16px;
+  border: 1.5px solid var(--edge); border-radius: 18px; background: var(--surface);
+  box-shadow: 0 12px 32px #0008;
+  transform: translateX(-50%);
+}
+.hud-rotate__text { margin: 0; font-size: 15px; line-height: 22px; white-space: nowrap; }
+.hud-rotate .hud-btn { height: 44px; padding: 0 14px; font-size: 15px; }
+
+/* ===== motion (full only) =============================================================================================== */
+
+:root[data-motion="full"] .hud-layer__scrim { transition: opacity 240ms var(--e-out); }
+:root[data-motion="full"] .hud-sheet { transition: transform 240ms var(--e-out), opacity 240ms var(--e-out); }
+:root[data-motion="full"] .hud-menu { transition: transform 140ms var(--e-out), opacity 140ms var(--e-out); }
+:root[data-motion="full"] .hud-dialog,
+:root[data-motion="full"] .hud-blocking { transition: transform 160ms var(--e-back), opacity 160ms var(--e-out); }
+:root[data-motion="full"] .hud-layer--start { transition: opacity 200ms linear; }
+:root[data-motion="full"] .hud-over { transition: transform 300ms var(--e-out), opacity 300ms var(--e-out); }
+:root[data-motion="full"] .hud-slot { transition: opacity 120ms var(--e-out); }                    /* D7 */
+:root[data-motion="full"] .hud-toast { transition: transform 200ms var(--e-out), opacity 200ms var(--e-out); }
+:root[data-motion="full"] .hud-switch__knob { transition: transform 140ms var(--e-out); }
+
+:root[data-motion="full"] .hud-confirm.is-beacon { animation: hud-beacon 300ms var(--e-inout) 1; }        /* D8 */
+:root[data-motion="full"] .hud-hint.is-nudge { animation: hud-beacon 300ms var(--e-inout) 2; }
+:root[data-motion="full"] .hud-hint.is-nudge .hud-pouch { animation: hud-wiggle 600ms var(--e-inout) 1; }
+:root[data-motion="full"] .hud-hint.is-nudge .hud-pouch:nth-child(2) { animation-delay: 60ms; }
+:root[data-motion="full"] .hud-hint.is-nudge .hud-pouch:nth-child(3) { animation-delay: 120ms; }
+:root[data-motion="full"] .hud-pouch.is-pop { animation: hud-pop 160ms var(--e-back) 1; }                 /* F7 */
+:root[data-motion="full"] .hud-disc.is-new { animation: hud-pop 240ms var(--e-back) 1; }
+:root[data-motion="full"] .hud-over__takeaway:empty::after { animation: hud-shimmer 1.4s var(--e-inout) infinite; }
+:root[data-motion="full"] .hud-blocking__retry.is-busy .hud-ico svg { animation: hud-spin 700ms var(--e-inout) 1; }
+/* The invitation to tap is a halo on a pseudo-element: the button's own box never moves (tests wait for it to be still). */
+:root[data-motion="full"] .hud-start__go::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  box-shadow: 0 0 0 3px var(--accent); opacity: 0;
+  animation: hud-halo 2.4s var(--e-out) 800ms infinite;
+}
+:root[data-motion="full"] #overlays .hud-start__figure .b-head-act { transition: rotate 260ms var(--e-back); }      /* with the rig's own tween */
+/* He appears at his place while the title card fades; in landscape he goes and comes with the game-over card
+ * (visibility switches at the transparent end of the fade: last when he goes, first when he comes). */
+:root[data-motion="full"] .coach__buddy .buddy-fig { transition: opacity 200ms linear, visibility 200ms linear; }
+:root[data-motion="full"] .hud-layer--start.is-open .hud-start__mark { animation: hud-rise 420ms var(--e-back) 1 backwards; }
+:root[data-motion="full"] .hud-layer--start.is-open .hud-start__line { animation: hud-rise 360ms var(--e-out) 120ms 1 backwards; }
+:root[data-motion="full"] .hud-layer--start.is-open .hud-start__buttons { animation: hud-rise 360ms var(--e-out) 220ms 1 backwards; }
+:root[data-motion="full"] .hud-layer--start.is-open .hud-start__links { animation: hud-rise 360ms var(--e-out) 300ms 1 backwards; }
+:root[data-motion="full"] .hud-layer.is-open > .hud-over .hud-over__crest { animation: hud-pop 420ms var(--e-back) 160ms 1 backwards; }
+
+@keyframes hud-beacon { 50% { transform: scale(1.04); } }
+@keyframes hud-wiggle { 25% { transform: translateY(-3px) rotate(-8deg); } 60% { transform: translateY(0) rotate(6deg); } }
+@keyframes hud-pop { from { transform: scale(.55); } }
+@keyframes hud-shimmer { to { transform: translateX(330%); } }
+@keyframes hud-spin { to { transform: rotate(360deg); } }
+@keyframes hud-halo { 0% { transform: scale(1); opacity: .75; } 60%, 100% { transform: scale(1.1, 1.38); opacity: 0; } }
+@keyframes hud-rise { from { transform: translateY(14px); opacity: 0; } }

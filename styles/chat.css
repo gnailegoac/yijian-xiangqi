@@ -1,0 +1,340 @@
+/* 弈间 — the coach side below the figure: chips, the two small tools, the ✎ field and the 回看 sheet; plus the text
+ * that stream-text.js renders wherever it is used: the bubble, the log, the game-over card
+ * (SPEC §4.28.5, §4.28.6, §12.3, §12.4). Package X6.
+ *
+ * The shell (layout.css) gives #chat its box in every mode and, with #app[data-sheet="1"], the sheet's box.
+ * This file styles what is inside, keyed on the attributes chat-panel.js writes on the host:
+ *   .chat[data-sheet="0|1"][data-mode="landscape|portrait|compact"][data-kb="0|1"][data-rows="1|2"]
+ *        [data-input="0|1"][data-free="0|1"][data-chips="<count>"]
+ * Colours are theme tokens only. Loops run only under :root[data-motion="full"].
+ */
+
+/* ===== text rendered by stream-text ========================================================================================= */
+
+/* The caret: a 7 x 15 px block after the last character while the line is streaming; 1 Hz, steady without motion. */
+.stream-text.is-streaming::after {
+  content: ""; display: inline-block; width: 7px; height: 15px; margin-left: 2px; vertical-align: -2px;
+  border-radius: 1px; background: var(--accent);
+}
+:root[data-motion="full"] .stream-text.is-streaming:not(.is-reduced)::after { animation: stream-caret 1s steps(2, jump-none) infinite; }
+@keyframes stream-caret { from { opacity: 1; } to { opacity: 0; } }
+
+/* A move inside the text: tappable, in the colour of the side that plays it. */
+.move-link {
+  --rival-red: var(--red-rim); --rival-blk: var(--blk-rim);
+  -webkit-appearance: none; appearance: none;
+  position: relative; display: inline-block; margin: 0 1px; padding: 0 2px; border: 0; border-radius: 6px;
+  background: linear-gradient(90deg, currentColor 60%, transparent 0) left bottom 1px / 7px 1.5px repeat-x;   /* 1.5 px dashed underline */
+  color: var(--accent);
+  font: inherit; font-weight: 600; line-height: inherit; letter-spacing: inherit; white-space: nowrap; vertical-align: baseline;
+  cursor: pointer; -webkit-user-select: none; user-select: none; touch-action: manipulation;
+}
+.move-link::before {                                  /* the 44 px-high tap area */
+  content: ""; position: absolute; z-index: 1; left: -3px; right: -3px; top: 50%; height: 44px; transform: translateY(-50%);
+}
+/* Lines are closer than 44 px, so the tap areas of links on neighbouring lines overlap. A link's own box lies above
+ * every tap area: a tap on the word always goes to that word. */
+.move-link::after { content: ""; position: absolute; z-index: 2; inset: 0; }
+/* On rice paper the pale rims cannot be read as text: 隆中 writes the rival's moves in the camp colours instead. */
+[data-theme="longzhong"] .move-link { --rival-red: var(--shu); --rival-blk: var(--wei); }
+.move-link[data-color="red"] { color: var(--accent); }                 /* the child plays red unless the board says otherwise */
+.move-link[data-color="black"] { color: var(--rival-blk); }
+:root:has(.bv[data-bottom="black"]) .move-link[data-color="red"] { color: var(--rival-red); }
+:root:has(.bv[data-bottom="black"]) .move-link[data-color="black"] { color: var(--accent); }
+.move-link:active { transform: scale(.96); }
+.move-link.is-active {
+  background: color-mix(in srgb, currentColor 22%, transparent);
+  box-shadow: inset 0 -1.5px 0 currentColor, 0 0 0 1px color-mix(in srgb, currentColor 22%, transparent);
+}
+
+/* ▶ 演示: plays the line that the links before it spell out. */
+.move-link--play {
+  margin-left: 6px; padding: 0 10px; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 65%, transparent);
+  color: var(--accent); font-size: .82em; line-height: 1.75; vertical-align: 1px;
+}
+.move-link--play:active { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+
+/* The tool indicator at the end of a line: 亮在沙盘上摆一摆【…】…… */
+.chat-tool { position: relative; display: block; padding-left: 1.45em; color: var(--ink-2); font-size: .9em; }
+.chat-tool::before {
+  content: ""; position: absolute; left: .1em; top: 50%; width: .8em; height: .8em; margin-top: -.4em;
+  box-sizing: border-box; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%;
+}
+:root[data-motion="full"] .chat-tool::before { animation: chat-spin 900ms linear infinite; }
+@keyframes chat-spin { to { transform: rotate(360deg); } }
+
+/* ===== the panel at rest: chips and tools =================================================================================== */
+
+.chat {
+  --chip-h: 48px; --chip-fs: 16px;
+  display: flex; flex-direction: column; gap: 8px;
+  min-width: 0; min-height: 0; padding-top: 8px;
+  color: var(--ink); font-family: var(--font-ui);
+}
+.chat[data-mode="compact"] { --chip-h: 36px; --chip-fs: 14px; padding-top: 2px; }
+
+.chat__head, .chat__log, .chat__note { display: none; }
+.chat [hidden] { display: none !important; }          /* chips without room, the collapsed field */
+
+/* One row that scrolls sideways (portrait, compact, keyboard up) … */
+.chat__chips {
+  display: flex; gap: 8px; flex: 1 1 auto; min-width: 0;
+  padding: 0 1px 4px;                                 /* room for the thick bottom edge of the chips */
+  overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: none;
+}
+.chat__chips::-webkit-scrollbar { display: none; }
+.chat[data-mode="compact"] .chat__chips { padding-block: 4px; }       /* a 36 px chip keeps a 44 px tap area */
+/* … or two columns that wrap to two rows (landscape). The two rows are reserved, so the figure never jumps. */
+.chat[data-mode="landscape"][data-rows="2"] .chat__chips {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; flex: none;
+  overflow: visible;
+}
+.chat[data-mode="landscape"][data-rows="2"][data-sheet="0"] .chat__chips { min-height: calc(2 * var(--chip-h) + 12px); }
+
+.chip {
+  -webkit-appearance: none; appearance: none;
+  position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  height: var(--chip-h); min-width: 72px; max-width: 100%; margin: 0; padding: 0 16px;
+  border: 1px solid var(--edge); border-radius: var(--r-chip);
+  background: var(--surface-2); color: var(--ink);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ink) 10%, transparent), 0 3px 0 color-mix(in srgb, var(--edge) 62%, #000);
+  font: 600 var(--chip-fs) / 1.2 var(--font-ui);
+  cursor: pointer; -webkit-user-select: none; user-select: none; touch-action: manipulation;
+  transition: transform 60ms, box-shadow 60ms;
+}
+.chat[data-mode="compact"] .chip { padding: 0 12px; }
+.chat[data-mode="compact"] .chip::before { content: ""; position: absolute; inset: -5px 0; }      /* 34 px inside the border + 10 = 44 */
+.chip__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ink) 10%, transparent), 0 1px 0 color-mix(in srgb, var(--edge) 62%, #000);
+}
+.chip--primary {
+  border-color: color-mix(in srgb, var(--accent) 70%, #000);
+  background: var(--accent); color: var(--accent-ink);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 35%, transparent), 0 3px 0 color-mix(in srgb, var(--accent) 55%, #000);
+}
+.chip--primary:active:not(:disabled) {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 35%, transparent), 0 1px 0 color-mix(in srgb, var(--accent) 55%, #000);
+}
+.chip.is-used, .chip:disabled {
+  opacity: .45; cursor: default; transform: translateY(2px);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--edge) 62%, #000);
+}
+/* A chip that was not in the previous set pops in, one after the other. */
+:root[data-motion="full"] .chip.is-new { animation: chip-in 260ms var(--e-back) backwards; animation-delay: calc(var(--i, 0) * 45ms); }
+@keyframes chip-in { from { opacity: 0; transform: translateY(8px) scale(.9); } to { opacity: 1; transform: none; } }
+/* The primary chip (试试这步, 悔一步重想) calls for attention twice, then rests. */
+.chip--primary::after {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent); opacity: 0;
+}
+:root[data-motion="full"] .chip--primary.is-new:not(.is-used)::after { animation: chip-call 1100ms var(--e-out) 420ms 2; }
+@keyframes chip-call { from { opacity: .9; transform: scale(1); } to { opacity: 0; transform: scale(1.12, 1.35); } }
+
+.chat__tools { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: none; }
+.chat__tools > button {
+  -webkit-appearance: none; appearance: none;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 44px; min-width: 44px; margin: 0; padding: 0 14px;
+  border: 1px solid var(--edge); border-radius: 12px;
+  background: var(--surface); color: var(--ink-2);
+  font: 500 14px / 1 var(--font-ui); white-space: nowrap;
+  cursor: pointer; -webkit-user-select: none; user-select: none; touch-action: manipulation;
+  transition: transform 60ms;
+}
+.chat__tools > button:active { transform: translateY(1px); background: var(--surface-2); }
+#chat-toggle {                                        /* ✎ as a drawn glyph, not as a colour emoji */
+  min-width: 48px; padding: 0 12px; color: var(--accent);
+  font: 400 24px / 1 "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2", "Noto Sans Symbols2", var(--font-ui);
+  font-variant-emoji: text;
+}
+#history-button::before {                             /* three lines: the transcript */
+  content: ""; width: 14px; height: 2px; border-radius: 1px; background: currentColor;
+  box-shadow: 0 -5px 0 currentColor, 0 5px 0 currentColor;
+}
+
+/* Portrait: one chip row, the tools at its end. */
+.chat[data-mode="portrait"][data-sheet="0"] { flex-direction: row; align-items: flex-start; }
+.chat[data-mode="portrait"][data-sheet="0"] .chat__tools { height: var(--chip-h); }
+/* Landscape with one row (keyboard up, landscape phone): the same. */
+.chat[data-mode="landscape"][data-rows="1"][data-sheet="0"] { flex-direction: row; align-items: flex-start; }
+.chat[data-mode="landscape"][data-rows="1"][data-sheet="0"] .chat__tools { height: var(--chip-h); }
+/* Compact: the chip row only; the bubble opens the sheet, and the tools live inside it. */
+.chat[data-mode="compact"][data-sheet="0"] .chat__tools { display: none; }
+
+/* ===== the 回看 sheet ========================================================================================================= */
+
+.chat[data-sheet="1"] {
+  gap: 0; padding: 0; overflow: hidden;
+  border: 1.5px solid var(--edge); border-radius: var(--r-card);
+  background: var(--surface);
+  box-shadow: 0 -6px 28px var(--shadow);
+}
+.chat[data-sheet="1"]:not([data-mode="landscape"]) { border-bottom: 0; border-radius: var(--r-card) var(--r-card) 0 0; }
+:root[data-motion="full"] .chat[data-sheet="1"] { animation: chat-sheet-rise 240ms var(--e-out); }
+:root[data-motion="full"] .chat[data-sheet="1"][data-mode="landscape"] { animation-name: chat-sheet-cover; }
+@keyframes chat-sheet-rise { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes chat-sheet-cover { from { transform: translateY(64px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* Title bar: 回看 and ▾. The whole bar closes the sheet. */
+.chat[data-sheet="1"] .chat__head {
+  -webkit-appearance: none; appearance: none;
+  position: relative; display: flex; align-items: center; justify-content: space-between; flex: none;
+  height: 52px; width: 100%; margin: 0; padding: 0 4px 0 18px;
+  border: 0; border-bottom: 1px solid var(--edge); border-radius: 0;
+  background: var(--surface-2); color: var(--ink);
+  font: 700 21px / 1 var(--font-kai); letter-spacing: .12em;
+  cursor: pointer; -webkit-user-select: none; user-select: none; touch-action: manipulation;
+}
+.chat[data-sheet="1"] .chat__head:focus-visible { outline-offset: -4px; }
+.chat__title { display: inline-flex; align-items: center; gap: 10px; }
+.chat__title::before {                                /* a seal-red mark before the title */
+  content: ""; width: 6px; height: 20px; border-radius: 3px; background: var(--accent);
+}
+.chat__arrow { display: grid; place-items: center; width: 48px; height: 44px; color: var(--ink-2); font: 400 30px / 1 var(--font-ui); letter-spacing: 0; }
+.chat[data-sheet="1"]:not([data-mode="landscape"]) .chat__head::before {      /* the grip of a bottom sheet */
+  content: ""; position: absolute; left: 50%; top: 5px; width: 40px; height: 4px; margin-left: -20px;
+  border-radius: 2px; background: var(--edge);
+}
+.chat[data-sheet="1"][data-mode="compact"] .chat__head { height: 46px; font-size: 19px; }
+/* Keyboard up on a phone: the sheet is short, so the title bar and the paddings give their room to the last line. */
+.chat[data-sheet="1"][data-mode="compact"][data-kb="1"] .chat__head { height: 36px; }
+.chat[data-sheet="1"][data-mode="compact"][data-kb="1"] .chat__head::after { content: ""; position: absolute; inset: 0 0 -9px; }      /* 44 px to tap */
+.chat[data-sheet="1"][data-mode="compact"][data-kb="1"] .chat__head::before { display: none; }
+
+.chat[data-sheet="1"] .chat__log {
+  display: flex; flex-direction: column; gap: 8px; flex: 1 1 0; min-height: 0;
+  padding: 12px 12px 14px;
+  overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: var(--edge) transparent;
+}
+
+.chat[data-sheet="1"][data-kb="1"] .chat__log { padding-block: 6px; }
+
+.chat__event {
+  display: flex; align-items: center; gap: 10px; flex: none;
+  margin: 6px 0 0; color: var(--ink-2); font-size: 13px; line-height: 18px; white-space: nowrap;
+}
+.chat__event::before, .chat__event::after { content: ""; flex: 1 1 0; min-width: 12px; height: 1px; background: var(--edge); }
+
+.msg {
+  position: relative; flex: none; max-width: 92%; padding: 8px 12px;
+  border: 1px solid var(--edge); border-radius: 14px;
+  font-size: 16px; line-height: 24px; overflow-wrap: anywhere;
+}
+.chat[data-mode="compact"] .msg { font-size: 15px; line-height: 22px; }
+.msg[data-role="buddy"] { align-self: flex-start; border-bottom-left-radius: 4px; background: var(--surface-2); }
+.msg[data-role="me"] {
+  align-self: flex-end; border-bottom-right-radius: 4px;
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--surface));
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+}
+.msg[data-kind="caption"] {                           /* the quiet caption of a rival move */
+  padding: 0 4px; border: 0; background: none; color: var(--ink-2); font-size: 14px; line-height: 22px;
+}
+.msg__text { display: inline; }
+.msg__cue {
+  display: inline-block; margin: 0 8px 0 -2px; padding: 0 8px; border-radius: 9px;
+  background: var(--surface); color: var(--ink);
+  font: 700 14px / 22px var(--font-kai); white-space: nowrap; vertical-align: 1px;
+}
+.msg__cue[data-tone="good"] { background: var(--accent); color: var(--accent-ink); }
+.msg__cue[data-tone="warn"] { background: var(--danger); color: var(--danger-ink); }
+.msg[data-state="stale"] > :is(.msg__text, .msg__cue) { opacity: .55; }
+.msg__tag {
+  display: inline-block; margin-left: 8px; padding: 0 6px;
+  border: 1px solid var(--edge); border-radius: 6px;
+  color: var(--ink-2); font-size: 12px; line-height: 18px; white-space: nowrap; vertical-align: 1px;
+}
+/* A line that has neither text nor dots yet takes no room. */
+.msg[data-role="buddy"][data-state="streaming"]:not([data-typing="1"]):not(:has(.msg__cue)):has(.msg__text:empty) { display: none; }
+/* Waiting for the first text: three dots. */
+.msg[data-typing="1"] .msg__text:empty::before {
+  content: ""; display: inline-block; width: 30px; height: 8px; vertical-align: middle;
+  background: radial-gradient(circle closest-side, var(--ink-2) 92%, transparent) 0 0 / 11px 8px repeat-x;
+}
+:root[data-motion="full"] .msg[data-typing="1"] .msg__text:empty::before { animation: chat-wait 900ms var(--e-inout) infinite alternate; }
+@keyframes chat-wait { from { opacity: .35; } to { opacity: 1; } }
+
+.chat[data-sheet="1"] .chat__chips { flex: none; padding: 10px 12px 6px; border-top: 1px solid var(--edge); }
+.chat[data-sheet="1"][data-mode="compact"] .chat__chips { padding-block: 8px 6px; }
+.chat[data-sheet="1"][data-mode="compact"][data-kb="1"] .chat__chips { padding-block: 6px 4px; }
+.chat[data-sheet="1"][data-chips="0"] .chat__chips { display: none; }
+
+/* Inside the sheet the tools row holds ✎ alone (▾ closes the sheet), spelled out. */
+.chat[data-sheet="1"] .chat__tools { padding: 6px 12px 10px; }
+.chat[data-sheet="1"][data-chips="0"] .chat__tools { padding-top: 10px; border-top: 1px solid var(--edge); }
+.chat[data-sheet="1"] #history-button { display: none; }
+.chat[data-sheet="1"][data-free="0"] .chat__tools,
+.chat[data-sheet="1"][data-input="1"] .chat__tools { display: none; }
+.chat[data-sheet="1"] #chat-toggle { flex: 1 1 auto; justify-content: flex-start; gap: 10px; }
+.chat[data-sheet="1"] #chat-toggle::after { content: attr(aria-label); color: var(--ink-2); font: 500 15px / 1 var(--font-ui); }
+
+/* The ✎ field: one line growing to three, and the send / stop button. */
+.chat__input {
+  display: flex; align-items: flex-end; gap: 8px; flex: none;
+  margin: 0; padding: 8px 12px; border-top: 1px solid var(--edge);
+  background: var(--surface-2);
+}
+#chat-input {
+  -webkit-appearance: none; appearance: none;
+  flex: 1 1 auto; min-width: 0; height: 44px; min-height: 44px; max-height: 96px; margin: 0; padding: 9px 14px;
+  border: 1.5px solid var(--edge); border-radius: 14px;
+  background: var(--surface); color: var(--ink);
+  font: 400 16px / 24px var(--font-ui);              /* 16 px: Safari does not zoom the page on focus */
+  resize: none; overflow-y: auto; scrollbar-width: none;
+}
+#chat-input::placeholder { color: var(--ink-2); opacity: 1; }
+#chat-input:focus { border-color: var(--accent); }
+#chat-input:focus-visible { outline-width: 2px; outline-offset: 0; }
+#chat-send {
+  -webkit-appearance: none; appearance: none;
+  position: relative; flex: none; width: 56px; height: 41px; margin: 0 0 3px; padding: 0;
+  border: 0; border-radius: var(--r-btn);
+  background: var(--accent); color: var(--accent-ink);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--accent) 55%, #000);
+  font: 700 15px / 1 var(--font-ui);
+  cursor: pointer; touch-action: manipulation; transition: transform 60ms, box-shadow 60ms;
+}
+#chat-send::after { content: ""; position: absolute; inset: -2px 0 -4px; }             /* tap area 56 x 47 */
+#chat-send[data-mode="send"]::before {                 /* an arrow pointing up */
+  content: ""; position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; margin: -10px 0 0 -10px;
+  background: currentColor; clip-path: polygon(50% 0, 100% 52%, 64% 52%, 64% 100%, 36% 100%, 36% 52%, 0 52%);
+}
+#chat-send:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 55%, #000); }
+#chat-send:disabled { opacity: .45; cursor: default; }
+#chat-send[data-mode="stop"] {
+  background: var(--danger); color: var(--danger-ink);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--danger) 55%, #000);
+}
+#chat-send[data-mode="stop"]:active { box-shadow: 0 1px 0 color-mix(in srgb, var(--danger) 55%, #000); }
+
+.chat[data-sheet="1"] .chat__note:not([hidden]) {
+  display: block; flex: none; margin: 0; padding: 0 16px 8px;
+  background: var(--surface-2); color: var(--ink-2); font-size: 12px; line-height: 16px;
+}
+.chat[data-kb="1"] .chat__note { display: none !important; }      /* the keyboard is up: every row counts */
+
+/* A short sheet (the keyboard is up on a phone): the field is never hidden (§12.4). The shell gives the open sheet a
+ * definite box, so the rows inside can ask how high it is. While the child types, first the chips give way to the
+ * last lines of the log, then the field stops growing, and last the title bar goes (the miniature, the back button
+ * and closing the keyboard still close the sheet). */
+.app[data-sheet="1"] .chat[data-sheet="1"] { container: chat-sheet / size; }
+@container chat-sheet (max-height: 231.9px) {
+  .chat[data-sheet="1"][data-input="1"] .chat__chips { display: none; }
+}
+@container chat-sheet (max-height: 169.9px) {
+  #chat-input { max-height: 69px; }                   /* two lines */
+}
+@container chat-sheet (max-height: 139.9px) {
+  #chat-input { max-height: 44px; }                   /* one line; a longer question scrolls inside */
+}
+@container chat-sheet (max-height: 115.9px) {
+  .chat[data-sheet="1"][data-input="1"] .chat__head { display: none; }
+}
+@container chat-sheet (max-height: 75.9px) {
+  .chat[data-sheet="1"][data-input="1"] .chat__log { display: none; }
+}

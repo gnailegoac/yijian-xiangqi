@@ -1,0 +1,452 @@
+/* 弈间 — the app shell: one grid over the six regions of index.html (SPEC §12). Package X1.
+ *
+ * WHAT THE SHELL GIVES EVERY REGION (the module that fills a region styles its inside, never its place):
+ *
+ *   #topbar    the top row, var(--top) high, as wide as the grid (landscape: from the board's left edge to the coach
+ *              column's right edge)
+ *   #stage     the board's cell; `overflow: clip` (nothing drawn past its edge shows: the cell is exactly as high as
+ *              the board in portrait and compact, and as the board plus its 8 px of padding above and below in
+ *              landscape, where it also reaches 16 to 40 px past the board on the left and on the right, except
+ *              on a landscape phone); #board inside is centred, 920:1060, its width set here
+ *   #underbar  directly under the board in every mode, var(--bar) high, as wide as the board
+ *              (compact: the left 38 % of the row under the board)
+ *   #coach     position: relative; two rows: #buddy (flexible, at least var(--buddy-h) high; position: relative)
+ *              above #chat (as high as its content, cut off rather than squeezing #buddy)
+ *   #actions   landscape: under the coach column, var(--bar) high · portrait: the bottom row, var(--actions) high
+ *              · compact: the right 62 % of the row under the board
+ *   #overlays  covers the whole window (safe areas and the margins around the landscape group included) above
+ *              everything else and lets taps through; its children take taps and stack among themselves with
+ *              var(--z-sheet) / var(--z-dialog) / var(--z-toast)
+ *
+ * Custom properties on #app, written by applyLayout() in src/ui/layout.js (§12.2):
+ *   --c  --board-w  --board-h  --top  --bar  --actions  --panel-w  --buddy-h  --stage-scale  --mini-h  --app-h
+ * and the attributes data-layout="landscape|portrait|compact", data-kb="0|1"; the stage sets data-sheet="0|1".
+ * Until the first applyLayout() (no script has run: #app has no inline style) the same sizes come from the CSS
+ * expressions below, and the mode is chosen by media queries that mirror computeLayout().
+ *
+ * Landscape (not the landscape phone) keeps the regions together as one group in the middle of the window ("One
+ * table" below). Two more properties on #app say where the group is, for overlays that line up with a region:
+ *   --group-x   the distance of the board's left edge and of the coach column's right edge from the window's edge
+ *               (16 px at least; a safe-area inset larger than it wins)
+ *   --group-y   the distance of the top bar and of the bottom row from the top and bottom safe-area edges (0 when
+ *               the board fills the height)
+ * They are not set in portrait, in compact and on a landscape phone: read them as var(--group-x, 16px) and
+ * var(--group-y, 0px).
+ *
+ * The board may be drawn slightly smaller than --board-w when the device has safe-area insets (a home-screen web
+ * app on an iPad): #board never leaves its cell. Inside the board, size from the --c that board-view measures.
+ *
+ * The conversation sheet (#app[data-sheet="1"], §12.4): this file gives #chat its box in each mode
+ *   landscape  covers the coach column
+ *   portrait   rises from the bottom over coach + actions + under-bar and the lower 40 % of the board (max 320 px);
+ *              to keep a square visible, set an inline max-height on #chat (it is anchored at the bottom)
+ *   compact    the stage shrinks to a miniature (var(--mini-h) high) and #chat covers the coach region below it
+ * chat.css owns how the sheet looks and how it slides.
+ *
+ * Properties starting with --_ are private to this file.
+ */
+
+/* ---- page ----------------------------------------------------------------------------------------------------------- */
+
+html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
+
+.app {
+  position: fixed; inset: 0; height: 100vh; height: 100dvh;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  display: grid;
+  overflow: hidden; overflow: clip;     /* clip: not a scroll container, so focusing a field can never shift the grid */
+  isolation: isolate;
+  touch-action: manipulation;
+  color: var(--ink);
+  /* The war table: the child's camp glows warm from below; a faint haze hangs over the rival's side above. */
+  background:
+    radial-gradient(75% 46% at 50% 106%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 100%),
+    radial-gradient(80% 50% at 78% -14%, var(--surface-2), transparent 100%),
+    var(--page);
+  /* height left for the rows once the safe areas are taken off */
+  --_h: calc(var(--app-h, 100dvh) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+}
+
+/* On-screen keyboard: the app follows the visual viewport (applyLayout also sets `top`). */
+.app[data-kb="1"] { height: var(--app-h, 100dvh); }
+
+/* ---- the three modes (§12.1) ----------------------------------------------------------------------------------------- *
+ * Each block holds the grid of the mode, its gutters, the CSS-only defaults of the sizes applyLayout() will write,
+ * and the private values the region rules below read. The portrait and compact blocks are repeated once more
+ * further down for the time before the first applyLayout(); layout.test.js keeps the copies identical. */
+
+.app[data-layout="landscape"] {
+  grid-template-columns: minmax(0, 1fr) var(--panel-w);
+  grid-template-rows: var(--top) minmax(0, 1fr) var(--bar);
+  grid-template-areas: "top top" "stage coach" "under actions";
+  gap: 0 16px;
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+  --top: 48px; --bar: 64px; --actions: 64px;
+  --c: clamp(20px, min((100vw - 388px) / 9.2, (100dvh - 128px) / 10.6), 84px);
+  --board-w: calc(9.2 * var(--c)); --board-h: calc(10.6 * var(--c));
+  --panel-w: clamp(340px, 100vw - var(--board-w) - 48px, 480px);
+  --buddy-h: clamp(96px, (100dvh - 128px) * .42, 300px);
+  --stage-scale: 1; --mini-h: 0px;
+  --_stage-pad: 8px; --_stage-bleed: 0px; --_coach-pad: 8px 0;
+  --_board-fit: min(var(--board-w), 100%, (var(--_h) - var(--top) - var(--bar) - 2 * var(--_stage-pad)) * 920 / 1060);
+  --_under-max: var(--_board-fit);
+  --_ph-btn-h: 48px; --_ph-chip-h: 48px; --_ph-chips: none; --_ph-undo-w: 120px; --_ph-tools: block;
+  --_ph-buddy: "bubble" minmax(0, 152px) "." minmax(0, 1fr) "figure" auto / minmax(0, 1fr);
+  --_ph-buddy-ar: .5; --_ph-bubble-h: 152px; --_ph-bubble-inset: 18%;
+}
+
+/* Landscape phone (`small` in computeLayout: the window is lower than 480 px). */
+@media (max-height: 479.98px) {
+  .app[data-layout="landscape"] {
+    column-gap: 8px;
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+    --top: 36px; --bar: 48px; --actions: 48px;
+    --c: clamp(20px, min((100vw - 264px) / 9.2, (100dvh - 92px) / 10.6), 84px);
+    --panel-w: clamp(240px, 100vw - var(--board-w) - 24px, 480px);
+    --buddy-h: clamp(96px, (100dvh - 92px) * .42, 300px);
+    --_stage-pad: 4px; --_coach-pad: 4px 0;
+    --_ph-btn-h: 40px; --_ph-chip-h: 40px;
+    --_ph-buddy: "figure bubble" minmax(0, 1fr) / auto minmax(0, 1fr);
+    --_ph-buddy-ar: 1; --_ph-bubble-h: none; --_ph-bubble-inset: 0px;
+  }
+}
+
+/* One table (iPad landscape and every desktop window; not the landscape phone): the top bar, the board with its
+ * under-bar, and the coach column with the actions stay together as one group in the middle of the window, however
+ * large the window is. computeLayout caps the board at 84 px per cell and the coach column at 480 px; what the window
+ * has beyond that goes around the group, never into it.
+ *   across  What board and coach column leave of the width is shared out in thirds (left margin, the gap between
+ *           board and column, right margin) until the gap reaches 40 px; from there on only the margins grow. The
+ *           stage column is then exactly as wide as the board. Taken from the window alone, so the coach column
+ *           stays where it is while the on-screen keyboard shrinks the board: --_c0 is the --c default of the block
+ *           above, less what the safe areas take off the height (a home-screen web app on an iPad: the board is
+ *           drawn that much smaller, see --_board-fit, and the column must not stay wider than it).
+ *   down    The stage row is as high as the board plus its two paddings; the rest of the height is split above the
+ *           top bar and under the bottom row. So the under-bar is always directly under the board.
+ *   room    The stage's box reaches one gap further out on both sides (--_stage-room: up to the coach column on the
+ *           right, never into a safe-area inset): there a shaking board, the glow of a piece on an edge file and
+ *           the particles of the fx canvas still show before #stage clips them. It is taken back as padding, so
+ *           the board keeps its column and its place.
+ * The condition is computeLayout's landscape test for a window of 480 px or higher. */
+@media (min-width: 900px) and (min-aspect-ratio: 21/20) and (min-height: 480px) {
+  .app[data-layout="landscape"] {
+    --_c0: clamp(20px, min((100vw - 388px) / 9.2, (100dvh - 128px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) / 10.6), 84px);
+    --_spare: max(48px, 100vw - 9.2 * var(--_c0) - 480px);
+    --_mid: min(var(--_spare) / 3, 40px);
+    --group-x: calc((var(--_spare) - var(--_mid)) / 2);
+    --group-y: max(0px, (var(--_h) - var(--top) - var(--bar) - 2 * var(--_stage-pad) - var(--board-h)) / 2);
+    --_stage-room: min(var(--_mid), max(0px, var(--group-x) - max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px))));
+    column-gap: var(--_mid);
+    padding-left: max(var(--group-x), env(safe-area-inset-left));
+    padding-right: max(var(--group-x), env(safe-area-inset-right));
+    padding-top: calc(env(safe-area-inset-top, 0px) + var(--group-y));
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--group-y));
+  }
+}
+
+.app[data-layout="portrait"] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: var(--top) auto var(--bar) minmax(0, 1fr) var(--actions);
+  grid-template-areas: "top" "stage" "under" "coach" "actions";
+  gap: 5px 0;
+  padding-left: max(8px, env(safe-area-inset-left));
+  padding-right: max(8px, env(safe-area-inset-right));
+  --top: 48px; --bar: 60px; --actions: 64px;
+  --c: clamp(20px, min((100vw - 16px) / 9.2, (100dvh - 368px) / 10.6), 84px);
+  --board-w: calc(9.2 * var(--c)); --board-h: calc(10.6 * var(--c));
+  --panel-w: 0px;
+  --buddy-h: clamp(72px, 100dvh - 248px - var(--board-h), 200px);
+  --stage-scale: 1; --mini-h: 0px;
+  --_stage-pad: 0px; --_stage-bleed: 0px; --_coach-pad: 0;
+  --_board-fit: min(var(--board-w), 100%, (var(--_h) - var(--top) - var(--bar) - var(--actions) - 196px) * 920 / 1060);
+  --_under-max: var(--_board-fit);
+  --_ph-btn-h: 48px; --_ph-chip-h: 48px; --_ph-undo-w: 120px; --_ph-tools: block;
+  --_ph-chips: max(0px, (var(--_h) - var(--top) - var(--bar) - var(--actions) - 20px - var(--board-h) - 149.5px) * 9999);
+  --_ph-buddy: "figure bubble" minmax(0, 1fr) / auto minmax(0, 1fr);
+  --_ph-buddy-ar: 1; --_ph-bubble-h: none; --_ph-bubble-inset: 0px;
+}
+
+.app[data-layout="compact"] {
+  grid-template-columns: minmax(0, 38fr) minmax(0, 62fr);
+  grid-template-rows: var(--top) auto var(--bar) minmax(0, 1fr);
+  grid-template-areas: "top top" "stage stage" "under actions" "coach coach";
+  gap: 4px 8px;
+  padding-left: max(8px, env(safe-area-inset-left));
+  padding-right: max(8px, env(safe-area-inset-right));
+  --top: 40px; --bar: 52px; --actions: 0px;
+  --c: clamp(20px, min((100vw - 8px) / 9.2, (100dvh - 192px) / 10.6), 56px);
+  --board-w: calc(9.2 * var(--c)); --board-h: calc(10.6 * var(--c));
+  --panel-w: 0px;
+  --buddy-h: 56px;
+  --stage-scale: 1; --mini-h: clamp(132px, 36dvh, 260px);
+  --_stage-pad: 0px; --_stage-bleed: -4px; --_coach-pad: 0 0 6px;
+  --_board-fit: min(var(--board-w), 100%, (var(--_h) - var(--top) - var(--bar) - 100px) * 920 / 1060);
+  --_under-max: none;
+  --_ph-btn-h: 44px; --_ph-chip-h: 36px; --_ph-undo-w: 100%; --_ph-tools: none;
+  --_ph-chips: max(0px, (var(--_h) - var(--top) - var(--bar) - 12px - var(--board-h) - 123.5px) * 9999);
+  --_ph-buddy: "figure bubble" minmax(0, 1fr) / auto minmax(0, 1fr);
+  --_ph-buddy-ar: 1; --_ph-bubble-h: none; --_ph-bubble-inset: 0px;
+}
+
+/* ---- before the first applyLayout() ----------------------------------------------------------------------------------- *
+ * index.html ships data-layout="landscape". While #app has no inline style, the mode is chosen here with the
+ * conditions of computeLayout(): landscape = (W >= 900 and W / H >= 1.05) or (H < 480 and W > H); else portrait
+ * when W >= 600; else compact. */
+
+@media (not (((min-width: 900px) and (min-aspect-ratio: 21/20)) or ((max-height: 479.98px) and (orientation: landscape)))) and (min-width: 600px) {
+  .app:not([style]) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: var(--top) auto var(--bar) minmax(0, 1fr) var(--actions);
+    grid-template-areas: "top" "stage" "under" "coach" "actions";
+    gap: 5px 0;
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+    --top: 48px; --bar: 60px; --actions: 64px;
+    --c: clamp(20px, min((100vw - 16px) / 9.2, (100dvh - 368px) / 10.6), 84px);
+    --board-w: calc(9.2 * var(--c)); --board-h: calc(10.6 * var(--c));
+    --panel-w: 0px;
+    --buddy-h: clamp(72px, 100dvh - 248px - var(--board-h), 200px);
+    --stage-scale: 1; --mini-h: 0px;
+    --_stage-pad: 0px; --_stage-bleed: 0px; --_coach-pad: 0;
+    --_board-fit: min(var(--board-w), 100%, (var(--_h) - var(--top) - var(--bar) - var(--actions) - 196px) * 920 / 1060);
+    --_under-max: var(--_board-fit);
+    --_ph-btn-h: 48px; --_ph-chip-h: 48px; --_ph-undo-w: 120px; --_ph-tools: block;
+    --_ph-chips: max(0px, (var(--_h) - var(--top) - var(--bar) - var(--actions) - 20px - var(--board-h) - 149.5px) * 9999);
+    --_ph-buddy: "figure bubble" minmax(0, 1fr) / auto minmax(0, 1fr);
+    --_ph-buddy-ar: 1; --_ph-bubble-h: none; --_ph-bubble-inset: 0px;
+  }
+}
+
+@media (not (((min-width: 900px) and (min-aspect-ratio: 21/20)) or ((max-height: 479.98px) and (orientation: landscape)))) and (max-width: 599.98px) {
+  .app:not([style]) {
+    grid-template-columns: minmax(0, 38fr) minmax(0, 62fr);
+    grid-template-rows: var(--top) auto var(--bar) minmax(0, 1fr);
+    grid-template-areas: "top top" "stage stage" "under actions" "coach coach";
+    gap: 4px 8px;
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+    --top: 40px; --bar: 52px; --actions: 0px;
+    --c: clamp(20px, min((100vw - 8px) / 9.2, (100dvh - 192px) / 10.6), 56px);
+    --board-w: calc(9.2 * var(--c)); --board-h: calc(10.6 * var(--c));
+    --panel-w: 0px;
+    --buddy-h: 56px;
+    --stage-scale: 1; --mini-h: clamp(132px, 36dvh, 260px);
+    --_stage-pad: 0px; --_stage-bleed: -4px; --_coach-pad: 0 0 6px;
+    --_board-fit: min(var(--board-w), 100%, (var(--_h) - var(--top) - var(--bar) - 100px) * 920 / 1060);
+    --_under-max: none;
+    --_ph-btn-h: 44px; --_ph-chip-h: 36px; --_ph-undo-w: 100%; --_ph-tools: none;
+    --_ph-chips: max(0px, (var(--_h) - var(--top) - var(--bar) - 12px - var(--board-h) - 123.5px) * 9999);
+    --_ph-buddy: "figure bubble" minmax(0, 1fr) / auto minmax(0, 1fr);
+    --_ph-buddy-ar: 1; --_ph-bubble-h: none; --_ph-bubble-inset: 0px;
+  }
+}
+
+/* A phone lower than 600 px has a 36 px top bar (computeLayout: `top = v.H < 600 ? 36 : 40`). */
+@media (not (((min-width: 900px) and (min-aspect-ratio: 21/20)) or ((max-height: 479.98px) and (orientation: landscape)))) and (max-width: 599.98px) and (max-height: 599.98px) {
+  .app:not([style]) {
+    --top: 36px;
+    --c: clamp(20px, min((100vw - 8px) / 9.2, (100dvh - 188px) / 10.6), 56px);
+  }
+}
+
+/* ---- the regions ------------------------------------------------------------------------------------------------------ */
+
+.topbar { grid-area: top; min-width: 0; height: var(--top); }
+
+.stage {
+  grid-area: stage; min-width: 0; min-height: 0;
+  display: grid; place-items: center;
+  /* --_stage-bleed widens the stage and with it the room the board may take (compact); --_stage-room widens only
+   * the box that clips (landscape, "One table"): what the margin adds, the padding takes back. */
+  padding: var(--_stage-pad) var(--_stage-room, 0px);
+  margin-inline: calc(var(--_stage-bleed) - var(--_stage-room, 0px));
+  position: relative; z-index: 1;
+  overflow: clip;                       /* the fx canvas bleeds 0.5 c past the board and must never widen the page */
+}
+
+#board { width: var(--_board-fit); aspect-ratio: 920 / 1060; position: relative; }
+
+.underbar {
+  grid-area: under; min-width: 0; height: var(--bar);
+  width: 100%; max-width: var(--_under-max); justify-self: center;
+}
+
+.coach {
+  grid-area: coach; min-width: 0; min-height: 0;
+  position: relative;
+  display: grid; grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(var(--buddy-h), 1fr) minmax(0, auto);
+  padding: var(--_coach-pad);
+}
+.coach__buddy { position: relative; min-width: 0; min-height: 0; }
+.coach__chat { min-width: 0; min-height: 0; }
+
+.actions { grid-area: actions; min-width: 0; min-height: 0; }
+
+#overlays { position: absolute; inset: 0; z-index: var(--z-sheet); pointer-events: none; }
+:where(#overlays) > * { pointer-events: auto; }      /* no specificity: hud.css may switch a child (a toast) off again */
+
+/* ---- on-screen keyboard (§12.4) --------------------------------------------------------------------------------------- */
+
+/* Portrait keeps 96 px for the coach instead of 176 px while the keyboard is up (computeLayout: coachMin). */
+.app[data-layout="portrait"][data-kb="1"] {
+  --_board-fit: min(var(--board-w), 100%, (var(--_h) - var(--top) - var(--bar) - var(--actions) - 116px) * 920 / 1060);
+}
+
+/* ---- the conversation sheet (§12.4) ------------------------------------------------------------------------------------ */
+
+.app[data-sheet="1"] .coach__chat { position: absolute; inset: 0; z-index: var(--z-sheet); }
+
+.app[data-layout="portrait"][data-sheet="1"] .coach__chat {
+  inset: auto 0 calc(-5px - var(--actions)) 0;
+  height: max(280px, 100% + var(--actions) + var(--bar) + 15px + min(var(--board-h) * .4, 320px));
+}
+
+/* G4: in compact mode the stage becomes a miniature and the rows under it move up.
+ * The origin is set whether or not the sheet is open: the stage grows back from the same top centre it shrank to. */
+.app[data-layout="compact"] .stage { transform-origin: top center; }
+.app[data-layout="compact"][data-sheet="1"] { grid-template-rows: var(--top) var(--mini-h) var(--bar) minmax(0, 1fr); }
+.app[data-layout="compact"][data-sheet="1"] .stage { align-self: start; transform: scale(var(--stage-scale)); }
+:root[data-motion="full"] .app[data-layout="compact"] .stage { transition: transform 220ms var(--e-inout); }
+
+/* ---- without JavaScript ------------------------------------------------------------------------------------------------ */
+
+.noscript {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: var(--z-toast);
+  width: max-content; max-width: calc(100vw - 32px); margin: 0; padding: 16px 24px;
+  border: 1.5px solid var(--edge); border-radius: var(--r-card);
+  background: var(--surface); color: var(--ink);
+  font: 700 22px/32px var(--font-kai); text-align: center; text-wrap: balance;
+  box-shadow: 0 12px 32px #0006;
+}
+
+/* ---- placeholders ------------------------------------------------------------------------------------------------------ *
+ * What an empty region shows until its module has filled it: the shell while the game loads. Every rule is tied
+ * to :empty, so it stops applying the moment a module adds its first node. Nothing here moves. */
+
+/* The board: frame, field, border, grid, palace diagonals and river of §10.2.1, drawn with gradients. k = one cell. */
+#board:empty { container-type: inline-size; }
+#board:empty::before {
+  content: ""; position: absolute; inset: 0;
+  --k: calc(100cqw / 9.2);
+  border-radius: calc(.26 * var(--k));
+  background: linear-gradient(135deg, var(--field-a), var(--field-b));
+  box-shadow: inset 0 0 0 calc(.03 * var(--k)) var(--frame), inset 0 0 0 calc(.07 * var(--k)) var(--frame-edge);
+}
+#board:empty::after {
+  content: "楚河\3000\3000\3000汉界"; position: absolute;
+  --k: calc(100cqw / 9.2);
+  --t: max(1px, .03 * var(--k));
+  left: calc(.43 * var(--k)); top: calc(.63 * var(--k));
+  width: calc(8.34 * var(--k)); height: calc(9.34 * var(--k));
+  padding: calc(.155 * var(--k));                                   /* border .06 + the gap to the first grid line */
+  box-shadow: inset 0 0 0 calc(.06 * var(--k)) var(--line);        /* a shadow, not a border: borders snap to whole pixels */
+  display: grid; place-items: center;
+  font: 700 calc(.52 * var(--k)) / 1 var(--font-kai);
+  letter-spacing: .3em; text-indent: .3em; white-space: nowrap;
+  color: color-mix(in srgb, var(--river-text) 80%, transparent);
+  background-origin: content-box; background-clip: content-box; background-repeat: no-repeat;
+  background-image:
+    linear-gradient(var(--line), var(--line)),
+    linear-gradient(var(--line), var(--line)),
+    linear-gradient(var(--line), var(--line)),
+    linear-gradient(to top right, transparent calc(50% - var(--t) / 2), var(--line) calc(50% - var(--t) / 2), var(--line) calc(50% + var(--t) / 2), transparent calc(50% + var(--t) / 2)),
+    linear-gradient(to bottom right, transparent calc(50% - var(--t) / 2), var(--line) calc(50% - var(--t) / 2), var(--line) calc(50% + var(--t) / 2), transparent calc(50% + var(--t) / 2)),
+    linear-gradient(to top right, transparent calc(50% - var(--t) / 2), var(--line) calc(50% - var(--t) / 2), var(--line) calc(50% + var(--t) / 2), transparent calc(50% + var(--t) / 2)),
+    linear-gradient(to bottom right, transparent calc(50% - var(--t) / 2), var(--line) calc(50% - var(--t) / 2), var(--line) calc(50% + var(--t) / 2), transparent calc(50% + var(--t) / 2)),
+    repeating-linear-gradient(to right, var(--line) 0, var(--line) var(--t), transparent var(--t), transparent var(--k)),
+    repeating-linear-gradient(to right, var(--line) 0, var(--line) var(--t), transparent var(--t), transparent var(--k)),
+    repeating-linear-gradient(to bottom, var(--line) 0, var(--line) var(--t), transparent var(--t), transparent var(--k)),
+    linear-gradient(to right,
+      color-mix(in srgb, var(--river-a) 55%, transparent),
+      color-mix(in srgb, var(--river-b) 55%, transparent),
+      color-mix(in srgb, var(--river-a) 55%, transparent));
+  /* Lines that meet another line end in the middle of it, so that pixel snapping can never leave a stub past it. */
+  background-size:
+    var(--t) 100%,
+    var(--t) 100%,
+    calc(100% - var(--t) / 2) var(--t),
+    calc(2 * var(--k)) calc(2 * var(--k)),
+    calc(2 * var(--k)) calc(2 * var(--k)),
+    calc(2 * var(--k)) calc(2 * var(--k)),
+    calc(2 * var(--k)) calc(2 * var(--k)),
+    100% calc(4.015 * var(--k)),
+    100% calc(4 * var(--k)),
+    calc(100% - var(--t) / 2) 100%,
+    100% var(--k);
+  background-position:
+    left top,
+    right top,
+    left bottom,
+    calc(3.015 * var(--k)) calc(.015 * var(--k)),
+    calc(3.015 * var(--k)) calc(.015 * var(--k)),
+    calc(3.015 * var(--k)) calc(7.015 * var(--k)),
+    calc(3.015 * var(--k)) calc(7.015 * var(--k)),
+    left top,
+    left calc(5.015 * var(--k)),
+    left top,
+    left calc(4.015 * var(--k));
+}
+
+/* Top bar: menu button, the rival's plate, mute button. */
+.topbar:empty {
+  display: flex; align-items: center; justify-content: space-between;
+  background:
+    radial-gradient(circle closest-side, var(--edge) 94%, transparent) 56px 50% / calc(var(--top) - 8px) calc(var(--top) - 8px) no-repeat,
+    linear-gradient(var(--edge), var(--edge)) calc(56px + var(--top)) calc(50% - 8px) / 64px 10px no-repeat,
+    linear-gradient(var(--edge), var(--edge)) calc(56px + var(--top)) calc(50% + 8px) / 96px 6px no-repeat;
+}
+.topbar:empty::before, .topbar:empty::after {
+  content: ""; flex: none; width: 44px; height: calc(var(--top) - 8px);
+  border: 1px solid var(--edge); border-radius: 12px; background: var(--surface);
+}
+
+/* Under-bar: the undo button and the last-move line. */
+.underbar:empty { display: flex; align-items: center; gap: 16px; }
+.underbar:empty::before {
+  content: ""; flex: none; width: var(--_ph-undo-w); height: var(--_ph-btn-h);
+  border: 1px solid var(--edge); border-radius: var(--r-btn); background: var(--surface);
+}
+.underbar:empty::after {
+  content: ""; flex: none; display: var(--_ph-tools); width: 112px; height: 8px; border-radius: 4px; background: var(--edge);
+}
+
+/* Actions: one thick primary button. */
+.actions:empty { display: flex; align-items: center; }
+.actions:empty::before {
+  content: ""; flex: 1; height: var(--_ph-btn-h); margin-bottom: 3px;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 60%, var(--surface)); border-radius: var(--r-btn);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--accent) 36%, var(--page));
+}
+
+/* Coach: the strategist's silhouette with his bubble, then the chips and the two small tools. */
+.coach__buddy:empty { display: grid; grid-template: var(--_ph-buddy); column-gap: 12px; }
+.coach__buddy:empty::before {
+  content: ""; grid-area: figure; justify-self: start; align-self: start;
+  height: var(--buddy-h); aspect-ratio: var(--_ph-buddy-ar);
+  border: 1px solid var(--edge); border-radius: 46% 46% 20% 20% / 30% 30% 10% 10%;
+  background: var(--surface);
+}
+.coach__buddy:empty::after {
+  content: ""; grid-area: bubble; margin-left: var(--_ph-bubble-inset); max-height: var(--_ph-bubble-h);
+  border: 1.5px solid var(--edge); border-radius: var(--r-card) var(--r-card) var(--r-card) 4px;
+  background: var(--surface);
+}
+.coach__chat:empty {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 6px; overflow: hidden;
+  max-height: var(--_ph-chips);                 /* 0 when computeLayout would hide the chips (showChips) */
+}
+.coach__chat:empty::before {
+  content: ""; flex: none; width: 104px; height: var(--_ph-chip-h); margin: 1px 225px 1px 1px;
+  border-radius: calc(var(--_ph-chip-h) / 2);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--edge), 112px 0 0 var(--surface), 112px 0 0 1px var(--edge), 224px 0 0 var(--surface), 224px 0 0 1px var(--edge);
+}
+.coach__chat:empty::after {
+  content: ""; flex: none; display: var(--_ph-tools); width: 44px; height: 44px; margin: 1px 53px 1px auto;
+  border-radius: 12px; background: var(--surface);
+  box-shadow: 0 0 0 1px var(--edge), 52px 0 0 var(--surface), 52px 0 0 1px var(--edge);
+}

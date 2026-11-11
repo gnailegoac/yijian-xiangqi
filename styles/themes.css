@@ -1,0 +1,96 @@
+/* 弈间 — the three Three-Kingdoms palettes (SPEC §10.1). Package X1.
+ *
+ * <html data-theme="chibi|longzhong|shachang">; `chibi` is the default and also applies when the attribute is
+ * missing. The selectors are attribute-only, so any element may carry data-theme and re-theme its subtree
+ * (the .bv element does; a dev page can show the three themes side by side).
+ *
+ * All colours of the game are custom properties defined here. Every theme defines every token (themes.test.js),
+ * and the contrast floors of §10.1 are asserted on these values. SVG art is styled through classes that read
+ * these properties (never var() inside presentation attributes).
+ *
+ * Tokens the contract's table lists by meaning but without a property name:
+ *   --river-opacity                 the "river opacity" column of the --river-a / --river-b row (a number 0..1)
+ *   --arrow-hint / -idea / -threat / -reply      the "Arrows hint / idea / threat / reply" row
+ * A token whose table cell says "none" is `transparent`, so it can be used wherever a colour is expected.
+ */
+
+/* 赤壁 — night river, fire glow, ship silhouettes (default) */
+:root,
+[data-theme="chibi"] {
+  color-scheme: dark;
+  --page: #0b0f1d;
+  --frame: #0a0d18; --frame-edge: #5a2f1c;
+  --field-a: #1b2440; --field-b: #10162b;
+  --line: #e0b56a; --line-glow: #ff8a3d30;
+  --river-a: #14324f; --river-b: #1f5a7a; --river-opacity: .55;
+  --river-text: #f0c27a; --label: #a98d58;
+  --red-a: #ff8a66; --red-b: #d8402f; --red-c: #8f1f14;
+  --red-rim: #ffd98a; --red-glyph: #fff3d6; --red-glow: #ff6a3d55;
+  --blk-a: #5a6a8f; --blk-b: #2a3552; --blk-c: #141a2e;
+  --blk-rim: #a9bfe6; --blk-glyph: #eaf2ff; --blk-glow: transparent;
+  --piece-edge: #05070d; --shadow: #000a;
+  --sel: #ffd166; --trial: #ffb000;
+  --ink: #eef2ff; --ink-2: #9aa6c7;
+  --surface: #19213a; --surface-2: #222c4b; --edge: #2f3b63;
+  --accent: #ffb347; --accent-ink: #2a1600;
+  --danger: #ff6b5e; --danger-ink: #2a0a06;
+  --arrow-hint: #ffd166; --arrow-idea: #7fe3c0; --arrow-threat: #ff6b5e; --arrow-reply: #a9bfe6;
+  --fx-spark: #ffd166; --fx-ember: #ff7a3d; --fx-cool: #58dcff; --fx-white: #ffffff;
+  --shu: #d8402f; --wei: #3a5a9a;
+}
+
+/* 隆中 — bamboo, mist, ink wash on rice paper: the calm bright one */
+[data-theme="longzhong"] {
+  color-scheme: light;
+  --page: #eef0e4;
+  --frame: #d9dcc2; --frame-edge: #8a9a78;
+  --field-a: #f2efdf; --field-b: #e3e6cf;
+  --line: #4f5f45; --line-glow: transparent;
+  --river-a: #cfd8c6; --river-b: #e6ebdc; --river-opacity: .60;
+  --river-text: #4f5f45; --label: #55634a;
+  --red-a: #e8604f; --red-b: #c8362a; --red-c: #8a1f16;
+  --red-rim: #f2d79a; --red-glyph: #fff6e2; --red-glow: transparent;
+  --blk-a: #4a5f55; --blk-b: #27352f; --blk-c: #131c18;
+  --blk-rim: #9cc4a8; --blk-glyph: #eef3ea; --blk-glow: transparent;
+  --piece-edge: #6f7a66; --shadow: #2a3a2a55;
+  --sel: #1f6b3f; --trial: #8f4a00;
+  --ink: #232a22; --ink-2: #5b6656;
+  --surface: #fbfaf2; --surface-2: #eff0e2; --edge: #cfd6c0;
+  --accent: #2f7d4f; --accent-ink: #ffffff;
+  --danger: #b8281e; --danger-ink: #ffffff;
+  --arrow-hint: #8f4a00; --arrow-idea: #1f6b3f; --arrow-threat: #b8281e; --arrow-reply: #3b4a45;
+  --fx-spark: #c97a00; --fx-ember: #c8362a; --fx-cool: #2f7d4f; --fx-white: #fffdf2;
+  --shu: #c8362a; --wei: #2f4f6a;
+}
+
+/* 沙场 — sand, bronze and war banners */
+[data-theme="shachang"] {
+  color-scheme: dark;
+  --page: #1c1610;
+  --frame: #3a2a18; --frame-edge: #8a6a3a;
+  --field-a: #d9b77c; --field-b: #c59d5f;
+  --line: #4a2e10; --line-glow: transparent;
+  --river-a: #b88f52; --river-b: #cfa868; --river-opacity: .50;
+  --river-text: #4a2e10; --label: #e0c79a;
+  --red-a: #d9483a; --red-b: #b3261a; --red-c: #6e140d;
+  --red-rim: #e8b85a; --red-glyph: #ffeccc; --red-glow: transparent;
+  --blk-a: #4a423c; --blk-b: #262220; --blk-c: #100d0c;
+  --blk-rim: #b08d57; --blk-glyph: #f0e6d2; --blk-glow: transparent;
+  --piece-edge: #3a2a18; --shadow: #000a;
+  --sel: #7a1f12; --trial: #0b4f5a;
+  --ink: #f6ead2; --ink-2: #c2ae8a;
+  --surface: #2b2219; --surface-2: #3a2e21; --edge: #5a4630;
+  --accent: #e8a33d; --accent-ink: #2a1700;
+  --danger: #ff7a5c; --danger-ink: #2a0a06;
+  --arrow-hint: #0b4f5a; --arrow-idea: #1f5a2e; --arrow-threat: #9c1f12; --arrow-reply: #3a2a18;
+  --fx-spark: #e8a33d; --fx-ember: #d9483a; --fx-cool: #0f7a8a; --fx-white: #fff3dc;
+  --shu: #b3261a; --wei: #2a3a55;
+}
+
+/* ---- the palette applied to the page -------------------------------------------------------------------------------- */
+
+html { background: var(--page); }
+body { background: var(--page); color: var(--ink); }
+
+/* A themed element inside the page takes its own ink, so a nested data-theme re-colours its text too. */
+[data-theme] { color: var(--ink); }

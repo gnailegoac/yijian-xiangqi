@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="chibi" data-motion="full">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f1d">
+<title>弈间 · 特效试验台 (fx.js)</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../styles/tokens.css">
+<link rel="stylesheet" href="../styles/themes.css">
+<link rel="stylesheet" href="../styles/fx.css">
+<style>
+/* Dev harness for src/ui/fx.js (package X3). Not part of the game: never built into dist/.
+ * The board below is a stand-in drawn by this page (the real one is board-view.js, package X2); it gives the
+ * effects a .bv with --c, a .bv-fx layer and a few pieces to land on. The page lays itself out like the game
+ * (the same cell size as src/ui/layout.js gives for the viewport), so every effect shows at its real size. */
+
+html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
+
+.lab {
+  position: fixed; inset: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: var(--top) auto var(--bar) minmax(0, 1fr);
+  grid-template-areas: "top" "stage" "status" "panel";
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  color: var(--ink);
+  background:
+    radial-gradient(75% 46% at 50% 106%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 100%),
+    radial-gradient(80% 50% at 78% -14%, var(--surface-2), transparent 100%),
+    var(--page);
+  --top: 48px; --bar: 60px; --pad: 8px;
+}
+.lab[data-layout="landscape"] {
+  grid-template-columns: minmax(0, 1fr) var(--panel-w, 440px);
+  grid-template-rows: var(--top) minmax(0, 1fr) var(--bar);
+  grid-template-areas: "top top" "stage panel" "status panel";
+  column-gap: 16px;
+  padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right));
+  --bar: 64px;
+}
+.lab[data-layout="compact"] { --top: 44px; --bar: 52px; --pad: 4px; }
+
+/* ---- top bar ---- */
+.lab__top { grid-area: top; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 var(--pad); }
+.lab__title { font: 700 20px/1 var(--font-kai); letter-spacing: .06em; white-space: nowrap; margin-right: auto; }
+.lab__title small { font: 600 12px/1 var(--font-ui); color: var(--ink-2); letter-spacing: 0; margin-left: 8px; }
+.lab[data-layout="compact"] .lab__title small { display: none; }
+.lab[data-layout="compact"] .lab__title { font-size: 17px; }
+
+.seg { display: inline-flex; padding: 2px; border-radius: 14px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--edge); }
+.seg button {
+  min-width: 48px; min-height: 44px; padding: 0 12px; border: 0; border-radius: 12px;
+  background: transparent; color: var(--ink-2); font-weight: 700; font-size: 15px; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.lab[data-layout="compact"] .seg button { padding: 0 8px; font-size: 14px; }
+
+/* ---- stage: the stand-in board ---- */
+.lab__stage { grid-area: stage; display: grid; place-items: center; padding: var(--pad); overflow: hidden; overflow: clip; min-height: 0; }
+.bv {
+  position: relative; isolation: isolate;
+  width: calc(9.2 * var(--c)); height: calc(10.6 * var(--c));
+  touch-action: manipulation; -webkit-user-select: none; user-select: none;
+  cursor: crosshair;
+}
+.bv > * { position: absolute; inset: 0; }
+.bv-art { width: 100%; height: 100%; z-index: var(--z-art); }
+.bv-pieces { z-index: var(--z-pieces); pointer-events: none; }
+.bv-over { z-index: var(--z-over); pointer-events: none; }
+.bv-fx { z-index: var(--z-fx); pointer-events: none; }
+
+.art-frame { fill: var(--frame); stroke: var(--frame-edge); stroke-width: 8; }
+.art-stop-a { stop-color: var(--field-a); } .art-stop-b { stop-color: var(--field-b); }
+.art-river { fill: var(--river-b); opacity: var(--river-opacity); }
+.art-line { stroke: var(--line); stroke-width: 3; stroke-linecap: round; fill: none; }
+.art-text { fill: var(--river-text); font: 700 60px var(--font-kai); text-anchor: middle; opacity: .85; }
+
+.pc {
+  position: absolute; left: calc((.6 + var(--vx)) * var(--c)); top: calc((.8 + var(--vy)) * var(--c));
+  width: calc(.88 * var(--c)); height: calc(.88 * var(--c)); margin: calc(-.44 * var(--c)) 0 0 calc(-.44 * var(--c));
+  border-radius: 50%; display: grid; place-items: center;
+  font: 700 calc(.5 * var(--c)) / 1 var(--font-kai);
+}
+.pc[data-color="red"] {
+  color: var(--red-glyph);
+  background: radial-gradient(circle at 36% 30%, var(--red-a), var(--red-b) 58%, var(--red-c));
+  box-shadow: inset 0 0 0 calc(.04 * var(--c)) var(--red-rim), 0 0 0 calc(.02 * var(--c)) var(--piece-edge), 0 calc(.07 * var(--c)) calc(.09 * var(--c)) var(--shadow);
+}
+.pc[data-color="black"] {
+  color: var(--blk-glyph);
+  background: radial-gradient(circle at 36% 30%, var(--blk-a), var(--blk-b) 58%, var(--blk-c));
+  box-shadow: inset 0 0 0 calc(.04 * var(--c)) var(--blk-rim), 0 0 0 calc(.02 * var(--c)) var(--piece-edge), 0 calc(.07 * var(--c)) calc(.09 * var(--c)) var(--shadow);
+}
+
+/* where the buttons aim: origin (ring) and target (reticle) */
+.aim { position: absolute; inset: auto; width: calc(1.04 * var(--c)); height: calc(1.04 * var(--c)); margin: calc(-.52 * var(--c)) 0 0 calc(-.52 * var(--c)); pointer-events: none; }
+.aim--from { border-radius: 50%; border: calc(.05 * var(--c)) dashed var(--trial); opacity: .9; }
+.aim--to {
+  --w: calc(.06 * var(--c)); --l: calc(.26 * var(--c));
+  background:
+    linear-gradient(var(--danger), var(--danger)) left top / var(--l) var(--w) no-repeat, linear-gradient(var(--danger), var(--danger)) left top / var(--w) var(--l) no-repeat,
+    linear-gradient(var(--danger), var(--danger)) right top / var(--l) var(--w) no-repeat, linear-gradient(var(--danger), var(--danger)) right top / var(--w) var(--l) no-repeat,
+    linear-gradient(var(--danger), var(--danger)) left bottom / var(--l) var(--w) no-repeat, linear-gradient(var(--danger), var(--danger)) left bottom / var(--w) var(--l) no-repeat,
+    linear-gradient(var(--danger), var(--danger)) right bottom / var(--l) var(--w) no-repeat, linear-gradient(var(--danger), var(--danger)) right bottom / var(--w) var(--l) no-repeat;
+}
+
+/* ---- status strip under the board ---- */
+.lab__status { grid-area: status; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 var(--pad); min-width: 0; }
+.meter {
+  display: grid; justify-items: center; align-content: center; min-width: 62px; height: 46px; padding: 0 8px;
+  border-radius: 12px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--edge);
+}
+.meter span { font-size: 11px; line-height: 14px; color: var(--ink-2); white-space: nowrap; }
+.meter b { font: 700 18px/20px ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+.meter[data-warn="1"] b { color: var(--danger); }
+.meter[data-step="1"] { box-shadow: inset 0 0 0 2px var(--accent); }
+.tog {
+  min-width: 64px; min-height: 46px; padding: 0 12px; border-radius: var(--r-btn); border: 1px solid var(--edge);
+  background: var(--surface-2); color: var(--ink); font-weight: 700; font-size: 14px; white-space: nowrap; cursor: pointer;
+}
+.tog[aria-pressed="true"] { background: var(--danger); color: var(--danger-ink); border-color: transparent; }
+.lab[data-layout="compact"] .lab__status { gap: 5px; }
+.lab[data-layout="compact"] .meter { min-width: 44px; padding: 0 5px; height: 44px; }
+.lab[data-layout="compact"] .meter b { font-size: 15px; }
+.lab[data-layout="compact"] .tog { min-width: 56px; min-height: 44px; padding: 0 8px; font-size: 13px; }
+
+/* ---- control panel ---- */
+.lab__panel {
+  grid-area: panel; display: flex; flex-direction: column; min-height: 0; min-width: 0; margin: 0 var(--pad) var(--pad);
+  background: var(--surface); border: 1px solid var(--edge); border-radius: var(--r-card); overflow: hidden;
+}
+.lab[data-layout="landscape"] .lab__panel { margin: 8px 0; }
+.tabs { flex: none; display: flex; gap: 2px; padding: 4px 6px; overflow-x: auto; border-bottom: 1px solid var(--edge); scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  flex: none; min-width: 56px; min-height: 44px; padding: 0 13px; border: 0; border-radius: 12px;
+  background: transparent; color: var(--ink-2); font-weight: 700; font-size: 15px; white-space: nowrap; cursor: pointer;
+}
+.tab[aria-selected="true"] { background: var(--surface-2); color: var(--ink); box-shadow: inset 0 -3px 0 var(--accent); }
+.groups { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px 10px 12px; }
+.group h2 { margin: 12px 2px 6px; font: 700 13px/18px var(--font-ui); color: var(--ink-2); letter-spacing: .08em; }
+.group h2 small { font-weight: 500; letter-spacing: 0; margin-left: 6px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 8px; }
+.fxb {
+  display: grid; align-content: center; justify-items: start; gap: 1px; min-height: 52px; padding: 5px 12px; text-align: left;
+  border-radius: var(--r-btn); border: 1px solid var(--edge); background: var(--surface-2); color: var(--ink); cursor: pointer;
+  transition: transform 60ms;
+}
+.fxb:active { transform: translateY(2px); }
+.fxb b { font-size: 15px; line-height: 20px; white-space: nowrap; }
+.fxb code { font: 11px/14px ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--ink-2); white-space: nowrap; }
+.fxb.is-scene {
+  background: var(--accent); color: var(--accent-ink); border-color: transparent;
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--accent) 55%, #000);
+}
+.fxb.is-scene:active { box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 55%, #000); }
+.fxb.is-scene code { color: inherit; opacity: .75; }
+.fxb[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.fxb[aria-pressed="true"] code { color: inherit; opacity: .75; }
+.lab[data-layout="compact"] .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.lab[data-layout="compact"] .fxb { min-height: 48px; padding: 4px 10px; }
+.lab[data-layout="compact"] .fxb code { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+</style>
+</head>
+<body>
+<div class="lab" id="lab" data-layout="landscape">
+  <header class="lab__top">
+    <div class="lab__title">特效试验台<small>src/ui/fx.js</small></div>
+    <div class="seg" id="themes" role="group" aria-label="棋盘主题">
+      <button type="button" data-theme-id="chibi" aria-pressed="true">赤壁</button>
+      <button type="button" data-theme-id="longzhong" aria-pressed="false">隆中</button>
+      <button type="button" data-theme-id="shachang" aria-pressed="false">沙场</button>
+    </div>
+    <div class="seg" id="motions" role="group" aria-label="动态效果">
+      <button type="button" data-motion-id="full" aria-pressed="true">完整</button>
+      <button type="button" data-motion-id="reduced" aria-pressed="false">精简</button>
+    </div>
+  </header>
+
+  <main class="lab__stage" id="stage">
+    <div class="bv" id="board" data-bottom="red"></div>
+  </main>
+
+  <div class="lab__status">
+    <div class="meter" id="m-live-box"><span>粒子</span><b id="m-live">0</b></div>
+    <div class="meter"><span>峰值</span><b id="m-peak">0</b></div>
+    <div class="meter" id="m-q-box"><span>画质 q</span><b id="m-q">1</b></div>
+    <div class="meter"><span>帧 ms</span><b id="m-gap">–</b></div>
+    <button type="button" class="tog" id="slow" aria-pressed="false" title="每帧多占 36 ms，看画质调节器降档">慢帧</button>
+    <button type="button" class="tog" id="pick" title="点棋盘时设置目标格，还是起点格">点设目标</button>
+  </div>
+
+  <aside class="lab__panel" aria-label="特效按钮">
+    <div class="tabs" id="tabs" role="tablist"></div>
+    <div class="groups" id="groups"></div>
+  </aside>
+</div>
+
+<script type="module">
+import { createFx } from '../src/ui/fx.js';
+
+const $ = id => /** @type {HTMLElement} */ (document.getElementById(id));
+const html = document.documentElement;
+const lab = $('lab'), board = $('board');
+const params = new URLSearchParams(location.search);
+const clamp = (lo, x, hi) => Math.max(lo, Math.min(hi, x));
+
+// ---- the stand-in board --------------------------------------------------------------------------------------------
+const lines = [];
+for (let i = 0; i < 10; i++) lines.push(`M60 ${80 + 100 * i}H860`);
+for (let j = 0; j < 9; j++) lines.push(j === 0 || j === 8 ? `M${60 + 100 * j} 80V980` : `M${60 + 100 * j} 80V480M${60 + 100 * j} 580V980`);
+lines.push('M360 80L560 280M560 80L360 280M360 780L560 980M560 780L360 980');
+board.innerHTML = `
+  <svg class="bv-art" viewBox="0 0 920 1060" aria-hidden="true">
+    <defs><linearGradient id="lab-field" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="art-stop-a"/><stop offset="1" class="art-stop-b"/></linearGradient></defs>
+    <rect class="art-frame" x="4" y="4" width="912" height="1052" rx="30"/>
+    <rect x="26" y="40" width="868" height="980" rx="16" fill="url(#lab-field)"/>
+    <rect class="art-river" x="60" y="482" width="800" height="96"/>
+    <path class="art-line" d="${lines.join('')}"/>
+    <text class="art-text" x="260" y="552">楚 河</text><text class="art-text" x="660" y="552">汉 界</text>
+  </svg>
+  <div class="bv-pieces" aria-hidden="true"></div>
+  <div class="bv-over" aria-hidden="true"><i class="aim aim--from"></i><i class="aim aim--to"></i></div>
+  <div class="bv-fx" aria-hidden="true"></div>`;
+
+/** [color, glyph, row, col]: a middle-game position with a central cannon aiming over a pawn. */
+const PIECES = [
+  ['black', '车', 0, 0], ['black', '象', 0, 2], ['black', '士', 0, 3], ['black', '将', 0, 4], ['black', '士', 0, 5], ['black', '象', 0, 6],
+  ['black', '车', 1, 8], ['black', '马', 2, 2], ['black', '炮', 2, 7], ['black', '马', 2, 6], ['black', '卒', 3, 0], ['black', '卒', 3, 4], ['black', '卒', 3, 8], ['black', '卒', 4, 2],
+  ['red', '兵', 5, 4], ['red', '兵', 6, 0], ['red', '兵', 6, 6], ['red', '兵', 6, 8], ['red', '炮', 7, 4], ['red', '炮', 7, 7], ['red', '马', 7, 2], ['red', '马', 7, 6],
+  ['red', '车', 9, 0], ['red', '相', 9, 2], ['red', '仕', 9, 3], ['red', '帅', 9, 4], ['red', '仕', 9, 5], ['red', '相', 9, 6], ['red', '车', 8, 8],
+];
+const piecesEl = /** @type {HTMLElement} */ (board.querySelector('.bv-pieces'));
+for (const [color, glyph, row, col] of PIECES) {
+  const el = document.createElement('div');
+  el.className = 'pc';
+  el.dataset.color = String(color);
+  el.dataset.sq = `${row},${col}`;
+  el.style.setProperty('--vx', String(col));
+  el.style.setProperty('--vy', String(row));
+  el.textContent = String(glyph);
+  piecesEl.append(el);
+}
+
+// ---- fx ------------------------------------------------------------------------------------------------------------
+const prefersReduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let reduced = params.get('motion') ? params.get('motion') === 'reduced' : prefersReduced;
+const fx = createFx({ reducedMotion: reduced, haptics: true });
+fx.mount(/** @type {HTMLElement} */ (board.querySelector('.bv-fx')));
+
+let c = 0;
+/** Centre of a square, CSS px relative to .bv (red at the bottom). */
+const pt = (row, col) => ({ x: (0.6 + col) * c, y: (0.8 + row) * c });
+let from = { row: 7, col: 4 }, to = { row: 3, col: 4 };
+let pickTarget = true;
+
+/** The cell size src/ui/layout.js gives this viewport (computeLayout, §12.2). */
+function layoutFor(W, H) {
+  const landscape = (W >= 900 && W / H >= 1.05) || (H < 480 && W > H);
+  if (landscape) {
+    const small = H < 480, top = small ? 36 : 48, bar = small ? 48 : 64, pad = small ? 4 : 8, gap = small ? 8 : 16, minPanel = small ? 240 : 340;
+    const cell = clamp(20, Math.min((W - minPanel - 3 * gap) / 9.2, (H - top - bar - 2 * pad) / 10.6), 84);
+    return { layout: 'landscape', cell, panelW: Math.round(clamp(minPanel, W - 9.2 * cell - 3 * gap, 480)) };
+  }
+  if (W >= 600) return { layout: 'portrait', cell: clamp(20, Math.min((W - 16) / 9.2, (H - 48 - 60 - 64 - 20 - 176) / 10.6), 84), panelW: 0 };
+  return { layout: 'compact', cell: clamp(20, Math.min((W - 8) / 9.2, (H - (H < 600 ? 36 : 40) - 52 - 12 - 88) / 10.6), 56), panelW: 0 };
+}
+
+function placeAims() {
+  const a = /** @type {HTMLElement} */ (board.querySelector('.aim--from')), b = /** @type {HTMLElement} */ (board.querySelector('.aim--to'));
+  const p = pt(from.row, from.col), q = pt(to.row, to.col);
+  a.style.left = `${p.x}px`; a.style.top = `${p.y}px`;
+  b.style.left = `${q.x}px`; b.style.top = `${q.y}px`;
+}
+
+function relayout() {
+  const r = layoutFor(innerWidth, innerHeight);
+  c = Math.floor(r.cell * 100) / 100;
+  lab.dataset.layout = r.layout;
+  lab.style.setProperty('--c', `${c}px`);
+  lab.style.setProperty('--panel-w', `${r.panelW}px`);
+  fx.resize(9.2 * c, 10.6 * c, c);          // what board-view's ResizeObserver does
+  placeAims();
+}
+addEventListener('resize', relayout);
+relayout();
+
+board.addEventListener('click', event => {
+  const box = board.getBoundingClientRect();
+  const col = clamp(0, Math.round((event.clientX - box.left) / c - 0.6), 8), row = clamp(0, Math.round((event.clientY - box.top) / c - 0.8), 9);
+  if (pickTarget) to = { row, col }; else from = { row, col };
+  placeAims();
+});
+
+// A piece that hovers like a trial, so hit-stop has a running animation to freeze.
+const hoverPiece = /** @type {HTMLElement} */ (piecesEl.querySelector('[data-sq="7,7"]'));
+hoverPiece.animate([{ transform: 'translateY(-10%)' }, { transform: 'translateY(-16%)' }, { transform: 'translateY(-10%)' }],
+  { duration: 2400, iterations: Infinity, easing: 'ease-in-out' });
+
+// ---- what the buttons do -------------------------------------------------------------------------------------------
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+const P = () => pt(from.row, from.col), T = () => pt(to.row, to.col);
+const dir = () => { const a = P(), b = T(); return Math.atan2(b.y - a.y, b.x - a.x); };
+/** The victim's body and rim colour, as board-view passes them: taken from the piece on the target square. */
+const side = () => (piecesEl.querySelector(`[data-sq="${to.row},${to.col}"]`)?.getAttribute('data-color') === 'red' ? ['--red-b', '--red-rim'] : ['--blk-a', '--blk-rim']);
+const king = { top: () => pt(0, 4), bottom: () => pt(9, 4) };
+
+const scenes = {
+  /** C-cannon + E4: the worst simultaneous load in play (6 + 11 + 57 + 16 = 90). */
+  async cannonCheck() {
+    fx.burst('sparks', P(), { n: 6, dir: dir() });
+    fx.haptic('blast');
+    await wait(30);
+    await fx.projectile(P(), T(), { arc: 0.9 * c, ms: 170 });
+    fx.burst('explosion', T(), { colors: side() });
+    fx.flash('#fff', 60); fx.shake(3); fx.hitStop(60);
+    await wait(380);
+    fx.burst('dust', T(), { n: 6 });
+    fx.haptic('check');
+    await fx.banner('check', { tone: 'mine', avoid: king.top() });
+  },
+  /** E5 + E6: mate, then the win (140 confetti + 14 stars = 154). */
+  async mateWin() {
+    fx.hitStop(120); fx.flash('#fff', 60);
+    fx.burst('explosion', king.top(), { colors: side() });
+    fx.haptic('win');
+    await fx.banner('mate');
+    fx.confetti();
+    fx.popup('神来之笔！', T(), { tone: 'brilliant' });
+  },
+  /** M14 + the find nobody announced: stamp first, then the popup. */
+  async stampLord() {
+    await fx.stamp('当头炮！', { size: 'full' });
+    fx.popup('主公英明！', T(), { tone: 'lord' });
+    fx.popup('自己想的', T(), { tone: 'mark' });
+  },
+  /** Rook ram on a big piece: capture + shake(2) + hitStop(60). */
+  async ram() {
+    fx.burst('capture', T(), { n: 30, dir: dir(), colors: side() });
+    fx.shake(2); fx.hitStop(60); fx.haptic('capture');
+    await wait(260);
+    fx.burst('dust', T(), { n: 8, dir: dir() });
+  },
+  /** E9: the child's pawn crosses the river. */
+  async river() {
+    fx.burst('splash', { x: T().x, y: 5.3 * c }, { n: 18 });
+    await fx.banner('river');
+  },
+  /** Losing is never rubbed in: only the calm band. */
+  async lose() { await fx.banner('lose'); },
+  /** Far beyond any real load: the pool stops at 320. */
+  async stress() {
+    for (let i = 0; i < 6; i++) fx.burst('explosion', pt(1 + (i % 3) * 3, 1 + i), { colors: side() });
+    fx.confetti(); fx.confetti();
+  },
+};
+
+const GROUPS = [
+  { id: 'burst', tab: '粒子', title: '粒子 burst(kind, at)', items: [
+    ['尘土', "burst('dust')", () => fx.burst('dust', T(), { n: 8, dir: dir() })],
+    ['落地圈', "burst('ring')", () => fx.burst('ring', T())],
+    ['大圈 · 金', "ring size 1.4", () => fx.burst('ring', T(), { size: 1.4, color: '--trial' })],
+    ['吃子碎片', "burst('capture')", () => fx.burst('capture', T(), { n: 24, dir: dir(), colors: side() })],
+    ['爆炸', "burst('explosion')", () => fx.burst('explosion', T(), { colors: side() })],
+    ['火星', "burst('sparks')", () => fx.burst('sparks', T(), { n: 16 })],
+    ['火星 · 定向', "sparks dir", () => fx.burst('sparks', P(), { n: 6, dir: dir() })],
+    ['水花', "burst('splash')", () => fx.burst('splash', { x: T().x, y: 5.3 * c }, { n: 18 })],
+    ['星星', "burst('stars')", () => fx.burst('stars', T(), { n: 14 })],
+    ['拖尾点', "burst('trail')", () => fx.burst('trail', T(), { dir: dir(), size: 2 })],
+  ] },
+  { id: 'more', tab: '粒子', title: '其余画布特效', items: [
+    ['士的残影', 'trail(from, to)', () => fx.trail(P(), T())],
+    ['刀光', 'slash(at)', () => fx.slash(T())],
+    ['炮弹', 'projectile()', () => fx.projectile(P(), T(), { arc: 0.9 * c, ms: 170 })],
+    ['彩带', 'confetti()', () => fx.confetti()],
+    ['羽扇风', 'wind()', () => fx.wind()],
+  ] },
+  { id: 'impact', tab: '冲击', title: '震动 · 定格 · 闪光', items: [
+    ['轻震', 'shake(1)', () => fx.shake(1)],
+    ['中震', 'shake(2)', () => fx.shake(2)],
+    ['重震', 'shake(3)', () => fx.shake(3)],
+    ['定格 60', 'hitStop(60)', () => fx.hitStop(60)],
+    ['定格 120', 'hitStop(120)', () => fx.hitStop(120)],
+    ['定格 600', 'hitStop(600)', () => fx.hitStop(600)],
+    ['白闪', "flash('#fff')", () => fx.flash('#fff', 60)],
+    ['红闪', "flash('--danger')", () => fx.flash('--danger', 120)],
+  ] },
+  { id: 'haptic', tab: '冲击', title: '触感 haptic(kind)', note: '需要设备支持 navigator.vibrate', items: [
+    ['触感开关', 'setHaptics()', button => { const on = button.getAttribute('aria-pressed') !== 'true'; button.setAttribute('aria-pressed', String(on)); fx.setHaptics(on); }, 'toggle-on'],
+    ...['tap', 'place', 'capture', 'blast', 'check', 'win', 'illegal'].map(kind => [kind, `haptic('${kind}')`, () => fx.haptic(kind)]),
+  ] },
+  { id: 'banner', tab: '横幅', title: '横幅 banner(kind)', items: [
+    ['开战！', "banner('start')", () => fx.banner('start')],
+    ['将军！ 我方', "check · mine", () => fx.banner('check', { tone: 'mine', avoid: king.top() })],
+    ['将军！ 被将', "check · danger", () => { fx.flash('--danger', 120); return fx.banner('check', { tone: 'danger', avoid: king.bottom() }); }],
+    ['绝杀！', "banner('mate')", () => fx.banner('mate')],
+    ['困毙！', "banner('stalemate')", () => fx.banner('stalemate')],
+    ['惜败，再战！', "banner('lose')", () => fx.banner('lose')],
+    ['握手言和', "banner('draw')", () => fx.banner('draw')],
+    ['过河！', "banner('river')", () => fx.banner('river')],
+    ['将军 · 让开上方', 'avoid 第 4 行', () => fx.banner('check', { tone: 'mine', avoid: pt(3, 4) })],
+    ['将军 · 让开下方', 'avoid 第 7 行', () => fx.banner('check', { tone: 'danger', avoid: pt(6, 4) })],
+  ] },
+  { id: 'popup', tab: '飘字', title: '飘字 popup(text, at)', items: [
+    ['好棋！', 'tone good', () => fx.popup('好棋！', T(), { tone: 'good' })],
+    ['妙计！', 'tone great', () => fx.popup('妙计！', T(), { tone: 'great' })],
+    ['神来之笔！', 'tone brilliant', () => fx.popup('神来之笔！', T(), { tone: 'brilliant' })],
+    ['主公英明！', 'tone lord', () => fx.popup('主公英明！', T(), { tone: 'lord' })],
+    ['3连妙手！', 'great · 连击', () => fx.popup('3连妙手！', T(), { tone: 'great' })],
+    ['自己想的', 'tone mark', () => fx.popup('自己想的', T(), { tone: 'mark' })],
+    ['妙计 + 自己想的', 'great + mark', () => { fx.popup('妙计！', T(), { tone: 'great' }); fx.popup('自己想的', T(), { tone: 'mark' }); }],
+  ] },
+  { id: 'stamp', tab: '飘字', title: '招式印 stamp(text)', items: [
+    ['当头炮！', 'size full', () => fx.stamp('当头炮！', { size: 'full' })],
+    ['大胆穿心！', 'full · 五字', () => fx.stamp('大胆穿心！', { size: 'full' })],
+    ['马后炮！', 'size small', () => fx.stamp('马后炮！', { size: 'small', at: T() })],
+  ] },
+  { id: 'scene', tab: '场景', title: '连贯场景（按对局里的编排）', items: [
+    ['炮击 + 将军', '最重一刻 ≤ 90', () => scenes.cannonCheck(), 'scene'],
+    ['绝杀 + 庆祝', '彩带 + 星 = 154', () => scenes.mateWin(), 'scene'],
+    ['招式 + 主公英明', 'stamp → popup', () => scenes.stampLord(), 'scene'],
+    ['车冲吃子', 'capture + hitStop', () => scenes.ram(), 'scene'],
+    ['兵过河', 'splash + river', () => scenes.river(), 'scene'],
+    ['惜败', '只有一条横幅', () => scenes.lose(), 'scene'],
+    ['压力测试', '池上限 320', () => scenes.stress()],
+    ['清空', 'clear()', () => fx.clear()],
+    ['重读配色', 'refreshPalette()', () => fx.refreshPalette()],
+    ['峰值归零', '计数器', () => { peak = 0; }],
+  ] },
+];
+
+// ---- panel ---------------------------------------------------------------------------------------------------------
+const tabsEl = $('tabs'), groupsEl = $('groups');
+const TABS = ['全部', ...new Set(GROUPS.map(g => g.tab))];
+const run = {};
+for (const g of GROUPS) {
+  const section = document.createElement('section');
+  section.className = 'group';
+  section.dataset.tab = g.tab;
+  const h = document.createElement('h2');
+  h.textContent = g.title;
+  if (g.note) { const s = document.createElement('small'); s.textContent = g.note; h.append(s); }
+  const grid = document.createElement('div');
+  grid.className = 'grid';
+  for (const [label, hint, action, flag] of g.items) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = flag === 'scene' ? 'fxb is-scene' : 'fxb';
+    if (flag === 'toggle-on') b.setAttribute('aria-pressed', 'true');
+    b.dataset.run = `${g.id}:${label}`;
+    const name = document.createElement('b'); name.textContent = label;
+    const code = document.createElement('code'); code.textContent = hint;
+    b.append(name, code);
+    b.addEventListener('click', () => action(b));
+    run[b.dataset.run] = () => action(b);
+    grid.append(b);
+  }
+  section.append(h, grid);
+  groupsEl.append(section);
+}
+function showTab(name) {
+  for (const t of tabsEl.children) t.setAttribute('aria-selected', String(t.textContent === name));
+  for (const s of groupsEl.children) /** @type {HTMLElement} */ (s).hidden = name !== '全部' && /** @type {HTMLElement} */ (s).dataset.tab !== name;
+  groupsEl.scrollTop = 0;
+}
+for (const name of TABS) {
+  const t = document.createElement('button');
+  t.type = 'button'; t.className = 'tab'; t.setAttribute('role', 'tab'); t.textContent = name;
+  t.addEventListener('click', () => showTab(name));
+  tabsEl.append(t);
+}
+showTab(params.get('tab') ?? (lab.dataset.layout === 'landscape' ? '全部' : '场景'));
+
+// ---- switches ------------------------------------------------------------------------------------------------------
+function setTheme(id) {
+  html.dataset.theme = id;
+  for (const b of $('themes').children) b.setAttribute('aria-pressed', String(/** @type {HTMLElement} */ (b).dataset.themeId === id));
+  fx.refreshPalette();                         // what board-view.setTheme does
+}
+function setMotion(isReduced) {
+  reduced = isReduced;
+  html.dataset.motion = reduced ? 'reduced' : 'full';
+  for (const b of $('motions').children) b.setAttribute('aria-pressed', String((/** @type {HTMLElement} */ (b).dataset.motionId === 'reduced') === reduced));
+  fx.setReducedMotion(reduced);
+}
+$('themes').addEventListener('click', e => { const id = /** @type {HTMLElement} */ (e.target).dataset.themeId; if (id) setTheme(id); });
+$('motions').addEventListener('click', e => { const id = /** @type {HTMLElement} */ (e.target).dataset.motionId; if (id) setMotion(id === 'reduced'); });
+setTheme(['chibi', 'longzhong', 'shachang'].includes(params.get('theme') ?? '') ? String(params.get('theme')) : 'chibi');
+setMotion(reduced);
+
+let slow = false;
+$('slow').addEventListener('click', () => { slow = !slow; $('slow').setAttribute('aria-pressed', String(slow)); });
+$('pick').addEventListener('click', () => { pickTarget = !pickTarget; $('pick').textContent = pickTarget ? '点设目标' : '点设起点'; });
+
+// ---- meters: live particles, peak, quality tier, frame gap; and the forced slow frame ---------------------------------
+const mLive = $('m-live'), mPeak = $('m-peak'), mQ = $('m-q'), mGap = $('m-gap');
+const fxCanvas = /** @type {HTMLCanvasElement} */ (board.querySelector('.fx-canvas'));
+let peak = 0, last = 0, average = 16.7, shownLive = -1, shownPeak = -1, shownQ = '', shownGap = '';
+function tick(now) {
+  if (slow) { const until = performance.now() + 36; while (performance.now() < until) { /* burn the frame */ } }
+  if (last) average += (Math.min(now - last, 200) - average) * 0.2;
+  last = now;
+  const live = fx.live;
+  if (live > peak) peak = live;
+  if (live !== shownLive) { mLive.textContent = String(shownLive = live); $('m-live-box').dataset.warn = live > 160 ? '1' : '0'; }
+  if (peak !== shownPeak) mPeak.textContent = String(shownPeak = peak);
+  const q = fxCanvas.dataset.q ?? '1';
+  if (q !== shownQ) { mQ.textContent = shownQ = q; $('m-q-box').dataset.step = q === '1' ? '0' : '1'; }
+  const gap = average.toFixed(1);
+  if (gap !== shownGap) mGap.textContent = shownGap = gap;
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+// Hooks for scripted checks (Playwright steps): not part of fx.
+Object.assign(window, { __lab: { fx, pt, run, scenes, cell: () => c, peak: () => peak, resetPeak: () => { peak = 0; }, q: () => Number(fxCanvas.dataset.q),
+  aim: (f, t) => { from = f; to = t; placeAims(); }, setTheme, setMotion, showTab, setSlow: on => { slow = on; $('slow').setAttribute('aria-pressed', String(on)); } } });
+</script>
+</body>
+</html>

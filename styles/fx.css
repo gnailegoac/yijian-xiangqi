@@ -1,0 +1,187 @@
+/* 弈间 — effects layer: canvas, flash, wind, banners, popups, stamps (SPEC §10.4). Package X3.
+ *
+ * Everything here lives inside the board's .bv-fx element (position: absolute; inset: 0, styled by board.css):
+ *
+ *   .bv-fx
+ *     canvas.fx-canvas          every particle; bleeds .5 c past the board (#stage clips it)
+ *     div.fx-wind > i           the band of light of a fan-sweep (fx.wind)
+ *     div.fx-flash              full-board flash (fx.flash)
+ *     div.fx-banners            .fx-banner[data-kind][data-tone] · .fx-popup[data-tone] · .fx-stamp[data-size] · .fx-ring
+ *
+ * Sizes come from --c (the cell pitch, set on .bv) and from --fs, which fx.js writes on each label in px.
+ * Positions (left / top) are written by fx.js in px relative to .bv. All motion is Element.animate() in fx.js and
+ * touches only transform, opacity and (the banner's brush wipe) clip-path; nothing here loops, so there is no
+ * data-motion rule: fx.js picks the reduced variants itself.
+ */
+
+.fx-canvas {
+  position: absolute;
+  left: calc(-.5 * var(--c)); top: calc(-.5 * var(--c));
+  width: calc(100% + var(--c)); height: calc(100% + var(--c));
+  pointer-events: none;
+}
+
+.fx-flash {
+  position: absolute; inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Fan-sweep: a 30 %-wide skewed band that fx.wind() sends across the board. On a dark field it is the catalogue's white
+   at 10 %. White cannot be seen on a light field (隆中, 沙场), so there the band is a shadow in the theme's grid ink
+   (CONTRACT-NOTES K-97); fx.js writes data-field="light" | "dark" from the luminance of --field-a. */
+.fx-wind {
+  position: absolute; inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.fx-wind > i {
+  position: absolute; left: 0; top: -10%;
+  width: 30%; height: 120%;
+  transform: translateX(-150%) skewX(-18deg);        /* parked off the left edge */
+  background: linear-gradient(90deg, transparent, var(--wind-band, rgb(255 255 255 / .10)) 50%, transparent);
+}
+.fx-wind[data-field="light"] { --wind-band: color-mix(in srgb, var(--line) 18%, transparent); }
+
+.fx-banners {
+  position: absolute; inset: 0;
+  z-index: var(--z-banner);                          /* over the canvas, the wind band and the flash */
+  pointer-events: none;
+  font-family: var(--font-kai);
+  font-weight: 700;
+  -webkit-user-select: none; user-select: none;
+}
+
+/* ---- banner: a brushed band across the board --------------------------------------------------------------------------- */
+
+.fx-banner {
+  position: absolute; left: 0;
+  width: 100%; height: calc(1.6 * var(--fs));
+  display: grid; place-items: center;
+  font-size: var(--fs); line-height: 1;
+  white-space: nowrap;
+  color: var(--band-ink);
+  /* tone "mine" */
+  --band: color-mix(in srgb, var(--accent) 92%, transparent);
+  --band-ink: var(--accent-ink);
+  --band-line: transparent;
+  --band-ink-edge: color-mix(in srgb, var(--band-ink) 34%, transparent);     /* the ink bleeding into the band */
+}
+.fx-banner[data-tone="danger"] {
+  --band: var(--danger);
+  --band-ink: var(--danger-ink);
+}
+.fx-banner[data-tone="calm"] {
+  --band: color-mix(in srgb, var(--surface) 92%, transparent);
+  --band-ink: var(--ink);
+  --band-line: var(--edge);
+}
+.fx-banner[data-kind="river"] { --band-ink: var(--fx-cool); }
+
+.fx-banner__band,
+.fx-popup__band {
+  position: absolute; left: 0; top: 0;
+  width: 100%; height: 100%;
+  overflow: visible;
+}
+.fx-brush--shade { fill: #000; fill-opacity: .28; transform: translate(0, 4px); }
+.fx-banner .fx-brush--fill {
+  fill: var(--band);
+  stroke: var(--band-line); stroke-width: 1px; vector-effect: non-scaling-stroke;
+}
+
+.fx-banner__text {
+  position: relative;
+  padding-left: .06em;                               /* balances the letter-spacing after the last glyph */
+  letter-spacing: .06em;
+  text-shadow: 0 0 .08em var(--band-ink-edge), 0 .06em 0 #0008;
+}
+/* A full-width ！ draws in the left third of its box: shift the label so the glyphs look centred. */
+.fx-banner__text[data-tail="mark"] { padding-left: .36em; }
+
+/* ---- popup: a floating label above a square ----------------------------------------------------------------------------- */
+
+.fx-popup {
+  position: absolute; left: 0; top: 0;
+  font-size: var(--fs); line-height: 1.15;
+  white-space: nowrap; text-align: center;
+  --rim: #0b0f1d;                                    /* outline colour */
+  --rim-w: .055em;
+  --rim-2: transparent;                              /* a second, outer line (only where the first is light) */
+  --rim-2w: calc(1.9 * var(--rim-w));
+  color: #ffd166;
+}
+.fx-popup__text {
+  position: relative; display: block;
+  text-shadow:
+    var(--rim-w) 0 0 var(--rim), calc(-1 * var(--rim-w)) 0 0 var(--rim),
+    0 var(--rim-w) 0 var(--rim), 0 calc(-1 * var(--rim-w)) 0 var(--rim),
+    calc(.7 * var(--rim-w)) calc(.7 * var(--rim-w)) 0 var(--rim), calc(-.7 * var(--rim-w)) calc(.7 * var(--rim-w)) 0 var(--rim),
+    calc(.7 * var(--rim-w)) calc(-.7 * var(--rim-w)) 0 var(--rim), calc(-.7 * var(--rim-w)) calc(-.7 * var(--rim-w)) 0 var(--rim),
+    var(--rim-2w) 0 0 var(--rim-2), calc(-1 * var(--rim-2w)) 0 0 var(--rim-2),
+    0 var(--rim-2w) 0 var(--rim-2), 0 calc(-1 * var(--rim-2w)) 0 var(--rim-2),
+    calc(.7 * var(--rim-2w)) calc(.7 * var(--rim-2w)) 0 var(--rim-2), calc(-.7 * var(--rim-2w)) calc(.7 * var(--rim-2w)) 0 var(--rim-2),
+    calc(.7 * var(--rim-2w)) calc(-.7 * var(--rim-2w)) 0 var(--rim-2), calc(-.7 * var(--rim-2w)) calc(-.7 * var(--rim-2w)) 0 var(--rim-2),
+    0 .1em .08em #000a;
+}
+.fx-popup__text[data-tail="mark"] { padding-left: .3em; }      /* centres the glyphs over the square (see the banner) */
+.fx-popup[data-tone="good"] { color: var(--sel); --rim: var(--field-b); --rim-w: .05em; }
+.fx-popup[data-tone="great"] { --rim: #2a1600; --rim-w: .06em; }                        /* gold, dark outline */
+/* gold, white outline; a dark hairline inside and a dark line outside keep both apart from a light board */
+.fx-popup[data-tone="brilliant"] { --rim: #ffffff; --rim-w: .045em; --rim-2: #3a1c00; }
+.fx-popup[data-tone="brilliant"] .fx-popup__text { -webkit-text-stroke: .012em #6b3a00; }
+.fx-popup[data-tone="lord"] { padding: .22em .8em .26em; --rim: #2a0a06; --rim-w: .04em; }    /* gold on a small brushed band */
+.fx-popup[data-tone="lord"] .fx-brush--fill { fill: color-mix(in srgb, var(--shu) 82%, #000); }
+
+/* 自己想的: the popup's Kai face, small and quiet, on its own plate so it reads on every board. Alone, or hanging under a
+ * praise popup. */
+.fx-popup[data-tone="mark"],
+.fx-popup__mark {
+  font-size: calc(.42 * var(--c)); line-height: 1.25;
+  color: var(--ink-2);
+  padding: .14em .6em;
+  border-radius: 1em;
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  box-shadow: 0 0 0 1px var(--edge);
+  text-shadow: none;
+}
+.fx-popup__mark {
+  position: absolute; left: 50%; top: 100%;
+  translate: -50% .1em;
+}
+
+/* ---- stamp: the 招式 seal ------------------------------------------------------------------------------------------------ */
+
+.fx-stamp {
+  position: absolute; left: 0; top: 0;
+  padding: .12em;                                    /* room for the outer line, so placing can count it */
+  rotate: -8deg;
+  font-size: var(--fs); line-height: 1.15;
+  white-space: nowrap;
+  color: var(--danger);                              /* seal red */
+}
+/* Seal red has to read on the field of every theme (CONTRACT-NOTES K-95). In 沙场 --danger is a pale coral on the sand,
+   so the seal takes the theme's darker red there, the one board.css uses for the marks it draws on the field
+   (--danger-mark). The theme is on <html> and on .bv; either one matches. */
+[data-theme="shachang"] .fx-stamp { color: var(--arrow-threat); }
+.fx-stamp__seal {
+  display: block;
+  border: .08em solid currentColor;
+  outline: .03em solid currentColor;
+  outline-offset: .06em;
+  border-radius: .12em;
+  padding: .08em .3em;
+  letter-spacing: .04em;
+  background: color-mix(in srgb, var(--field-a) 88%, transparent);       /* the slip the seal is pressed on: a piece of the field */
+  box-shadow: 0 .06em .16em #0006;
+}
+.fx-stamp__seal[data-tail="mark"] { text-indent: .28em; }        /* balances the empty half of the trailing ！ */
+
+/* ---- reduced-motion stand-in for a ring: static, fades in 200 ms ------------------------------------------------------------ */
+
+.fx-ring {
+  position: absolute;
+  translate: -50% -50%;
+  border: calc(.06 * var(--c)) solid var(--sel);
+  border-radius: 50%;
+}

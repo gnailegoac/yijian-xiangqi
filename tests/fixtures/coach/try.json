@@ -1,0 +1,19 @@
+{ "v": 1,
+  "turn": { "ply": 2, "me": "red", "phase": "opening", "check": false, "n": 35, "back": null, "eval": { "b": "even" },
+    "mat": { "me": "R2H2C2P5A2E2", "opp": "R2H2C2P5A2E2", "cp": 0 }, "level": 3,
+    "moments": [], "taught": [],
+    "mine": { "move": "炮二平五", "cat": "best", "waited": true, "self": true },
+    "opp": { "move": "马8进7", "check": false, "quality": "normal", "name": "horse_open",
+      "does": [ { "k": "develop", "by": { "s": "opp", "t": "H", "f": 7 } },
+                { "k": "defend", "on": { "s": "opp", "t": "P", "f": 5 } } ] },
+    "threats": [], "chance": null, "known": { "threats": true, "chance": false } },
+  "events": [
+    { "i": 0, "kind": "opp", "said": "none" },
+    { "i": 1, "kind": "try", "n": 1,
+      "try": { "move": "马二进三", "cat": "best", "loss": 0, "held": false, "self": true,
+        "eval": { "b": "even" },
+        "does": [ { "k": "develop", "by": { "s": "me", "t": "H", "f": 3 } }, { "k": "open_rook", "on": { "s": "me", "t": "R", "f": 1 } } ],
+        "flaws": [], "cost": null,
+        "reply": { "first": "opp", "moves": ["车9平8", "车一平二"], "net": { "gain": [], "lose": [], "cp": 0 }, "end": "quiet" },
+        "toward": null, "chance": "none" } }
+  ] }

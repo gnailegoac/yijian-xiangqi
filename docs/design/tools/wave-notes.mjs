@@ -36,6 +36,11 @@ for (const path of journals) {
   }
   for (const [agentId, label] of labels) if (!done.has(agentId)) running.push(label);
 }
+// An agent that was cut off in one journal and finished in a later run (another journal) is not running.
+for (let i = running.length - 1; i >= 0; i--) {
+  const [stage, id] = running[i].split(':');
+  if (packages.get(id)?.[stage]) running.splice(i, 1);
+}
 
 // Best-effort owner of a file named in a request.
 const OWNERS = [

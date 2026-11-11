@@ -1,0 +1,90 @@
+/* 弈间 — tokens shared by all themes (SPEC §10.1). Package X1.
+ *
+ * Load order on every page: tokens.css, themes.css, then the page's own stylesheets.
+ * This file holds the type scale, spacing, easings and z-layers, plus the few element defaults every page
+ * (index.html and the dev harness pages) needs so that text, focus rings and motion preferences behave the same
+ * everywhere. Colours live in themes.css; the app grid lives in layout.css.
+ */
+
+:root {
+  /* easing */
+  --e-out:   cubic-bezier(.2,.8,.2,1);
+  --e-in:    cubic-bezier(.6,0,.9,.4);
+  --e-inout: cubic-bezier(.65,0,.35,1);
+  --e-back:  cubic-bezier(.34,1.56,.64,1);   /* overshoot */
+  --e-slam:  cubic-bezier(.5,0,.1,1);        /* accelerate, hard stop */
+  /* durations */
+  --t-1: 100ms; --t-2: 160ms; --t-3: 240ms; --t-4: 360ms; --t-5: 600ms;
+  /* type: UI and display stacks, system fonts only */
+  --font-ui: system-ui, -apple-system, "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-kai: "KaiTi", "STKaiti", "Kaiti SC", "BiauKai", "Songti SC", "SimSun", "Noto Serif CJK SC", serif;  /* piece glyphs, banners, titles */
+  --fs-body: 15px; --lh-body: 22px; --fs-small: 13px; --fs-button: 16px;   /* wide layout: 16 / 24 / 13 / 16 */
+  /* spacing and radii */
+  --gap: 4px; --pad: 8px; --r-btn: 14px; --r-card: 16px; --r-chip: 17px;
+  /* z-layers inside .bv (board view) */
+  --z-art: 0; --z-marks: 1; --z-pieces: 2; --z-over: 3; --z-fx: 4; --z-banner: 5; --z-hit: 6;
+  /* z-layers of the app */
+  --z-sheet: 20; --z-dialog: 30; --z-toast: 40;
+}
+
+/* Wide layout (everything but the phone-sized `compact` mode of §12.2): 16 / 24 / 13 / 16.
+ * `compact` is "not landscape and narrower than 600 px", so "wide" is exactly: at least 600 px wide, or a
+ * landscape phone (lower than 480 px and wider than high). A media query, so it holds before any script runs. */
+@media (min-width: 600px), (max-height: 479.98px) and (orientation: landscape) {
+  :root { --fs-body: 16px; --lh-body: 24px; --fs-small: 13px; --fs-button: 16px; }
+}
+
+/* ---- element defaults ------------------------------------------------------------------------------------------- */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+button, input, textarea, select { font: inherit; color: inherit; }
+button { touch-action: manipulation; }
+
+/* Elements switched off with the `hidden` attribute stay hidden whatever `display` their class gives them. */
+[hidden] { display: none !important; }
+
+/* Focus ring of every control (§10.1 Chrome, §10.6): 3 px accent, only for keyboard focus. */
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+:focus:not(:focus-visible) { outline: none; }
+
+/* Text for screen readers only (e.g. #board-announcement). */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+
+/* ---- motion preference ------------------------------------------------------------------------------------------- *
+ * html[data-motion] is "full" or "reduced" (set by the stage). Loops are written as
+ *   :root[data-motion="full"] .x { animation: … }
+ * so that the reduced state is the default while no script has run. When the system asks for reduced motion,
+ * transitions are zeroed as well, unless the player chose "full" in the settings (data-motion="full").
+ *
+ * Zero means 0s, not "almost zero": with any positive duration every element would get a real transition on
+ * every property (transition-property defaults to `all`), so a geometry read made right after a write would still
+ * see the old value (the FLIP of board-view measures exactly that way) and `transitionend` would fire for changes
+ * nobody declared. The consequence for every module: under this block no CSS transition runs and no
+ * `transitionend` is ever dispatched, so never wait for one without another way out. */
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) *,
+  :root:not([data-motion="full"]) *::before,
+  :root:not([data-motion="full"]) *::after {
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+}

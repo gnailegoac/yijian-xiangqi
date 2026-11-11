@@ -1,0 +1,8 @@
+{
+  "kind": "yijian-backup",
+  "v": 1,
+  "at": 1790003600000,
+  "game": {"schema":2,"id":"g-bk2026bad","humanColor":"red","moves":"7774,0726,9776","result":null,"startedAt":1790000000000,"endedAt":null,"activeMs":61000,"counted":false,"drawFrom":0,"seed":4242424242,"skill":null,"memory":null,"start":null},
+  "profile": {"schema":2,"skill":{"v":1,"level":3.4,"games":7,"tactics":{"seen":[5.2,1.9,0],"found":[3.8,0.97,0]},"streak":2,"bandShift":-15,"habits":{"greedy":1.62,"miss_threat":0.9},"recent":[{"at":1789913600000,"result":"win","acc":0.81,"n":31,"level":3.2},{"at":1789996400000,"result":"win","acc":0.84,"n":28,"level":3.4}]},"games":{"played":99,"won":99,"lost":0,"drawn":0},"rank":9,"goal":{"code":"greedy","setAt":1789996400000},"introSeen":true,"createdAt":1787408000000},
+  "settings": {"schema":2,"theme":"shachang","sfx":true,"music":false,"volume":0.1,"motion":"auto","haptics":true,"typeTicks":false,"readAloud":false,"side":"black","coach":"auto","freeText":true,"talk":"more"}
+}

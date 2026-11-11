@@ -1,18 +1,31 @@
 {
   "name": "yijian-xiangqi",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "弈间 · 可离线部署的中国象棋游戏",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "dev": "node scripts/serve.js",
     "start": "node scripts/serve.js",
+    "dev": "node scripts/serve.js",
+    "start:mock": "node scripts/serve.js --mock",
     "build": "node scripts/build.js",
-    "test": "node --test tests/*.test.js",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "test": "node --test \"tests/unit/**/*.test.js\"",
+    "test:slow": "node --test \"tests/slow/**/*.test.js\"",
+    "test:sim": "node scripts/sim.js",
     "test:e2e": "playwright test",
-    "check": "npm test && npm run build"
+    "bench": "node scripts/bench.js",
+    "coach:bench": "node scripts/coach-bench.js",
+    "check": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "openai": "^7.54.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.65.0"
+    "@playwright/test": "^1.65.0",
+    "typescript": "^7.0.0",
+    "@types/node": "^24.0.0"
   }
 }

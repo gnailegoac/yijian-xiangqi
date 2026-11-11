@@ -1,0 +1,16 @@
+{
+  "schema": 2,
+  "id": "g-7q2mate01",
+  "humanColor": "red",
+  "moves": ["7774","0010","7434","1000","7151","0010"],
+  "result": null,
+  "startedAt": 1790000000000,
+  "endedAt": null,
+  "activeMs": 95000,
+  "counted": false,
+  "drawFrom": 0,
+  "seed": 123456789,
+  "skill": null,
+  "memory": null,
+  "start": null
+}

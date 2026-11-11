@@ -15,7 +15,49 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Every test that needs no browser, the type check and the build.
+  check:
+    name: Type check, unit tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Type check, unit tests and build
+        run: npm run check
+
+  # The Playwright flows against `serve.js --mock` (Chromium emulations of the iPad and of a phone).
+  e2e:
+    name: End-to-end tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests
+        run: npm run test:e2e
+
+  # The published site has no proxy unless the repository variable COACH_API_BASE names one (an https URL).
   deploy:
+    name: Build and publish
+    if: github.ref == 'refs/heads/main'
+    needs: [check, e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
@@ -28,8 +70,11 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '24'
-      - name: Test and build
-        run: npm run check
+      - name: Build
+        run: npm run build
+        env:
+          BUILD_ID: ${{ github.sha }}
+          COACH_API_BASE: ${{ vars.COACH_API_BASE }}
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload static game

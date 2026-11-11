@@ -1,43 +1,35 @@
 <!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#284e3e" />
-    <meta name="description" content="弈间：中国象棋在线小游戏。人机对弈、双人同屏、走棋提示与棋谱，静下心，下一盘。" />
-    <title>弈间 · 中国象棋</title>
-    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-    <link rel="stylesheet" href="./styles.css" />
-  </head>
-  <body>
-    <header class="site-header">
-      <a class="brand" href="./" aria-label="弈间首页"><span class="brand-seal">弈</span><span class="brand-name">弈间<span>XIANGQI CLUB</span></span></a>
-      <nav aria-label="主导航"><a href="#game" class="nav-current">对弈<span></span></a><button type="button" data-action="rules">玩法指南</button><button type="button" data-action="about">关于弈间</button></nav>
-      <span class="header-note"><span class="online-dot"></span>好棋，随时开局</span>
-    </header>
-    <main id="game">
-      <section class="page-heading"><div><p class="eyebrow"><span></span>一棋一世界</p><h1>落子之间，自有天地<span>。</span></h1><p class="intro">楚河汉界，方寸纵横。给自己一点时间，认真下一盘棋。</p></div><div class="heading-decoration" aria-hidden="true"><span>車</span><span>馬</span><i>THE ART OF XIANGQI</i></div></section>
-      <div class="game-layout">
-        <section class="board-panel" aria-label="象棋对弈区">
-          <div class="player-bar opponent-bar"><div class="avatar black-avatar" id="opponent-avatar">将</div><div class="player-info"><strong id="opponent-name">弈间棋手</strong><span id="opponent-detail">电脑 · 进阶难度</span></div><span class="side-label black-label" id="opponent-side">执黑 · 后手</span></div>
-          <div class="board-wrap"><div id="board" class="board" role="group" aria-label="中国象棋棋盘"></div><div id="board-announcement" class="sr-only" role="status" aria-live="polite"></div></div>
-          <div id="mobile-board-actions" class="mobile-board-actions" role="group" aria-label="棋盘快捷操作"></div>
-          <section id="coach-panel" class="coach-panel" aria-label="棋局讲解"><div class="coach-heading"><h2><span data-icon="bulb"></span>棋局讲解</h2><span id="coach-status">正在分析…</span></div><div id="coach-content" aria-live="polite" aria-atomic="true"></div><button type="button" id="coach-use-button" class="coach-use-button" data-action="coach-use" hidden>在棋盘上标出推荐走法 <span aria-hidden="true">↗</span></button><p class="coach-note">建议来自当前局面的有限搜索，走法仍由你决定。</p></section>
-          <div class="player-bar self-bar"><div class="avatar red-avatar" id="self-avatar">帅</div><div class="player-info"><strong id="self-name">我方</strong><span id="self-detail">从容落子，好棋自来</span></div><span class="side-label red-label" id="self-side">执红 · 先手</span></div>
-          <div class="board-tools"><button type="button" data-action="flip" title="翻转棋盘（F）"><span data-icon="flip"></span>翻转棋盘</button><button type="button" id="hint-button" data-action="hint" title="走棋提示（H）"><span data-icon="bulb"></span>走棋提示</button><button type="button" id="sound-button" data-action="sound" aria-pressed="false"><span data-icon="sound"></span><span id="sound-label">音效已关闭</span></button><span class="save-state"><span></span><span id="save-label">棋局自动保存</span></span></div>
-        </section>
-        <aside class="sidebar">
-          <section class="card setup-card"><div class="card-title"><h2>开一盘好棋</h2><span class="small-seal">对弈</span></div><div class="mode-tabs" role="group" aria-label="对弈模式"><button type="button" data-mode="ai" class="active"><span data-icon="cpu"></span>人机对弈</button><button type="button" data-mode="local"><span data-icon="users"></span>双人同屏</button></div><div id="ai-settings"><div class="setting-label"><span>电脑难度</span><span id="difficulty-description">思考几步，棋逢对手</span></div><div class="difficulty-tabs" role="group" aria-label="电脑难度"><button type="button" data-difficulty="easy">入门</button><button type="button" data-difficulty="normal" class="active">进阶</button><button type="button" data-difficulty="hard">挑战</button></div><div class="side-setting"><span>我方执子</span><div role="group" aria-label="我方执子"><button type="button" data-color="red" class="active"><i class="red-disc"></i>红方</button><button type="button" data-color="black"><i class="black-disc"></i>黑方</button></div></div></div><p id="local-description" class="local-description" hidden>与身边的朋友共用棋盘，红方先行，轮流落子。</p><button type="button" class="primary-button new-game-button" data-action="new"><span data-icon="plus"></span>重新开局</button></section>
-          <section class="card status-card"><div class="turn-status"><span id="turn-indicator" class="turn-dot red"></span><div><h2 id="status-title">红方行棋</h2><p id="status-description">你先行，请选择一枚棋子</p></div><span id="thinking-indicator" class="thinking" hidden></span></div><div class="game-stats"><div><span>当前回合</span><strong id="round-count">01</strong></div><div><span>本局用时</span><strong id="elapsed-time">00:00</strong></div></div><div class="action-row"><button type="button" id="undo-button" data-action="undo"><span data-icon="undo"></span>悔棋</button><button type="button" id="resign-button" data-action="resign"><span data-icon="flag"></span>认输</button></div><button type="button" id="retry-ai" class="retry-button" data-action="retry" hidden>重新让电脑行棋</button></section>
-          <section class="card history-card"><div class="card-title"><h2>本局棋谱 <span id="move-count" class="count-badge">0</span></h2><button type="button" class="icon-button export-button" data-action="export" title="下载棋谱" aria-label="下载棋谱"><span data-icon="download"></span></button></div><div class="history-head"><span>回合</span><span><i class="red-disc"></i>红方</span><span><i class="black-disc"></i>黑方</span></div><div id="move-history" class="move-history"><div class="empty-history"><span data-icon="scroll"></span><p>棋局，始于你的第一步</p><span>落子后，棋谱将在这里记录</span></div></div><div id="capture-summary" class="capture-summary"><span>尚未发生吃子</span></div></section>
-          <div class="tip-card"><span data-icon="leaf"></span><p><strong>观棋不语，落子有声</strong><span>点击棋子，查看可走的位置；<br />再点击落点，即可行棋。</span></p></div>
-        </aside>
-      </div>
-      <footer><span>弈间<span class="footer-divider">/</span>把时间，留给一盘好棋。</span><span class="footer-shortcuts">快捷键 <kbd>U</kbd> 悔棋 <kbd>F</kbd> 翻转 <kbd>H</kbd> 提示</span><button type="button" data-action="rules">行棋规则 <span aria-hidden="true">↗</span></button></footer>
-    </main>
-    <div id="toast" class="toast" role="status" hidden></div>
-    <dialog id="modal"><div class="modal-heading"><h2 id="modal-title"></h2><button type="button" class="icon-button" id="modal-close" aria-label="关闭">×</button></div><div id="modal-content"></div><div id="modal-actions" class="modal-actions"></div></dialog>
-    <noscript><p class="noscript">请开启 JavaScript 后开始对弈。</p></noscript>
-    <script type="module" src="./src/app.js"></script>
-  </body>
+<html lang="zh-CN" data-theme="chibi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-visual">
+<meta name="theme-color" content="#0b0f1d">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="弈间">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png"><link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="./favicon.svg"><title>弈间 · 中国象棋</title>
+<link rel="stylesheet" href="./styles/tokens.css">
+<link rel="stylesheet" href="./styles/themes.css">
+<link rel="stylesheet" href="./styles/layout.css">
+<link rel="stylesheet" href="./styles/board.css">
+<link rel="stylesheet" href="./styles/fx.css">
+<link rel="stylesheet" href="./styles/buddy.css">
+<link rel="stylesheet" href="./styles/chat.css">
+<link rel="stylesheet" href="./styles/hud.css">
+<script type="module" src="./src/app.js"></script>
+</head>
+<body>
+<div id="app" class="app" data-layout="landscape" data-phase="boot" data-ply="0" data-kb="0" data-sheet="0" data-coach="local">
+  <header id="topbar" class="topbar"></header>            <!-- hud.js: menu, 司马懿 plate, round, trophies, mute -->
+  <main id="stage" class="stage"><div id="board"></div></main>   <!-- board-view.js (+ fx inside) -->
+  <div id="underbar" class="underbar"></div>               <!-- hud.js: #undo-button — always the element directly under the board -->
+  <section id="coach" class="coach" aria-label="军师">
+    <div id="buddy" class="coach__buddy"></div>            <!-- buddy.js: 诸葛亮 + bubble -->
+    <div id="chat" class="coach__chat"></div>              <!-- chat-panel.js: chips, ✎, 回看, input, history sheet -->
+  </section>
+  <div id="actions" class="actions"></div>                 <!-- hud.js: 锦囊 | 换一步 + 确定落子 | 再来一局 -->
+  <div id="overlays"></div>                                <!-- hud.js: sheets, dialogs, toasts, start and game-over cards -->
+</div>
+<noscript><p class="noscript">请开启 JavaScript 后开始对弈。</p></noscript>
+</body>
 </html>

@@ -1,0 +1,1101 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="chibi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-visual">
+<meta name="theme-color" content="#0b0f1d">
+<title>弈间 · 舞台试验台 (stage.js)</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../styles/tokens.css">
+<link rel="stylesheet" href="../styles/themes.css">
+<link rel="stylesheet" href="../styles/layout.css">
+<link rel="stylesheet" href="../styles/board.css">
+<link rel="stylesheet" href="../styles/fx.css">
+<link rel="stylesheet" href="../styles/buddy.css">
+<link rel="stylesheet" href="../styles/chat.css">
+<link rel="stylesheet" href="../styles/hud.css">
+<style>
+/* Dev harness for src/ui/stage.js (package X8). Not part of the game: never built into dist/.
+ *
+ * The page is the real shell of index.html and the real stage with every real UI module. What is fake is the
+ * game behind it: a small stand-in for the director (below) that keeps a board with the rules of
+ * src/core/engine.js, answers the stage's StageHandlers and calls StagePort in the order of SPEC 5.8, with
+ * scripted verdicts, lines, rival replies and hints. Nothing is searched and nothing is sent anywhere.
+ *
+ * Four scenes: 开局 (the start position: trial, streamed comment, retract, opening stamp, the rival's move with
+ * caption and line, a held trial with 指给我看, the three pouches, an ask chip with a tool round, the child's own
+ * cannon capture, undo) · 中局 (the find nobody announced: check + stamp + 主公英明 + a rattled rival; the rival
+ * gives check) · 绝杀 (mate in one, the win, 本局最佳, the card and its takeaway) · 惜败 (the rival mates).
+ *
+ * URL (the stage reads its own switches from the same URL: ?theme= ?motion=reduced ?mute=1 ?test=1):
+ *   ?panel=0     hide the control panel            ?start=0   no start overlay
+ *   ?auto=1      play the whole script             ?scene=opening|fork|mate|loss
+ *   ?coach=off   the strategist speaks locally (no ✎ input)
+ * Scripted use: window.__dev = { stage, G, act, scene(name), playAll(), moment(name), raw, calls, ... }. */
+
+.dev {
+  position: fixed; left: 8px; top: 56px; z-index: 90; width: min(372px, calc(100vw - 16px)); max-height: calc(100dvh - 72px);
+  display: flex; flex-direction: column; gap: 6px; padding: 8px;
+  border: 1px dashed var(--edge); border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 95%, transparent); color: var(--ink);
+  font: 500 12px/1.3 var(--font-ui); overflow: auto; overscroll-behavior: contain;
+  box-shadow: 0 12px 32px #0008;
+}
+.dev[hidden] { display: none; }
+.dev h2 { margin: 0; font: 700 14px/1.2 var(--font-ui); display: flex; align-items: center; gap: 8px; }
+.dev h2 small { font-weight: 500; color: var(--ink-2); }
+.dev fieldset { margin: 0; padding: 4px 6px 6px; border: 1px solid var(--edge); border-radius: 10px; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.dev legend { padding: 0 4px; color: var(--ink-2); font-weight: 700; }
+.dev button {
+  min-height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--edge);
+  background: var(--surface-2); color: var(--ink); font: 600 12px/1 var(--font-ui); cursor: pointer;
+}
+.dev button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.dev button.is-go { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.dev__log { flex: none; height: 120px; margin: 0; padding: 6px 8px; border-radius: 10px; background: var(--page); color: var(--ink-2);
+  font: 500 11px/1.5 ui-monospace, Consolas, monospace; overflow: auto; white-space: pre-wrap; }
+.dev-toggle {
+  position: fixed; left: 50%; top: 0; z-index: 91; translate: -50% 0; min-width: 44px; height: 20px; padding: 0 10px;
+  border: 1px solid var(--edge); border-top: 0; border-radius: 0 0 10px 10px;
+  background: var(--surface-2); color: var(--ink-2); font: 700 10px/1 var(--font-ui); letter-spacing: .1em; cursor: pointer; opacity: .8;
+}
+.dev-toggle[hidden] { display: none; }
+</style>
+</head>
+<body>
+<div id="app" class="app" data-layout="landscape" data-phase="boot" data-ply="0" data-kb="0" data-sheet="0" data-coach="local">
+  <header id="topbar" class="topbar"></header>
+  <main id="stage" class="stage"><div id="board"></div></main>
+  <div id="underbar" class="underbar"></div>
+  <section id="coach" class="coach" aria-label="军师">
+    <div id="buddy" class="coach__buddy"></div>
+    <div id="chat" class="coach__chat"></div>
+  </section>
+  <div id="actions" class="actions"></div>
+  <div id="overlays"></div>
+</div>
+
+<button class="dev-toggle" id="dev-toggle" type="button" aria-controls="dev">DEV</button>
+<aside class="dev" id="dev" aria-label="stage 试验台" hidden>
+  <h2>stage.js <small id="dev-size"></small></h2>
+  <div id="dev-groups"></div>
+  <pre class="dev__log" id="dev-log" aria-live="off"></pre>
+</aside>
+
+<script type="module">
+import { createStage } from '../src/ui/stage.js';
+import { ASK_LABEL, CUE, RANK_NAMES } from '../src/core/codes.js';
+import { START_FEN, applyMove, checkers, fenToBoard, getGameStatus, getLegalMoves, getPieceLegalMoves, moveToNotation } from '../src/core/engine.js';
+
+const $ = (sel) => document.querySelector(sel);
+const query = new URLSearchParams(location.search);
+const html = document.documentElement;
+
+// ---- log -------------------------------------------------------------------------------------------------------------------
+
+const logEl = $('#dev-log');
+const logLines = [];
+function log(text) {
+  logLines.push(text);
+  if (logLines.length > 80) logLines.shift();
+  logEl.textContent = logLines.join('\n');
+  logEl.scrollTop = logEl.scrollHeight;
+}
+/** Every StageHandlers call the stage made: [name, ...args]. */
+const calls = [];
+
+// ---- the stage, the real one ---------------------------------------------------------------------------------------------------
+
+let settings = { schema: 2, theme: 'chibi', sfx: true, music: true, volume: 1, motion: 'auto', haptics: true, typeTicks: false,
+                 readAloud: false, side: 'red', coach: query.get('coach') === 'off' ? 'local' : 'auto', freeText: true, talk: 'smart' };
+let coachMode = settings.coach === 'local' ? { mode: 'local', reason: 'setting' } : { mode: 'llm', reason: null };
+
+const real = createStage($('#app'), { settings, url: location, rank: '' });
+/** The same StagePort, with every call written to the log (what a director says, in order). */
+const stage = new Proxy(real, {
+  get(target, name) {
+    const member = target[name];
+    if (typeof member !== 'function') return member;
+    return (...args) => {
+      if (name !== 'coachSegment' && name !== 'activity') log(`stage.${String(name)}(${args.map(brief).join(', ')})`);
+      return member.apply(target, args);
+    };
+  },
+});
+function brief(value) {
+  if (value === null || typeof value !== 'object') return typeof value === 'string' ? `'${value.length > 16 ? value.slice(0, 16) + '…' : value}'` : String(value);
+  if (Array.isArray(value)) return `[${value.length}]`;
+  if ('from' in value && 'to' in value) return `${value.from.row}${value.from.col}→${value.to.row}${value.to.col}`;
+  const keys = ['id', 'kind', 'phase', 'cat', 'final', 'held', 'voiced', 'mood', 'line', 'result', 'reason', 'deal', 'notation', 'reselect', 'group', 'mode', 'visible', 'enabled'];
+  const shown = keys.filter((k) => k in value).map((k) => `${k}:${typeof value[k] === 'object' ? '…' : value[k]}`);
+  return `{${shown.join(' ')}}`;
+}
+
+// ---- the fake game -----------------------------------------------------------------------------------------------------------
+
+const other = (color) => (color === 'red' ? 'black' : 'red');
+const sq = (row, col) => ({ row, col });
+const codeOf = (m) => `${m.from.row}${m.from.col}${m.to.row}${m.to.col}`;
+const sameSq = (a, b) => !!a && !!b && a.row === b.row && a.col === b.col;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const G = {
+  scene: 'opening', gameId: 0, positionId: 0, trialId: 0,
+  board: fenToBoard(START_FEN).board, turn: 'red', human: 'red',
+  history: [],                    // { move, notation, by, color, before, flags }
+  phase: 'boot', selected: null, targets: [], trial: null, hintLevel: 0, failed: false,
+  result: null, trophies: { mine: [], lost: [] }, roundBase: 0, tension: 0.15, proud: null, brilliant: 0,
+  streak: 0, tapOverTold: false, lastAnim: Promise.resolve(), failNext: false,
+};
+
+/** A script dies with the game, the position or the trial it belongs to (SPEC 4.25.2). */
+function scope(lifetime) {
+  const born = { g: G.gameId, p: G.positionId, t: G.trialId };
+  return () => G.gameId === born.g && (lifetime === 'game' || (G.positionId === born.p && (lifetime === 'position' || G.trialId === born.t)));
+}
+
+function flagsOf(after, move) {
+  const enemy = other(move.piece.color);
+  const st = getGameStatus(after, enemy);
+  let checkedKing = null;
+  if (st.check) for (let r = 0; r < 10; r++) for (let c = 0; c < 9; c++) if (after[r][c]?.type === 'king' && after[r][c].color === enemy) checkedKing = sq(r, c);
+  const crossed = move.piece.type === 'pawn' && (move.piece.color === 'red' ? move.from.row === 5 && move.to.row === 4 : move.from.row === 4 && move.to.row === 5);
+  return { check: st.check, mate: st.over && st.reason === 'checkmate', checkedKing, checkers: st.check ? checkers(after, enemy) : [], crossed };
+}
+
+function viewOf() {
+  const last = G.history[G.history.length - 1] ?? null;
+  const st = getGameStatus(G.board, G.turn);
+  return {
+    board: G.board, bottom: G.human, lastMove: last ? last.move : null, lastBy: last ? last.by : null,
+    check: st.check ? G.turn : null, checkers: st.check ? checkers(G.board, G.turn) : [],
+    round: G.roundBase + Math.floor(G.history.length / 2) + 1,
+    trophies: { mine: [...G.trophies.mine], lost: [...G.trophies.lost] },
+  };
+}
+
+function rows() {
+  const out = [];
+  G.history.forEach((ply, i) => {
+    const first = (G.history[0].color === 'red');
+    const k = first ? i : i + 1;
+    if (k % 2 === 0) out.push({ n: Math.floor(k / 2) + 1, red: ply.notation });
+    else if (out.length) out[out.length - 1].black = ply.notation;
+    else out.push({ n: 1, red: '…', black: ply.notation });
+  });
+  return out;
+}
+
+const inputOn = () => coachMode.mode === 'llm' && settings.freeText;
+function pushPhase() {
+  stage.phase({ phase: G.phase, canUndo: undoCount() > 0 || G.phase === 'tentative', hintLevel: G.hintLevel, canAsk: G.phase !== 'opponentTurn', failed: G.failed, ply: 2 * G.roundBase + G.history.length });
+}
+
+function push(move, by) {
+  const before = G.board;
+  const notation = moveToNotation(before, move);
+  G.board = applyMove(before, move);
+  const flags = flagsOf(G.board, move);
+  G.history.push({ move, notation, by, color: move.piece.color, before, flags });
+  if (move.captured) (by === 'child' ? G.trophies.mine : G.trophies.lost).push(move.captured);
+  G.turn = other(move.piece.color);
+  G.positionId += 1;
+  return { notation, flags, before };
+}
+
+// ---- text: 【notation】 becomes a move link ----------------------------------------------------------------------------------------
+
+function findByNotation(board, notation) {
+  for (const color of ['red', 'black']) {
+    const move = getLegalMoves(board, color).find((m) => moveToNotation(board, m) === notation);
+    if (move) return move;
+  }
+  return null;
+}
+/** @param {string} text  @param {{board?:any, line?:boolean, src?:string}} [base]  line: the bracketed moves follow each other */
+function parse(text, base = {}) {
+  const out = [];
+  let board = base.board ?? G.board;
+  const pre = [];
+  for (const part of text.split(/(【[^】]+】)/)) {
+    if (!part) continue;
+    const hit = /^【(.+)】$/.exec(part);
+    const move = hit ? findByNotation(board, hit[1]) : null;
+    if (!hit || !move) { out.push({ type: 'text', text: hit ? hit[1] : part }); continue; }
+    out.push({ type: 'move', notation: hit[1], link: {
+      from: move.from, to: move.to, color: move.piece.color, code: codeOf(move), pre: base.line ? [...pre] : [],
+      playable: move.piece.color === G.human && board === G.board && G.turn === G.human, src: base.src ?? 'opp' } });
+    if (base.line) { pre.push({ from: move.from, to: move.to, color: move.piece.color }); board = applyMove(board, move); }
+  }
+  return out;
+}
+
+// ---- the strategist's replies: streamed like the model's, or at once like the local narrator's ------------------------------------
+
+let msgSeq = 0;
+let replyGen = 0;                 // one reply at a time; an interrupted one reports nothing (SPEC 7.5)
+const interrupt = () => { replyGen += 1; };
+
+/** @returns {Promise<boolean>} true when the line ended with text */
+async function say(kind, text, o = {}) {
+  const id = `m${++msgSeq}`;
+  const alive = scope(o.lifetime ?? 'position');
+  const gen = ++replyGen;
+  const ok = () => alive() && gen === replyGen;
+  stage.coachBegin({ id, kind, cue: o.cue ?? null, target: o.target });
+  const segments = parse(text, o.base);
+  if (o.source === 'local' || coachMode.mode === 'local') {
+    for (const seg of segments) stage.coachSegment(id, seg);
+    stage.coachEnd(id, { reason: 'done', source: 'local' });
+    return true;
+  }
+  await sleep(o.delay ?? 650);                              // time to the first token
+  if (!ok()) return false;
+  if (o.tool) {                                             // a tool round: 亮在沙盘上摆一摆【…】……
+    stage.coachTool(id, { phase: 'start', notation: o.tool.notation, link: o.tool.link });
+    await sleep(1300);
+    if (!ok()) return false;
+    stage.coachTool(id, { phase: 'end' });
+    await sleep(300);
+    if (!ok()) return false;
+  }
+  for (const seg of segments) {
+    if (seg.type === 'move') { stage.coachSegment(id, seg); await sleep(50); }
+    else for (let i = 0; i < seg.text.length; i += 3) {
+      stage.coachSegment(id, { type: 'text', text: seg.text.slice(i, i + 3) });
+      await sleep(55);
+      if (!ok()) return false;
+    }
+    if (!ok()) return false;
+  }
+  stage.coachEnd(id, { reason: 'done', source: 'llm' });
+  return true;
+}
+const local = (text, opts) => stage.coachLocal(parse(text), opts);
+
+// ---- chips (SPEC 4.25.6) ------------------------------------------------------------------------------------------------------------
+
+const ask = (code) => ({ id: code, label: ASK_LABEL[code], ask: code });
+const SETS = {
+  turn: () => [ask('intent'), ask('danger'), ...(G.history.some((p) => p.by === 'child') ? [ask('last')] : []), ask('score')],
+  trial: (why) => [ask('good'), ask('reply'), ask('better'), ...(why ? [ask('why')] : [])],
+  held: () => [{ id: 'seen', label: '我看出来了', action: 'retract' }, ask('show'), { id: 'go', label: '就走这步', action: 'confirm' }],
+  hint3: () => [{ id: 'try', label: '试试这步', action: 'pouch', primary: true }, ...SETS.turn()].slice(0, 4),
+  takeback: () => [{ id: 'takeback', label: '悔一步重想', action: 'takeback', primary: true }, ...SETS.turn()].slice(0, 4),
+  over: () => [ask('proud'), ask('improve'), ask('next')],
+  none: () => [],
+};
+
+// ---- the script: verdicts, lines, replies and hints by scene (key = plies played + ':' + move code) -----------------------------
+
+const SCENES = {
+  opening: {
+    title: '开局', fen: START_FEN, roundBase: 0, tension: 0.15,
+    trials: {
+      '0:7774': { quick: 'good', cat: 'good', line: '当头炮！先占中路，是开局的好手。', stamp: { text: '当头炮！', size: 'full' } },
+      '2:7434': { quick: 'pending', cat: 'mistake', held: true, voiced: true, focus: [sq(2, 6)], cue: CUE.wait, line: '这个兵，真的没人保护吗？',
+                  show: { line: '看，【马7进5】一跳，炮就白丢了。' } },
+      '2:9776': { quick: 'good', cat: 'good', reply: { notation: '车9平8', line: '多半是【车9平8】，出车抢先。' } },
+      '4:7101': { quick: 'best', cat: 'best', earned: true, cue: CUE.wow, line: '白吃一匹马！他的车刚走开，这匹马就没人保护了。',
+                  praise: { tier: 'great', streak: 1 }, self: true, rival: { mood: 'frown', line: '哼，大意了。' } },
+    },
+    replies: {
+      1: { move: [0, 7, 2, 6], word: '出子', line: '他跳马，护住了中间的卒。' },
+      3: { move: [0, 0, 1, 0], word: '亮车' },                                  // the hole nobody announces
+      5: { move: [1, 0, 1, 1], word: '捉子', line: '他的车盯上你的炮了，想想往哪儿躲。', tension: 0.45 },
+    },
+    hints: { 2: { move: [9, 7, 7, 6], lines: ['想一想：你的大子都出动了吗？', '看看右边这匹马，它还在家里呢。', '走【马二进三】，把马跳出来，护住中兵。'] } },
+  },
+  fork: {
+    title: '中局', fen: '2bakab2/9/7c1/1r4p1p/2N6/9/P3P3P/1C7/9/R1BAKAB2 w', roundBase: 17, tension: 0.5,
+    intro: '小主公，他的车离开了老家。仔细看看，有没有机会？',
+    trials: {
+      '0:4223': { quick: 'best', cat: 'best', earned: true, cue: CUE.lord, line: '将军又捉车，一马双响！', stamp: { text: '将军捉子！', size: 'full' },
+                  praise: { tier: 'lord', streak: 2 }, self: true, rival: { mood: 'rattled', line: '什么？！' } },
+      '2:2331': { quick: 'best', cat: 'best', earned: true, cue: CUE.nice, line: '车到手了！这一仗赚大了。', praise: { tier: 'great', streak: 3 } },
+      '4:9584': { quick: 'good', cat: 'good' },
+    },
+    replies: {
+      1: { move: [0, 4, 1, 4], word: '躲开' },
+      3: { move: [2, 7, 2, 4], word: '将军', line: '他架炮将军了！垫一个子，挡住炮口。', rival: { mood: 'smug', line: '且看这一炮。' }, tension: 0.8 },
+    },
+    hints: {
+      0: { move: [4, 2, 2, 3], lines: ['对方的将和车，离得近不近？', '看看这匹马，它能跳到哪里？', '走【马七进六】，将军的同时还捉着车。'] },
+      4: { move: [9, 5, 8, 4], lines: ['被将军了，有几种办法应将？', '看看老帅身边的仕。', '走【仕四进五】，垫在中间挡住炮。'] },
+    },
+  },
+  mate: {
+    title: '绝杀', fen: '2bakab2/9/7n1/p1p3p1p/4C4/9/P1P3P1P/1C4N2/8r/2BAKAB2 w', roundBase: 33, tension: 0.9,
+    intro: '他的将被自己的士象围住了。小主公，看看你的两门炮。',
+    trials: {
+      '0:7174': { quick: 'best', cat: 'brilliant', earned: true, cue: CUE.wow, line: '重炮！他已经无路可逃。', stamp: { text: '重炮！', size: 'full' }, self: true,
+                  rival: { mood: 'rattled' } },
+    },
+    replies: {},
+    hints: { 0: { move: [7, 1, 7, 4], lines: ['对方的将，还有地方可以走吗？', '看看左边这门炮。', '走【炮八平五】，两门炮叠在一条线上。'] } },
+  },
+  loss: {
+    title: '惜败', fen: '2bakab2/9/7c1/p1p3p1p/9/4c4/P1P3P1P/2N6/9/R1BAKAB2 w', roundBase: 26, tension: 0.85,
+    intro: '形势吃紧。小主公，先看看对方的炮想干什么。',
+    trials: { '0:6858': { quick: 'ok', cat: 'mistake', held: true, voiced: false } },
+    replies: { 1: { move: [2, 7, 2, 4], word: '重炮', rival: { mood: 'calm' } } },
+    hints: {},
+  },
+};
+/** The best moment shown by the game-over card when the game itself has none. */
+const SAMPLE_PROUD = (() => {
+  const before = fenToBoard(SCENES.fork.fen).board;
+  const move = getLegalMoves(before, 'red').find((m) => codeOf(m) === '4223');
+  return { before, move, notation: moveToNotation(before, move), self: true };
+})();
+const OVER_LINE = {
+  win: '这一局赢得漂亮！那步【马七进六】将军捉车，是你自己看出来的。上盘说好的，做到了！',
+  loss: '这盘只差一步。你那步【马七进六】下得真好，亮都记着呢。下一盘，我们先看对方的炮。',
+  draw: '旗鼓相当！你守得很稳，没有白丢一个子。',
+};
+
+const sceneNow = () => SCENES[G.scene];
+function trialScript(move) {
+  const hit = sceneNow().trials[`${G.history.length}:${codeOf(move)}`];
+  return hit ?? { quick: move.captured ? 'good' : 'ok', cat: move.captured ? 'good' : 'ok' };
+}
+const pick = (color, coords) => getLegalMoves(G.board, color).find((m) => m.from.row === coords[0] && m.from.col === coords[1] && m.to.row === coords[2] && m.to.col === coords[3]) ?? null;
+const WORTH = { king: 9, rook: 8, cannon: 5, horse: 4, advisor: 2, elephant: 2, pawn: 1 };
+
+// ---- transitions, in the order of SPEC 5.8 ---------------------------------------------------------------------------------------
+
+function select(at) {
+  G.selected = at;
+  G.targets = getPieceLegalMoves(G.board, at.row, at.col);
+  G.phase = 'selected';
+  stage.selected(at, G.targets, []);
+  pushPhase();
+}
+function deselect() {
+  G.selected = null;
+  G.targets = [];
+  G.phase = 'childTurn';
+  stage.selected(null, [], []);
+  pushPhase();
+}
+
+function tryMove(move, opts = {}) {
+  interrupt();
+  G.trialId += 1;
+  const notation = moveToNotation(G.board, move);
+  G.trial = { move, notation, script: null, landedAt: performance.now() };
+  G.phase = 'tentative';
+  G.selected = move.from;
+  G.targets = getPieceLegalMoves(G.board, move.from.row, move.from.col);
+  G.lastAnim = stage.tentative(move, { notation, aim: !!move.captured });
+  pushPhase();
+  if (opts.raw) return;
+  const script = trialScript(move);
+  stage.verdict({ cat: script.quick ?? 'pending', final: false, held: false, voiced: false, earned: false, focus: [] });   // the face, in the same frame
+  stage.chips(SETS.trial(false));
+  stage.announce(`试走 ${notation}，还没落子。`);
+  assess(script);
+}
+
+async function assess(script) {
+  const alive = scope('trial');
+  await sleep(130);                                         // the assess job
+  if (!alive()) return;
+  G.trial.script = script;
+  const held = !!script.held, voiced = held && !!script.voiced;
+  stage.verdict({ cat: script.cat, final: true, held, voiced, earned: !!script.earned, focus: voiced ? script.focus ?? [] : [] });
+  if (held) {                                               // the guiding question is local and instant; never a beacon
+    if (voiced) { await say('try', script.line, { cue: script.cue ?? CUE.wait, source: 'local', lifetime: 'trial' }); stage.chips(SETS.held()); }
+    return;
+  }
+  if (!script.line) {                                       // a nod and no text: the beacon 600 ms after landing
+    await sleep(470);
+    if (alive()) stage.beacon();
+    return;
+  }
+  setTimeout(() => { if (alive()) stage.beacon(); }, 1400);
+  const spoke = await say('try', script.line, { cue: script.cue ?? null, lifetime: 'trial' });
+  if (spoke && alive()) stage.chips(SETS.trial(true));
+}
+
+function retract(keep = true) {
+  if (G.phase !== 'tentative') return;
+  stage.settle();
+  interrupt();
+  const origin = G.trial.move.from;
+  G.trial = null;
+  G.trialId += 1;
+  G.phase = keep ? 'selected' : 'childTurn';
+  G.selected = keep ? origin : null;
+  if (!keep) G.targets = [];
+  G.lastAnim = stage.retracted({ reselect: keep, targets: G.targets, forbidden: [] });
+  stage.chips(SETS.turn());
+  stage.announce('已取消试走。');
+  stage.selected(G.selected, G.targets, []);
+  pushPhase();
+}
+
+function confirm(over = {}) {
+  if (G.phase !== 'tentative') return;
+  stage.settle();
+  interrupt();
+  const trial = G.trial;
+  const script = { ...(trial.script ?? trialScript(trial.move)), ...over };
+  const before = G.board;
+  const { flags } = push(trial.move, 'child');
+  G.trial = null;
+  G.trialId += 1;
+  G.selected = null;
+  G.targets = [];
+  if (script.praise) { G.proud = { before, move: trial.move, notation: trial.notation, self: !!script.self }; if (script.praise.tier === 'brilliant') G.brilliant += 1; }
+  G.lastAnim = stage.committed({ move: trial.move, notation: trial.notation, flags, fromTrial: true, cat: script.cat ?? null, praise: script.praise ?? null,
+                                 stamp: script.stamp ?? null, self: !!script.self, softCheck: false, view: viewOf() });
+  if (script.rival) stage.rival(script.rival); else if (flags.check) stage.rival({ mood: 'frown' });
+  stage.notation(rows(), G.history.length);
+  stage.announce(`你走了 ${trial.notation}。`);
+  next(flags, 'child');
+}
+
+function next(flags, by) {
+  const st = getGameStatus(G.board, G.turn);
+  if (st.over) { gameOver(st.winner === G.human ? 'win' : 'loss', st.reason === 'stalemate' ? 'stalemate' : 'checkmate', by === 'child' && flags.mate); return; }
+  if (G.turn !== G.human) rivalTurn();
+}
+
+async function rivalTurn() {
+  G.phase = 'opponentTurn';
+  G.failed = false;
+  G.hintLevel = 0;
+  pushPhase();
+  stage.chips([]);
+  stage.input({ visible: inputOn(), enabled: false });
+  stage.rival({ mood: 'thinking' });
+  stage.announce('对方正在思考。');
+  const alive = scope('position');
+  const scripted = sceneNow().replies[G.history.length];
+  await Promise.all([sleep(scripted?.think ?? 800), G.lastAnim]);
+  if (!alive()) return;
+  if (G.failNext) {                                         // 司马懿走神了
+    G.failNext = false;
+    G.failed = true;
+    pushPhase();
+    return;
+  }
+  const rivalColor = other(G.human);
+  let move = scripted ? pick(rivalColor, scripted.move) : null;
+  if (!move) {                                              // free play: take what can be taken, else something plain
+    const moves = getLegalMoves(G.board, rivalColor);
+    const takes = moves.filter((m) => m.captured).sort((a, b) => WORTH[b.captured.type] - WORTH[a.captured.type]);
+    move = takes[0] ?? moves[(G.history.length * 7 + 3) % moves.length];
+  }
+  const { notation, flags, before } = push(move, 'opponent');
+  const big = ['rook', 'cannon', 'horse'].includes(move.captured?.type ?? '');
+  G.lastAnim = stage.rivalMoved({ move, notation, flags, caption: [], lostBig: big, softCheck: false, view: viewOf() });
+  stage.rival(scripted?.rival ?? { mood: flags.check ? 'smug' : 'calm' });
+  G.tension = scripted?.tension ?? Math.min(1, G.tension + (move.captured ? 0.15 : 0.02));
+  stage.tension(G.tension);
+  stage.notation(rows(), G.history.length);
+  stage.announce(`对方走了 ${notation}${flags.check ? '，将军！' : '。'}`);
+  const st = getGameStatus(G.board, G.turn);
+  if (st.over) { gameOver(st.winner === G.human ? 'win' : 'loss', st.reason === 'stalemate' ? 'stalemate' : 'checkmate', false); return; }
+  childTurn({ notation, before, word: scripted?.word ?? (move.captured ? '吃子' : flags.check ? '将军' : '调整'), line: scripted?.line ?? null });
+}
+
+async function childTurn(opp) {
+  G.phase = 'childTurn';
+  G.hintLevel = 0;
+  G.failed = false;
+  pushPhase();
+  stage.chips([]);
+  stage.input({ visible: inputOn(), enabled: false });
+  const alive = scope('position');
+  if (opp) {
+    await sleep(380);                                       // hidden behind the rival's move animation
+    if (!alive()) return;
+    stage.caption(parse(`【${opp.notation}】${opp.word}`, { board: opp.before, src: 'opp' }));
+    if (opp.line) say('opp', opp.line, { lifetime: 'position' });
+  }
+  stage.chips(SETS.turn());
+  stage.input({ visible: inputOn(), enabled: true });
+}
+
+async function gameOver(result, reason, byChildMate, quiet = false) {
+  G.phase = 'over';
+  G.result = { result, reason };
+  G.tapOverTold = false;
+  interrupt();
+  pushPhase();
+  stage.chips([]);
+  const alive = scope('position');
+  await G.lastAnim;
+  if (!alive()) return;
+  const view = {
+    result, reason, byChildMate, stats: { rounds: G.roundBase + Math.ceil(G.history.length / 2), captures: G.trophies.mine.length + (G.roundBase ? 4 : 0), brilliant: G.brilliant + (G.roundBase ? 1 : 0) },
+    proud: quiet ? null : G.proud ?? SAMPLE_PROUD, rank: result === 'win' ? { to: 3, name: RANK_NAMES[2] } : null,
+    goal: result === 'draw' ? null : '下一盘小目标：吃子之前，先看它有没有保镖。', kept: result === 'win' ? true : null, quiet,
+  };
+  await stage.over(view);
+  if (!alive()) return;
+  stage.rival(result === 'win' ? { mood: 'frown', line: '后生可畏……' } : result === 'loss' ? { mood: 'calm', line: '承让。' } : { mood: 'calm' });
+  const cue = result === 'win' ? CUE.win : result === 'loss' ? CUE.lose : CUE.draw;
+  const spoke = await say('over', OVER_LINE[result], { cue, target: 'card', lifetime: 'position', base: { board: SAMPLE_PROUD.before, src: 'moment' } });
+  if (spoke && alive()) stage.chips(SETS.over());
+}
+
+function undoCount() {
+  const n = G.history.length;
+  if (!n) return 0;
+  const lastBy = G.history[n - 1].by;
+  if (G.phase === 'opponentTurn') return 1;
+  if (G.phase === 'over') return G.result?.reason === 'resign' ? (lastBy === 'child' ? 1 : 0) : lastBy === 'child' ? 1 : Math.min(2, n);
+  return lastBy === 'opponent' && n >= 2 ? 2 : 0;
+}
+
+function undo() {
+  if (G.phase === 'tentative') { retract(); return; }
+  const n = undoCount();
+  if (!n && !(G.phase === 'over' && G.result?.reason === 'resign')) { stage.toast('已经回到开局啦，没有可以悔的棋。'); return; }
+  stage.settle();
+  interrupt();
+  const steps = [];
+  for (let i = 0; i < n; i++) {
+    const ply = G.history.pop();
+    steps.push(ply.move);
+    G.board = ply.before;
+    G.turn = ply.color;
+    if (ply.move.captured) (ply.by === 'child' ? G.trophies.mine : G.trophies.lost).pop();
+  }
+  G.result = null;
+  G.positionId += 1;
+  G.trial = null;
+  G.selected = null;
+  G.targets = [];
+  G.hintLevel = 0;
+  G.failed = false;
+  G.phase = 'childTurn';
+  G.lastAnim = stage.undone({ steps, view: viewOf() });
+  local('好，退回去，咱们重新想。');
+  stage.notation(rows(), G.history.length);
+  pushPhase();
+  stage.chips(SETS.turn());
+  stage.input({ visible: inputOn(), enabled: true });
+}
+
+function hintData() {
+  const scripted = sceneNow().hints[G.history.length];
+  let move = scripted ? pick(G.human, scripted.move) : null;
+  if (!move) {
+    const moves = getLegalMoves(G.board, G.human);
+    move = moves.filter((m) => m.captured).sort((a, b) => WORTH[b.captured.type] - WORTH[a.captured.type])[0] ?? moves[moves.length >> 1];
+  }
+  const notation = moveToNotation(G.board, move);
+  return { move, lines: scripted?.lines ?? ['先想一想：对方上一步想干什么？', '看看亮起来的这个子。', `走【${notation}】，稳稳地出子。`] };
+}
+
+function hint() {
+  if (!(G.phase === 'childTurn' || G.phase === 'selected') || G.hintLevel >= 3) return;
+  G.hintLevel += 1;
+  pushPhase();
+  const { move, lines } = hintData();
+  if (G.hintLevel === 1) {
+    stage.hint(1, {});
+  } else if (G.hintLevel === 2) {
+    stage.hint(2, { pieces: [move.from], squares: [move.to] });
+  } else {
+    stage.hint(3, { move });
+    select(move.from);
+    stage.chips(SETS.hint3());
+  }
+  say('hint', lines[G.hintLevel - 1], { cue: G.hintLevel === 1 ? CUE.look : null, lifetime: 'position', base: { src: 'hint' } });
+}
+
+let lastAskAt = 0;
+async function askCoach({ code, text }) {
+  if (G.phase === 'opponentTurn' || performance.now() - lastAskAt < 800) return;
+  lastAskAt = performance.now();
+  code ??= 'free';
+  const trial = G.trial;
+  const script = trial ? trial.script ?? trialScript(trial.move) : null;
+  const after = trial ? applyMove(G.board, trial.move) : G.board;
+  const last = G.history[G.history.length - 1];
+  const mine = [...G.history].reverse().find((p) => p.by === 'child');
+  let answer = { text: '小主公问得好。先看清对方的子，再想自己的棋。' };
+  // see-first: the board acts at tap time, from local data; the text is the caption
+  if (code === 'reply' && trial) {
+    const reply = script.reply ? findByNotation(after, script.reply.notation) : getLegalMoves(after, other(G.human)).sort((a, b) => (b.captured ? 1 : 0) - (a.captured ? 1 : 0))[0];
+    if (reply) {
+      stage.preview([reply], { from: 'trial' });
+      answer = { text: script.reply?.line ?? `多半是【${moveToNotation(after, reply)}】。`, base: { board: after, src: 'reply' },
+                 tool: script.reply ? { notation: script.reply.notation } : undefined };
+    }
+  } else if (code === 'show' && trial && script.show) {
+    stage.highlight({ pieces: script.focus ?? [] });
+    const refute = parse(script.show.line, { board: after, src: 'reply' }).find((s) => s.type === 'move');
+    if (refute) setTimeout(() => { if (G.trial === trial) stage.preview([findByNotation(after, refute.notation)], { from: 'trial' }); }, 700);
+    answer = { text: script.show.line, base: { board: after, src: 'reply' } };
+  } else if (code === 'better') {
+    const best = hintData().move;
+    stage.arrows([{ from: best.from, to: best.to, style: 'idea' }], { group: 'ask' });
+    answer = { text: `可以想想【${moveToNotation(G.board, best)}】。`, base: { src: 'better' } };
+  } else if (code === 'intent' && last) {
+    stage.arrows([{ from: last.move.from, to: last.move.to, style: 'last' }], { group: 'ask' });
+    answer = { text: `他走【${last.notation}】，是想把子力调到前面来。`, base: { board: last.before, src: 'opp' } };
+  } else if (code === 'danger') {
+    answer = { text: '眼下没有子被白吃。走每一步之前，都这样看一眼。' };
+  } else if (code === 'last' && mine) {
+    stage.arrows([{ from: mine.move.from, to: mine.move.to, style: 'last' }], { group: 'ask' });
+    answer = { text: `你上一步【${mine.notation}】走得稳。`, base: { board: mine.before, src: 'mine' } };
+  } else if (code === 'score') {
+    answer = { text: '眼下势均力敌，谁先出齐大子，谁就占上风。' };
+  } else if (code === 'good') {
+    answer = { text: script?.cat === 'mistake' || script?.cat === 'blunder' ? '这一步有点险，再看一眼对方的子。' : '这一步不错，子走到了有用的地方。' };
+  } else if (code === 'why') {
+    answer = { text: '因为它让你的子更活，又不给对方白吃的机会。' };
+  } else if (code === 'proud') {
+    answer = { text: '最好的是那步【马七进六】：将军的同时捉住了车。', base: { board: SAMPLE_PROUD.before, src: 'moment' } };
+  } else if (code === 'improve') {
+    answer = { text: '吃子之前多看一眼，它有没有保镖。' };
+  } else if (code === 'next') {
+    answer = { text: '下一盘，对方走完先问自己：它想干什么？' };
+  } else if (code === 'free') {
+    const found = /[帅将仕士相象马车炮兵卒][一二三四五六七八九1-9][进退平][一二三四五六七八九1-9]/.exec(text ?? '');
+    answer = found ? { text: `亮摆过了：【${found[0]}】可以走，不过要先看对方的炮。`, tool: { notation: found[0] } } : { text: '这个问题有意思。咱们先把眼前这步棋想明白，好不好？' };
+  }
+  stage.childSaid(ASK_LABEL[code] ?? text);
+  const before = G.trial ? SETS.held().some((c) => c.id === 'seen') && script?.held && script?.voiced ? SETS.held() : SETS.trial(true) : G.phase === 'over' ? SETS.over() : SETS.turn();
+  const spoke = await say('ask', answer.text, { lifetime: trial ? 'trial' : G.phase === 'over' ? 'game' : 'position', tool: answer.tool, base: answer.base, delay: 500 });
+  if (spoke) stage.chips([ask('why'), ...before.filter((c) => c.id !== code && c.id !== 'why')].slice(0, 4));
+}
+
+function startScene(name, opts = {}) {
+  const scene = SCENES[name];
+  const human = opts.human ?? 'red';
+  const { board } = fenToBoard(scene.fen);
+  stage.settle();
+  interrupt();
+  Object.assign(G, { scene: name, gameId: G.gameId + 1, positionId: G.positionId + 1, trialId: G.trialId + 1, board, turn: 'red', human,
+                     history: [], phase: 'childTurn', selected: null, targets: [], trial: null, hintLevel: 0, failed: false, result: null,
+                     trophies: { mine: [], lost: [] }, roundBase: scene.roundBase, tension: scene.tension, proud: null, brilliant: 0, streak: 0 });
+  G.lastAnim = stage.reset(viewOf(), { deal: !!opts.deal });
+  stage.rival({ mood: 'calm', line: opts.deal ? '请。' : undefined });
+  stage.tension(G.tension);
+  stage.notation(rows(), 0);
+  for (const b of document.querySelectorAll('[data-scene]')) b.setAttribute('aria-pressed', String(b.dataset.scene === name));
+  if (human !== 'red') { rivalTurn(); return G.lastAnim; }
+  pushPhase();
+  stage.chips([]);
+  stage.input({ visible: inputOn(), enabled: false });
+  const alive = scope('position');
+  (async () => {
+    if (opts.deal) {
+      await say('start', '小主公，红方先行。这一局，亮陪你一起下。', { cue: CUE.go, lifetime: 'position' });
+      if (alive()) local('上盘说好的小目标：吃子之前，先看它有没有保镖。');          // held until the greeting has been read (K-101)
+    } else if (scene.intro) {
+      local(scene.intro);
+    }
+    if (!alive()) return;
+    stage.chips(SETS.turn());
+    stage.input({ visible: inputOn(), enabled: true });
+  })();
+  return G.lastAnim;
+}
+
+// ---- StageHandlers: what a director does with the child's intents (SPEC 4.25.7) ----------------------------------------------
+
+const actions = {
+  tap(row, col, via) {
+    const at = sq(row, col);
+    const piece = G.board[row][col];
+    const refuse = (reason) => { G.streak += 1; stage.rejected(at, reason, G.streak); if (reason === 'no-moves' && G.streak === 3) stage.toast('这个子现在动不了，换一个试试。'); };
+    const ok = () => { G.streak = 0; };
+    if (G.phase === 'over') { if (!G.tapOverTold) { G.tapOverTold = true; stage.toast('这一局已经结束啦，再来一局吧。'); } return; }
+    if (G.phase === 'opponentTurn' || G.phase === 'boot') { refuse('not-your-turn'); return; }
+    if (G.phase === 'tentative') {
+      const t = G.trial.move;
+      if (sameSq(at, t.to)) { ok(); confirm(); return; }
+      if (sameSq(at, t.from)) { ok(); retract(); return; }
+      const target = G.targets.find((m) => sameSq(m.to, at));
+      if (target) { ok(); tryMove(target); return; }
+      if (piece && piece.color === G.human && getPieceLegalMoves(G.board, row, col).length) { ok(); retract(false); select(at); return; }
+      refuse('not-a-target');
+      return;
+    }
+    if (G.phase === 'selected') {
+      if (sameSq(at, G.selected)) { ok(); deselect(); return; }
+      const target = G.targets.find((m) => sameSq(m.to, at));
+      if (target) { ok(); tryMove(target); return; }
+      if (piece && piece.color === G.human) { if (getPieceLegalMoves(G.board, row, col).length) { ok(); select(at); } else refuse('no-moves'); return; }
+      refuse('not-a-target');
+      return;
+    }
+    if (!piece) { refuse('empty'); return; }
+    if (piece.color !== G.human) { refuse('not-yours'); return; }
+    if (!getPieceLegalMoves(G.board, row, col).length) { refuse('no-moves'); return; }
+    ok();
+    select(at);
+    void via;
+  },
+  confirm: () => confirm(),
+  retract: () => retract(),
+  undo: () => undo(),
+  hint: () => hint(),
+  ask: (q) => { askCoach(q); },
+  chip(spec) {
+    if (spec.action === 'retract') { local('小主公好眼力！换一步再想。'); retract(); }
+    else if (spec.action === 'confirm') confirm();
+    else if (spec.action === 'takeback') undo();
+    else if (spec.action === 'pouch') { const { move } = hintData(); tryMove(move); }
+  },
+  moveLink(link, active) {
+    if (active) stage.arrows([{ from: link.from, to: link.to, style: link.color === G.human ? 'idea' : 'threat', badge: link.pre.length >= 2 ? String(link.pre.length + 1) : undefined }], { group: 'chat' });
+    else {
+      stage.clearArrows('chat');
+      const move = link.playable && (G.phase === 'childTurn' || G.phase === 'selected' || G.phase === 'tentative') ? pick(G.human, [link.from.row, link.from.col, link.to.row, link.to.col]) : null;
+      if (move) tryMove(move);                              // a second tap on an active playable link
+    }
+  },
+  playLine(links) {
+    const fromTrial = links[0].src === 'reply' && !!G.trial;
+    let board = fromTrial ? applyMove(G.board, G.trial.move) : G.board;
+    const moves = [];
+    for (const ref of [...links[0].pre, ...links]) {
+      const piece = board[ref.from.row][ref.from.col];
+      if (!piece) break;
+      moves.push({ from: ref.from, to: ref.to, piece, captured: board[ref.to.row][ref.to.col] });
+      board = applyMove(board, ref);
+    }
+    stage.preview(moves, { from: fromTrial ? 'trial' : 'now' });
+  },
+  async newGame() {
+    let human = settings.side;
+    if (G.phase !== 'over' && G.phase !== 'boot' && G.history.length) {
+      const answer = await stage.dialog('new-game');
+      if (!answer) return;
+      human = answer.humanColor;
+    }
+    startScene('opening', { deal: true, human });
+  },
+  async resign() {
+    if (G.phase === 'over' || G.phase === 'boot') return;
+    if (!(await stage.dialog('resign'))) return;
+    stage.settle();
+    G.trial = null;
+    G.trialId += 1;
+    gameOver('loss', 'resign', false);
+  },
+  retryOpponent() { if (G.failed) rivalTurn(); },
+  retryEngine() { setTimeout(() => stage.blocking(null), 600); },
+  setting(key, value) {
+    settings = { ...settings, [key]: value };
+    stage.applySettings(settings);
+    if (key === 'coach') { coachMode = value === 'local' ? { mode: 'local', reason: 'setting' } : { mode: 'llm', reason: null }; stage.coachMode(coachMode); }
+    if (key === 'coach' || key === 'freeText') stage.input({ visible: inputOn(), enabled: G.phase !== 'opponentTurn' });
+    syncPanel();
+  },
+  exportRecord() { stage.toast('（试验台）棋谱已导出。'); },
+  exportBackup() { stage.toast('（试验台）存档已导出。'); },
+  importBackup(text) { stage.toast(`（试验台）读到存档 ${text.length} 个字符。`); },
+  stopCoach() { interrupt(); },
+  activity() {},
+};
+const recorded = {};
+for (const name of Object.keys(actions)) {
+  recorded[name] = (...args) => {
+    calls.push([name, ...args]);
+    if (name !== 'activity') log(`handlers.${name}(${args.map(brief).join(', ')})`);
+    return actions[name](...args);
+  };
+}
+stage.on(recorded);
+
+// ---- scripted steps (what a child would do), the whole script, and the five moments -------------------------------------------
+
+const act = {
+  tap: (row, col) => recorded.tap(row, col, 'tap'),
+  async move(fr, fc, tr, tc) { act.tap(fr, fc); await sleep(260); act.tap(tr, tc); },
+  confirm: () => recorded.confirm(),
+  retract: () => recorded.retract(),
+  undo: () => recorded.undo(),
+  hint: () => recorded.hint(),
+  ask: (code) => { const b = document.querySelector(`.chip[data-ask="${code}"]:not(:disabled)`); if (b) b.click(); else recorded.ask({ code }); },
+  chip: (id) => { const spec = [...SETS.held(), ...SETS.hint3(), ...SETS.takeback()].find((c) => c.id === id); if (spec) recorded.chip(spec); },
+};
+/** The child may move again (or the game is over) and nothing is animating. */
+async function turnDone() {
+  for (let i = 0; i < 400; i++) {
+    await sleep(50);
+    if ((G.phase === 'childTurn' || G.phase === 'over') && html.dataset.uiBusy !== '1') break;
+  }
+  await G.lastAnim;
+}
+async function cardUp() {
+  for (let i = 0; i < 400 && !document.querySelector('dialog[data-dialog="over"]'); i++) await sleep(50);
+}
+
+let playing = 0;
+async function playAll() {
+  const run = ++playing;
+  const on = () => run === playing;
+  const pause = async (ms) => { await sleep(ms); if (!on()) throw new Error('stopped'); };
+  try {
+    await startScene('opening', { deal: true }); await pause(4200);
+    await act.move(7, 7, 7, 4); await pause(2800);          // a trial, the verdict, a streamed comment
+    act.retract(); await pause(1000);                       // 换一步
+    await act.move(7, 7, 7, 4); await pause(700);
+    act.confirm(); await turnDone(); await pause(2600);     // the opening stamp; the rival's move, caption and line
+    await act.move(7, 4, 3, 4); await pause(1900);          // a held trial: 且慢……
+    act.ask('show'); await pause(3600);                     // 指给我看: highlight, ghosts, the line
+    act.chip('seen'); await pause(1500);                    // 我看出来了
+    act.hint(); await pause(2400); act.hint(); await pause(2600); act.hint(); await pause(2400);     // the three pouches
+    act.chip('try'); await pause(1300);                     // 试试这步
+    act.ask('reply'); await pause(4600);                    // an ask chip with a tool round
+    act.confirm(); await turnDone(); await pause(1500);
+    await act.move(7, 1, 0, 1); await pause(2800);          // the child's own capture: aim ...
+    act.confirm(); await turnDone(); await pause(3000);     // ... and the shot
+    act.undo(); await pause(2200);
+    await startScene('fork'); await pause(2400);
+    await act.move(4, 2, 2, 3); await pause(2400);          // the find nobody announced
+    act.confirm(); await turnDone(); await pause(1500);
+    await act.move(2, 3, 3, 1); await pause(2000);
+    act.confirm(); await turnDone(); await pause(2600);     // the rival gives check
+    await act.move(9, 5, 8, 4); await pause(900);
+    act.confirm(); await turnDone(); await pause(1500);
+    await startScene('mate'); await pause(2400);
+    await act.move(7, 1, 7, 4); await pause(2400);
+    act.confirm(); await cardUp(); await pause(6500);       // 绝杀, the win, 本局最佳, the card and its takeaway
+    await startScene('loss'); await pause(2400);
+    await act.move(6, 8, 5, 8); await pause(1400);
+    act.confirm(); await cardUp(); await pause(4000);       // a loss that is never rubbed in
+  } catch (error) {
+    if (error.message !== 'stopped') throw error;
+  }
+}
+
+/** Each of the five moments of SPEC 15, from a fresh scene up to the tap that starts it. */
+const moment = {
+  async capture() { await startScene('opening'); G.history.length = 0; await sleep(50);
+    for (const [by, m] of [['child', [7, 7, 7, 4]], ['opponent', [0, 7, 2, 6]], ['child', [9, 7, 7, 6]], ['opponent', [0, 0, 1, 0]]]) push(pick(by === 'child' ? 'red' : 'black', m), by);
+    stage.settle(); G.lastAnim = stage.reset(viewOf(), { deal: false }); stage.notation(rows(), G.history.length); pushPhase(); stage.chips(SETS.turn());
+    await sleep(100); await act.move(7, 1, 0, 1); },
+  async touch() { await startScene('opening'); await sleep(100); },
+  async face() { await startScene('opening'); await sleep(100); act.tap(7, 7); },
+  async find() { await startScene('fork'); await sleep(900); await act.move(4, 2, 2, 3); },
+  async mate() { await startScene('mate'); await sleep(900); await act.move(7, 1, 7, 4); },
+  async loss() { await startScene('loss'); await sleep(900); await act.move(6, 8, 5, 8); },
+};
+
+// ---- every StagePort method on its own (sample data from the fake game; the game follows where the board changes) ---------
+
+const mineMoves = () => getLegalMoves(G.board, G.human);
+const rivalMoves = () => getLegalMoves(G.board, other(G.human));
+function sampleMove(capture) {
+  const moves = mineMoves();
+  return (capture ? moves.filter((m) => m.captured).sort((a, b) => WORTH[b.captured.type] - WORTH[a.captured.type])[0] : null) ?? moves.find((m) => !m.captured && m.piece.type === 'horse') ?? moves[0];
+}
+function ensureTrial(capture = false) {
+  if (G.trial && !!G.trial.move.captured === capture) return;
+  if (G.trial) { G.trial = null; G.trialId += 1; stage.retracted({ reselect: false, targets: [], forbidden: [] }); }
+  tryMove(sampleMove(capture), { raw: true });
+}
+/** committed() on its own: a hovering trial of the wanted kind is played with the given CommitView fields. */
+function rawCommit(extra = {}, capture = false) {
+  let move = null;
+  if (extra.wantCheck) move = mineMoves().find((m) => flagsOf(applyMove(G.board, m), m).check) ?? null;
+  if (extra.wantCheck && !move) { log('这个局面没有将军的棋：先切到「中局」'); return; }
+  if (move) { if (G.trial) { G.trial = null; G.trialId += 1; stage.retracted({ reselect: false, targets: [], forbidden: [] }); } tryMove(move, { raw: true }); }
+  else ensureTrial(capture);
+  const trial = G.trial;
+  const { flags } = push(trial.move, 'child');
+  G.turn = G.human;                                         // raw mode: the child keeps the move, nothing answers
+  G.trial = null; G.trialId += 1; G.selected = null; G.phase = 'childTurn';
+  G.lastAnim = stage.committed({ move: trial.move, notation: trial.notation, flags, fromTrial: true, cat: 'good', praise: null, stamp: null, self: false, softCheck: false, ...extra, view: viewOf() });
+  stage.notation(rows(), G.history.length);
+  pushPhase();
+}
+function rawRival(kind) {
+  const moves = rivalMoves();
+  const takes = moves.filter((m) => m.captured);
+  const move = kind === 'take' ? takes.find((m) => m.captured.type === 'pawn') ?? takes[0]
+    : kind === 'big' ? takes.find((m) => ['rook', 'cannon', 'horse'].includes(m.captured.type))
+    : kind === 'check' || kind === 'soft' ? moves.find((m) => flagsOf(applyMove(G.board, m), m).check)
+    : moves.find((m) => !m.captured && m.piece.type !== 'king') ?? moves[0];
+  if (!move) { log(`这个局面里对方没有这样的棋（${kind}）`); return; }
+  if (G.trial) { G.trial = null; G.trialId += 1; }
+  const { notation, flags } = push(move, 'opponent');
+  G.turn = G.human;
+  G.phase = 'childTurn'; G.selected = null;
+  G.lastAnim = stage.rivalMoved({ move, notation, flags, caption: parse(`【${notation}】${move.captured ? '吃子' : flags.check ? '将军' : '调整'}`, { board: G.history[G.history.length - 1].before }),
+                                  lostBig: kind === 'big', softCheck: kind === 'soft', view: viewOf() });
+  stage.notation(rows(), G.history.length);
+  pushPhase();
+}
+function rawUndo(n) {
+  const steps = [];
+  for (let i = 0; i < n && G.history.length; i++) {
+    const ply = G.history.pop();
+    steps.push(ply.move);
+    G.board = ply.before;
+    if (ply.move.captured) (ply.by === 'child' ? G.trophies.mine : G.trophies.lost).pop();
+  }
+  G.turn = G.human; G.trial = null; G.trialId += 1; G.result = null; G.positionId += 1; G.phase = 'childTurn';
+  G.lastAnim = stage.undone({ steps, view: viewOf() });
+  stage.notation(rows(), G.history.length);
+  pushPhase();
+}
+function rawOver(result, reason, extra = {}) {
+  G.phase = 'over'; G.result = { result, reason }; G.positionId += 1;
+  pushPhase();
+  return stage.over({ result, reason, byChildMate: false, stats: { rounds: 34, captures: 9, brilliant: 1 }, proud: SAMPLE_PROUD,
+                      rank: result === 'win' ? { to: 4, name: RANK_NAMES[3] } : null, goal: '下一盘小目标：吃子之前，先看它有没有保镖。', kept: result === 'win' ? true : null, quiet: false, ...extra });
+}
+const V = (cat, o = {}) => () => { if (!G.trial) ensureTrial(false); stage.verdict({ cat, final: true, held: false, voiced: false, earned: false, focus: [], ...o }); };
+let streamId = '';
+const sampleLine = '小主公这步【马二进三】走得稳。出子要快，先把大子调到前面来，再想进攻的事。';
+
+const raw = {
+  start: (info) => stage.start(info).then((choice) => log(`start -> '${choice}'`)),
+  commit: rawCommit, rival: rawRival, undo: rawUndo, over: rawOver,
+};
+
+const GROUPS = [
+  ['主题 · 动态 · 声音', [
+    ['赤壁', () => recorded.setting('theme', 'chibi'), 'theme:chibi'], ['隆中', () => recorded.setting('theme', 'longzhong'), 'theme:longzhong'], ['沙场', () => recorded.setting('theme', 'shachang'), 'theme:shachang'],
+    ['动态 自动', () => recorded.setting('motion', 'auto'), 'motion:auto'], ['完整', () => recorded.setting('motion', 'full'), 'motion:full'], ['精简', () => recorded.setting('motion', 'reduced'), 'motion:reduced'],
+    ['静音', () => $('#mute-button').click()], ['朗读', () => recorded.setting('readAloud', !settings.readAloud)], ['打字音', () => recorded.setting('typeTicks', !settings.typeTicks)],
+  ]],
+  ['剧本', [
+    ['▶ 整局', () => playAll(), 'go'], ['■ 停', () => { playing += 1; }],
+    ['开局', () => startScene('opening', { deal: true }), 'scene:opening'], ['中局', () => startScene('fork'), 'scene:fork'], ['绝杀', () => startScene('mate'), 'scene:mate'], ['惜败', () => startScene('loss'), 'scene:loss'],
+    ['执黑开局', () => startScene('opening', { deal: true, human: 'black' })],
+    ['时刻① 自己吃子', () => moment.capture()], ['时刻③ 先变脸', () => moment.face()], ['时刻④ 没人提醒的妙手', () => moment.find()], ['时刻⑤ 绝杀', () => moment.mate()], ['时刻⑤ 惜败', () => moment.loss()],
+    ['下一次对方走神', () => { G.failNext = true; log('failNext = true'); }],
+  ]],
+  ['start · reset · phase', [
+    ['start 首次', () => raw.start({ hasSave: false, firstVisit: true, canImport: false })], ['start 有存档', () => raw.start({ hasSave: true, firstVisit: false, canImport: false })],
+    ['start 首次+导入', () => raw.start({ hasSave: false, firstVisit: true, canImport: true })],
+    ['reset 发牌', () => startScene(G.scene, { deal: true })], ['reset 不发牌', () => startScene(G.scene)],
+    ...['childTurn', 'selected', 'tentative', 'opponentTurn', 'over'].map((p) => [`phase ${p}`, () => stage.phase({ phase: p, canUndo: true, hintLevel: G.hintLevel, canAsk: true, failed: false, ply: G.history.length })]),
+    ['phase 对方走神', () => stage.phase({ phase: 'opponentTurn', canUndo: true, hintLevel: 0, canAsk: false, failed: true, ply: G.history.length })],
+    ['phase 锦囊+1', () => { G.hintLevel = (G.hintLevel + 1) % 4; stage.phase({ phase: 'childTurn', canUndo: true, hintLevel: G.hintLevel, canAsk: true, failed: false, ply: G.history.length }); }],
+  ]],
+  ['selected · rejected · tentative · verdict · retracted', [
+    ['selected', () => { const m = sampleMove(false); select(m.from); }], ['selected null', () => deselect()],
+    ['rejected', () => { G.streak += 1; stage.rejected(G.selected ?? sq(9, 4), 'not-a-target', G.streak); }],
+    ['tentative 悬停', () => { if (G.trial) retract(false); tryMove(sampleMove(false), { raw: true }); }], ['tentative 瞄准', () => { if (G.trial) retract(false); tryMove(sampleMove(true), { raw: true }); }],
+    ['v pending', () => { if (!G.trial) ensureTrial(); stage.verdict({ cat: 'pending', final: false, held: false, voiced: false, earned: false, focus: [] }); }],
+    ['v brilliant', V('brilliant', { earned: true })], ['v best 赢得', V('best', { earned: true })], ['v best', V('best')], ['v good', V('good')], ['v ok', V('ok')],
+    ['v mistake', V('mistake')], ['v mistake 稳住+问', V('mistake', { held: true, voiced: true, focus: [sq(2, 6)] })], ['v mistake 稳住', V('mistake', { held: true })],
+    ['v blunder 稳住+问', V('blunder', { held: true, voiced: true })], ['v blunder 稳住', V('blunder', { held: true })], ['v blunder', V('blunder')],
+    ['retracted 重选', () => { if (!G.trial) return; const from = G.trial.move.from; G.trial = null; G.trialId += 1; G.phase = 'selected'; G.selected = from; stage.retracted({ reselect: true, targets: G.targets, forbidden: [] }); pushPhase(); }],
+    ['retracted', () => { if (!G.trial) return; G.trial = null; G.trialId += 1; G.phase = 'childTurn'; G.selected = null; stage.retracted({ reselect: false, targets: [], forbidden: [] }); pushPhase(); }],
+  ]],
+  ['committed', [
+    ['普通', () => rawCommit()], ['吃子', () => rawCommit({}, true)], ['好棋！', () => rawCommit({ praise: { tier: 'good', streak: 1 } })], ['妙计！', () => rawCommit({ praise: { tier: 'great', streak: 1 } })],
+    ['4连好棋！', () => rawCommit({ praise: { tier: 'great', streak: 4 } })], ['神来之笔！', () => rawCommit({ praise: { tier: 'brilliant', streak: 1 }, self: true })],
+    ['主公英明！+招式', () => rawCommit({ praise: { tier: 'lord', streak: 1 }, stamp: { text: '屏风马！', size: 'full' }, self: true })],
+    ['小招式', () => rawCommit({ stamp: { text: '当头炮！', size: 'small' } })], ['自己想的', () => rawCommit({ self: true })],
+    ['将军', () => rawCommit({ wantCheck: true })], ['软将军', () => rawCommit({ wantCheck: true, softCheck: true })], ['失误', () => rawCommit({ cat: 'mistake' })],
+    ['不经试走', () => { const move = sampleMove(false); const { notation, flags } = push(move, 'child'); G.turn = G.human;
+      G.lastAnim = stage.committed({ move, notation, flags, fromTrial: false, cat: null, praise: null, stamp: null, self: false, softCheck: false, view: viewOf() }); pushPhase(); }],
+  ]],
+  ['rivalMoved · undone · rival · tension', [
+    ['对方 普通', () => rawRival('plain')], ['对方 吃子', () => rawRival('take')], ['对方 吃大子', () => rawRival('big')], ['对方 将军', () => rawRival('check')], ['对方 软将军', () => rawRival('soft')],
+    ['undone 1', () => rawUndo(1)], ['undone 2', () => rawUndo(2)],
+    ...['calm', 'thinking', 'frown', 'rattled', 'smug'].map((mood) => [`rival ${mood}`, () => stage.rival({ mood })]), ['rival 说话', () => stage.rival({ mood: 'smug', line: '这一步，你可看懂了？' })],
+    // as the director tells it after a move that punished him: the stage keeps the fright on his face before he thinks
+    ['rival 受惊→思考', () => { stage.rival({ mood: 'rattled', line: '竟有此着！' }); stage.rival({ mood: 'thinking' }); }],
+    ...[0.1, 0.5, 0.8, 1].map((x) => [`tension ${x}`, () => stage.tension(x)]),
+  ]],
+  ['hint · arrows · highlight · preview', [
+    ['hint 1', () => stage.hint(1, {})], ['hint 2', () => { const m = hintData().move; stage.hint(2, { pieces: [m.from], squares: [m.to] }); }], ['hint 3', () => stage.hint(3, { move: hintData().move })],
+    ...['hint', 'idea', 'threat', 'reply', 'last'].map((style, i) => [`arrows ${style}`, () => { const m = mineMoves()[i * 5 % mineMoves().length]; stage.arrows([{ from: m.from, to: m.to, style, badge: style === 'idea' ? '2' : undefined }], { group: 'dev', ttl: style === 'last' ? 2000 : undefined }); }]),
+    ['clearArrows', () => stage.clearArrows()], ['highlight 聚光', () => { const m = sampleMove(false); stage.highlight({ pieces: [m.from], squares: [m.to], dim: true }); }],
+    ['highlight 标记', () => stage.highlight({ pieces: [sq(2, 6), sq(0, 1)], ttl: 3000 })], ['highlight null', () => stage.highlight(null)],
+    ['preview 幽灵棋', () => { let b = G.board; const moves = []; for (const color of [G.human, other(G.human), G.human]) { const all = getLegalMoves(b, color); const m = all.find((x) => x.captured) ?? all[7 % all.length]; moves.push(m); b = applyMove(b, m); } stage.preview(moves, { from: 'now' }); }],
+  ]],
+  ['军师的话', [
+    ['流式一句', () => say('opp', sampleLine, { cue: null, lifetime: 'game' })], ['流式+叹词', () => say('try', '好棋！这一步把车亮了出来。', { cue: CUE.nice, lifetime: 'game' })],
+    ['coachBegin', () => { streamId = `raw${++msgSeq}`; stage.coachBegin({ id: streamId, kind: 'ask', cue: null }); }],
+    ['coachSegment', () => stage.coachSegment(streamId, { type: 'text', text: '先看中路，' })], ['coachSegment 棋步', () => { for (const s of parse('【马二进三】')) stage.coachSegment(streamId, s); }],
+    ['coachTool 开始', () => stage.coachTool(streamId, { phase: 'start', notation: '车9平8' })], ['coachTool 结束', () => stage.coachTool(streamId, { phase: 'end' })],
+    ['coachReset', () => stage.coachReset(streamId)], ['coachEnd done', () => stage.coachEnd(streamId, { reason: 'done', source: 'llm' })],
+    ['coachEnd cut', () => stage.coachEnd(streamId, { reason: 'cut', source: 'mixed' })], ['coachEnd aborted', () => stage.coachEnd(streamId, { reason: 'aborted', source: 'none' })],
+    ['coachEnd 已换一步', () => stage.coachEnd(streamId, { reason: 'aborted', source: 'none', stale: '已换一步' })],
+    ['coachLocal', () => local('小主公，慢慢想，亮不催你。')], ['coachLocal ×3（排队）', () => { local('第一句：先看对方的炮。'); local('第二句：再看自己的马。'); local('第三句：最后数一数子。'); }],
+    ['coachLocal → 卡片', () => local('这一局下得很稳，亮都看在眼里。', { kind: 'over', target: 'card' })],
+    ['caption', () => stage.caption(parse('【马8进7】出子', { board: fenToBoard(START_FEN).board }))], ['childSaid', () => stage.childSaid('对方会怎么应？')],
+  ]],
+  ['chips · input · coachMode · beacon', [
+    ...Object.keys(SETS).map((name) => [`chips ${name}`, () => stage.chips(SETS[name](true))]),
+    ['input 可用', () => stage.input({ visible: true, enabled: true })], ['input 暂停', () => stage.input({ visible: true, enabled: false })], ['input 没有', () => stage.input({ visible: false, enabled: false })],
+    ['coachMode llm', () => { coachMode = { mode: 'llm', reason: null }; stage.coachMode(coachMode); }], ['coachMode local', () => { coachMode = { mode: 'local', reason: 'no_proxy' }; stage.coachMode(coachMode); }],
+    ['beacon', () => stage.beacon()],
+  ]],
+  ['over', [
+    ['胜 · 绝杀', () => rawOver('win', 'checkmate', { byChildMate: false })], ['胜 · 困毙', () => rawOver('win', 'stalemate')], ['负', () => rawOver('loss', 'checkmate')], ['负 · 认输', () => rawOver('loss', 'resign', { proud: null })],
+    ['和', () => rawOver('draw', 'repetition', { proud: null, goal: null })], ['quiet', () => rawOver('win', 'checkmate', { quiet: true, proud: null })],
+  ]],
+  ['toast · announce · dialog · notation · blocking · settle · on', [
+    ['toast', () => stage.toast('已经回到开局啦，没有可以悔的棋。')], ['announce', () => { stage.announce('对方走了 马8进7。'); log(`#board-announcement = ${$('#board-announcement').textContent}`); }],
+    ['dialog resign', () => stage.dialog('resign').then((r) => log(`dialog('resign') -> ${r}`))], ['dialog new-game', () => stage.dialog('new-game').then((r) => log(`dialog('new-game') -> ${JSON.stringify(r)}`))],
+    ['notation 41', () => { const names = ['炮二平五', '马8进7', '马二进三', '车9平8', '车一平二', '炮8平9']; const r = []; for (let i = 0; i < 41; i++) { if (i % 2 === 0) r.push({ n: i / 2 + 1, red: names[i % 6] }); else r[r.length - 1].black = names[i % 6]; } stage.notation(r, 41); }],
+    ['blocking', () => stage.blocking({ kind: 'engine-dead' })], ['blocking null', () => stage.blocking(null)], ['settle', () => stage.settle()],
+    ['on(只记录)', () => { stage.on(Object.fromEntries(Object.keys(actions).map((n) => [n, (...a) => { calls.push([n, ...a]); log(`(只记录) handlers.${n}(${a.map(brief).join(', ')})`); }]))); }],
+    ['on(假导演)', () => stage.on(recorded)],
+  ]],
+];
+
+const groupsEl = $('#dev-groups');
+const pressers = [];
+for (const [title, buttons] of GROUPS) {
+  const set = document.createElement('fieldset');
+  const legend = document.createElement('legend');
+  legend.textContent = title;
+  set.append(legend);
+  for (const [label, run, tag] of buttons) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    if (tag === 'go') b.className = 'is-go';
+    else if (tag?.startsWith('scene:')) b.dataset.scene = tag.slice(6);
+    else if (tag) pressers.push([b, tag]);
+    b.addEventListener('click', () => { try { run(); } catch (error) { log(`! ${error.message}`); throw error; } });
+    set.append(b);
+  }
+  groupsEl.append(set);
+}
+function syncPanel() {
+  for (const [b, tag] of pressers) { const [key, value] = tag.split(':'); b.setAttribute('aria-pressed', String(settings[key] === value)); }
+  $('#dev-size').textContent = `${innerWidth} x ${innerHeight} · ${$('#app').dataset.layout} · ${html.dataset.theme} · ${html.dataset.motion}`;
+}
+addEventListener('resize', syncPanel);
+
+const panel = $('#dev'), toggle = $('#dev-toggle');
+toggle.addEventListener('click', () => { panel.hidden = !panel.hidden; });
+if (query.get('panel') === '0') { toggle.hidden = true; panel.hidden = true; }
+else if (query.get('panel') === '1') panel.hidden = false;
+
+// ---- boot ------------------------------------------------------------------------------------------------------------------------
+
+stage.coachMode(coachMode);
+stage.notation([], 0);
+syncPanel();
+
+window.__dev = { stage, real, G, SCENES, SETS, act, raw, moment, calls, logLines, say, local, parse, startScene, playAll, turnDone, cardUp,
+                 confirm, retract, tryMove, select, hint, undo, gameOver, pushPhase, viewOf, rows, sampleMove,
+                 get settings() { return settings; }, stop() { playing += 1; } };
+
+const firstScene = Object.hasOwn(SCENES, query.get('scene') ?? '') ? query.get('scene') : 'opening';
+if (query.get('auto') === '1') {
+  playAll();
+} else if (query.get('start') === '0' || query.get('test') === '1') {
+  startScene(firstScene, { deal: firstScene === 'opening' && query.get('test') !== '1' });
+} else {
+  real.start({ hasSave: false, firstVisit: true, canImport: false }).then((choice) => {
+    log(`start -> '${choice}'`);
+    startScene(firstScene, { deal: firstScene === 'opening' });
+  });
+}
+</script>
+</body>
+</html>

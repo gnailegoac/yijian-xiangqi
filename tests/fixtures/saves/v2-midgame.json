@@ -1,0 +1,46 @@
+{
+  "schema": 2,
+  "id": "g-m3k09x2a",
+  "humanColor": "red",
+  "moves": ["7774","0726","9776","0807","9897","0122","7434","2234"],
+  "result": null,
+  "startedAt": 1790000000000,
+  "endedAt": null,
+  "activeMs": 48200,
+  "counted": false,
+  "drawFrom": 0,
+  "seed": 2891336453,
+  "skill": {
+    "seed": 2891336453,
+    "samples": [
+      {"ply":0,"first":{"move":{"from":{"row":7,"col":7},"to":{"row":7,"col":4},"notation":"炮二平五","piece":"cannon","color":"red","captured":null},"loss":0,"cat":"best"},"final":{"move":{"from":{"row":7,"col":7},"to":{"row":7,"col":4},"notation":"炮二平五","piece":"cannon","color":"red","captured":null},"loss":0,"cat":"best"},"tries":1,"hint":0,"hintMax":0,"self":true,"bestCp":20,"legalCount":44,"test":null,"danger":null,"habit":null,"avoided":null,"patterns":["central_cannon"],"captured":null,"thinkMs":6400},
+      {"ply":2,"first":{"move":{"from":{"row":9,"col":7},"to":{"row":7,"col":6},"notation":"马二进三","piece":"horse","color":"red","captured":null},"loss":0,"cat":"best"},"final":{"move":{"from":{"row":9,"col":7},"to":{"row":7,"col":6},"notation":"马二进三","piece":"horse","color":"red","captured":null},"loss":0,"cat":"best"},"tries":1,"hint":0,"hintMax":0,"self":true,"bestCp":24,"legalCount":44,"test":null,"danger":null,"habit":null,"avoided":null,"patterns":[],"captured":null,"thinkMs":5200},
+      {"ply":4,"first":{"move":{"from":{"row":9,"col":8},"to":{"row":9,"col":7},"notation":"车一平二","piece":"rook","color":"red","captured":null},"loss":12,"cat":"good"},"final":{"move":{"from":{"row":9,"col":8},"to":{"row":9,"col":7},"notation":"车一平二","piece":"rook","color":"red","captured":null},"loss":12,"cat":"good"},"tries":1,"hint":0,"hintMax":0,"self":true,"bestCp":30,"legalCount":42,"test":null,"danger":null,"habit":null,"avoided":null,"patterns":[],"captured":null,"thinkMs":7900},
+      {"ply":6,"first":{"move":{"from":{"row":7,"col":4},"to":{"row":3,"col":4},"notation":"炮五进四","piece":"cannon","color":"red","captured":"pawn"},"loss":350,"cat":"blunder"},"final":{"move":{"from":{"row":7,"col":4},"to":{"row":3,"col":4},"notation":"炮五进四","piece":"cannon","color":"red","captured":"pawn"},"loss":350,"cat":"blunder"},"tries":1,"hint":0,"hintMax":0,"self":true,"bestCp":28,"legalCount":43,"test":null,"danger":"hangs_moved_piece","habit":"greedy","avoided":null,"patterns":[],"captured":"pawn","thinkMs":3100}
+    ],
+    "n": 4,
+    "accSum": 2.96,
+    "shift": -0.0208,
+    "drift": 0,
+    "easeRun": 0,
+    "pressRun": 0,
+    "aheadRun": 0,
+    "sinceChance": 103,
+    "sinceBlunder": 1,
+    "lastKind": "honest",
+    "spared": 0,
+    "chances": 0,
+    "marks": [
+      {"ply":0,"n":1,"accSum":1,"shift":0,"drift":0,"easeRun":0,"pressRun":0,"aheadRun":0,"sinceChance":99,"sinceBlunder":99,"lastKind":null,"spared":0,"chances":0,"samples":1},
+      {"ply":1,"n":1,"accSum":1,"shift":0,"drift":0,"easeRun":0,"pressRun":0,"aheadRun":0,"sinceChance":100,"sinceBlunder":100,"lastKind":"honest","spared":0,"chances":0,"samples":1},
+      {"ply":2,"n":2,"accSum":2,"shift":0,"drift":0,"easeRun":0,"pressRun":0,"aheadRun":0,"sinceChance":100,"sinceBlunder":100,"lastKind":"honest","spared":0,"chances":0,"samples":2},
+      {"ply":3,"n":2,"accSum":2,"shift":0,"drift":0,"easeRun":0,"pressRun":0,"aheadRun":0,"sinceChance":101,"sinceBlunder":101,"lastKind":"variety","spared":0,"chances":0,"samples":2},
+      {"ply":4,"n":3,"accSum":2.96,"shift":0,"drift":0,"easeRun":0,"pressRun":0,"aheadRun":0,"sinceChance":101,"sinceBlunder":101,"lastKind":"variety","spared":0,"chances":0,"samples":3},
+      {"ply":5,"n":3,"accSum":2.96,"shift":0,"drift":0,"easeRun":0,"pressRun":0,"aheadRun":0,"sinceChance":102,"sinceBlunder":102,"lastKind":"honest","spared":0,"chances":0,"samples":3},
+      {"ply":6,"n":4,"accSum":2.96,"shift":-0.0208,"drift":0,"easeRun":0,"pressRun":0,"aheadRun":0,"sinceChance":102,"sinceBlunder":0,"lastKind":"honest","spared":0,"chances":0,"samples":4},
+      {"ply":7,"n":4,"accSum":2.96,"shift":-0.0208,"drift":0,"easeRun":0,"pressRun":0,"aheadRun":0,"sinceChance":103,"sinceBlunder":1,"lastKind":"honest","spared":0,"chances":0,"samples":4}
+    ]
+  },
+  "memory": {"moments":[{"n":4,"s":"me","move":"炮五进四","tag":"slip","k":"capture"}],"taught":["develop","capture"],"mine":{"ply":6,"move":"炮五进四","cat":"blunder","waited":false,"self":true},"habits":[]},
+  "start": null
+}
