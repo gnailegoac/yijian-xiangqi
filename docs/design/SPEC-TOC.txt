@@ -1,0 +1,242 @@
+﻿    1  # 弈间 rebuild — BUILD CONTRACT (SPEC)
+   28  ## (1) Decisions log
+   32  ### 1.1 Authority
+   39  ### 1.2 Architecture seams
+   70  ### 1.3 The child's seat
+   92  ### 1.4 Things deliberately removed
+   99  ## (2) Final file tree and owners
+  249  ## (3) Shared types
+  260  ### 3.1 Board and moves
+  283  ### 3.2 Search: `Analysis`
+  325  ### 3.3 Facts
+  392  ### 3.4 Assessment, hints and job results
+  462  ### 3.5 Teacher
+  546  ### 3.6 Coach wire types (browser ⇄ proxy)
+  666  ### 3.7 Session
+  731  ### 3.8 Tasks
+  745  ### 3.9 Persistence
+  792  ### 3.10 Ports (what the director depends on)
+  942  ### 3.11 UI types
+  957  ## (4) Module APIs
+  961  ### 4.1 `src/core/codes.js` (F0, frozen)
+ 1068  ### 4.2 `src/core/engine.js` (B1)
+ 1100  ### 4.3 `src/core/notation.js` (B1)
+ 1127  ### 4.4 `src/core/position.js` (B2)
+ 1131  ### 4.5 `src/core/search.js` (B2)
+ 1162  ### 4.6 `src/core/facts.js` (B3)
+ 1191  #### 4.6.1 Verdict
+ 1210  #### 4.6.2 Hints
+ 1230  #### 4.6.3 Settled material (`materialOutcome`)
+ 1234  #### 4.6.4 Threat, test, traps
+ 1242  ### 4.7 `src/core/teacher.js` (B4)
+ 1268  #### 4.7.1 Level scale
+ 1298  #### 4.7.2 What is measured
+ 1339  #### 4.7.3 Tactical horizon
+ 1354  #### 4.7.4 Profile results (`finishGame`)
+ 1366  #### 4.7.5 The teaching opponent
+ 1489  #### 4.7.6 Finisher
+ 1509  #### 4.7.7 Tension
+ 1527  #### 4.7.8 Takeaways (`gameTakeaways`)
+ 1535  ### 4.8 `src/core/brain.js` (B5)
+ 1553  #### 4.8.1 Depth and time plan (the single source of budgets)
+ 1568  #### 4.8.2 Jobs
+ 1593  ### 4.9 `src/core/search-worker.js` (B5)
+ 1616  ### 4.10 `src/coach/protocol.js` (C1)
+ 1658  ### 4.11 `src/coach/lexicon.js` (C1)
+ 1728  ### 4.12 `src/coach/markup.js` (C1)
+ 1755  ### 4.13 `src/coach/book.js` (C2)
+ 1773  ### 4.14 `src/coach/brief.js` (C3)
+ 1819  #### 4.14.1 `buildTurnBrief`
+ 1835  #### 4.14.2 `buildTryPacket`
+ 1848  #### 4.14.3 Facts → codes (the only mapping)
+ 1889  #### 4.14.4 `buildHintPacket`
+ 1895  #### 4.14.5 `isEarned`, `worthSpeaking`
+ 1912  #### 4.14.6 `buildOverPacket`
+ 1922  ### 4.15 `src/coach/fallback.js` (C2)
+ 1940  ### 4.16 `src/coach/memory.js` (C2)
+ 1960  ### 4.17 `src/coach/client.js` (C4)
+ 1981  ### 4.18 `src/game/session.js` (G1)
+ 2033  ### 4.19 `src/game/tasks.js` (G2)
+ 2060  ### 4.20 `src/game/store.js` (G3)
+ 2100  ### 4.21 `src/game/record.js` (G3)
+ 2115  ### 4.22 `src/game/policy.js`, `src/game/rival.js` (G5)
+ 2203  ### 4.23 `src/game/strings.js` (G5)
+ 2256  ### 4.24 `src/game/ports.js` (G4)
+ 2291  ### 4.25 `src/game/director.js` (G4)
+ 2319  #### 4.25.1 State
+ 2338  #### 4.25.2 Script primitive
+ 2355  #### 4.25.3 One truth per position (`TurnTruth`)
+ 2362  #### 4.25.4 Speaking rules (who narrates what)
+ 2378  #### 4.25.5 Building the `MoveSample` (at confirm)
+ 2396  #### 4.25.6 Chips
+ 2413  #### 4.25.7 `actions` (user intents)
+ 2433  ### 4.26 `src/config.js` (A1)
+ 2452  ### 4.27 `src/app.js` (A1)
+ 2485  ### 4.28 `src/ui/*` (X1–X8)
+ 2496  #### 4.28.1 `board-view.js` (X2)
+ 2542  #### 4.28.2 `fx.js` (X3)
+ 2579  #### 4.28.3 `audio.js`, `speech.js` (X4)
+ 2620  #### 4.28.4 `buddy.js`, `rival-view.js` (X5)
+ 2656  #### 4.28.5 `stream-text.js` (X6)
+ 2679  #### 4.28.6 `chat-panel.js` (X6)
+ 2734  #### 4.28.7 `hud.js` (X7)
+ 2765  #### 4.28.8 `texts.js` (X7) — UI-owned strings
+ 2806  #### 4.28.9 `stage.js` (X8) and the DOM-hook table
+ 2841  ### 4.29 `server/*` (S1, S2)
+ 2895  ### 4.30 Scripts and tooling (T1, T2)
+ 2897  #### 4.30.1 `scripts/serve.js`
+ 2944  #### 4.30.2 `scripts/build.js`
+ 2965  #### 4.30.3 `scripts/make-icons.js`
+ 2969  #### 4.30.4 `index.html` head and manifest (X1)
+ 2985  #### 4.30.5 `package.json`, type checking, CI
+ 3016  ## (5) The session state machine
+ 3018  ### 5.1 Phases
+ 3032  ### 5.2 `tapSquare(row, col)`
+ 3053  ### 5.3 Other commands by phase (blank = refuse `wrong-phase`)
+ 3068  ### 5.4 Guards and actions
+ 3122  ### 5.5 Undo
+ 3139  ### 5.6 Restore and serialize
+ 3159  ### 5.7 Event batches
+ 3179  ### 5.8 Director scripts: the order of effects per transition
+ 3366  ## (6) The task manager and the cancellation rules
+ 3370  ### 6.1 Model
+ 3376  ### 6.2 `sync(s)`
+ 3398  ### 6.3 `stop(task, reason)`
+ 3409  ### 6.4 How a late result is rejected (four independent layers; any one is sufficient)
+ 3418  ### 6.5 Worker lifecycle
+ 3425  ### 6.6 Who may use the worker when (the director's policy)
+ 3434  ### 6.7 `run` tasks (LLM replies)
+ 3441  ## (7) Browser ⇄ proxy protocol and the SSE format
+ 3445  ### 7.1 Endpoints
+ 3456  ### 7.2 Request
+ 3467  ### 7.3 Response stream
+ 3506  ### 7.4 Signing (`server/sign.js`)
+ 3513  ### 7.5 The client: sending one event
+ 3590  ### 7.6 Availability (one state machine, in `client.js`)
+ 3602  ### 7.7 Failure rules as the child sees them (D-13, D-40)
+ 3610  ### 7.8 Mock mode (one spec)
+ 3622  ### 7.9 Proxy configuration (`loadConfig(env)`)
+ 3645  ### 7.10 Request handling (`server/coach-handler.js`)
+ 3680  ### 7.11 The provider call (`server/provider.js`, `runLive`)
+ 3763  ### 7.12 The tool loop
+ 3776  ### 7.13 Safety
+ 3788  ## (8) The system prompt, the tool, and the two narrators
+ 3790  ### 8.1 `SYSTEM_PROMPT` (ship as written; `server/prompt.js`)
+ 3854  ### 8.2 `TOOLS` (one tool, always present, byte-stable)
+ 3880  ### 8.3 Length caps (`CAPS`, characters as the child sees them, brackets not counted)
+ 3897  ### 8.4 Prompt assembly (`buildMessages`, `renderTurn`, `renderEvent`)
+ 4001  ### 8.5 `renderToolResult(result, me)` (content of the `tool` message)
+ 4014  ### 8.6 The local narrator (`fallback.js` templates)
+ 4099  ### 8.7 `cueFor(turn, event, flags)` (the only interjection rule)
+ 4122  ## (9) The facts packets, with one full example per event
+ 4126  ### 9.1 Sources
+ 4141  ### 9.2 `start` (the child opens as red)
+ 4152  ### 9.3 `opp` (the rival just moved; 1. 炮二平五 炮8平5)
+ 4172  ### 9.4 `hint` (the three pouches; position after 1. 炮二平五 马8进7, pinned best move 马二进三)
+ 4187  ### 9.5 `try` — a held trial, then the follow-up `ask` (the worked example)
+ 4226  ### 9.6 `try` — an ordinary trial (not held)
+ 4240  ### 9.7 `ask` — chip without a try, and a free question with a tool round
+ 4267  ### 9.8 `over`
+ 4287  ### 9.9 `recap` (a long turn compacted locally)
+ 4303  ## (10) Visual, animation, effects and sound catalogues
+ 4307  ### 10.1 Visual direction, themes, tokens
+ 4409  ### 10.2 The board
+ 4411  #### 10.2.1 Board art (`svg.bv-art`, `viewBox="0 0 920 1060"`)
+ 4426  #### 10.2.2 Theme decoration and camp seals
+ 4438  #### 10.2.3 Pieces
+ 4473  #### 10.2.4 Board-view DOM and visual states
+ 4509  #### 10.2.5 Input
+ 4518  #### 10.2.6 Implementation notes
+ 4542  ### 10.3 Animation catalogue
+ 4546  #### A. Selection and input
+ 4559  #### B. Movement by piece type
+ 4577  #### C. Capture impact by attacker type
+ 4602  #### D. Tentative move lifecycle
+ 4618  #### E. Rival moves and game events
+ 4634  #### F. Hints and arrows
+ 4646  #### G. Board lifecycle
+ 4656  ### 10.4 Effects (`fx.js`)
+ 4658  #### 10.4.1 Engine
+ 4679  #### 10.4.2 Particle catalogue (counts at `q = 1`)
+ 4700  #### 10.4.3 Shake, hit-stop, flash, haptics
+ 4714  #### 10.4.4 Banners, popups, stamps (DOM, in `div.fx-banners`)
+ 4756  ### 10.5 Sound (`audio.js`)
+ 4758  #### 10.5.1 Graph and lifecycle
+ 4780  #### 10.5.2 Synthesis primitives
+ 4821  #### 10.5.3 Sound effects
+ 4873  #### 10.5.4 Who plays what
+ 4886  #### 10.5.5 Adaptive music
+ 4922  #### 10.5.6 Theme palettes (`setPalette`)
+ 4930  ### 10.6 Accessibility and performance budgets
+ 4954  ## (11) The strategist character: construction and moods
+ 4956  ### 11.1 Identity
+ 4963  ### 11.2 Construction (`buddy.js`)
+ 5062  ### 11.3 Moods
+ 5079  ### 11.4 Motion
+ 5101  ### 11.5 Verdict → face, word, sound (the stage's table; the only place this is decided)
+ 5122  ### 11.6 The speech bubble (`Bubble`)
+ 5143  ### 11.7 司马懿 (`rival-view.js`)
+ 5162  ## (12) Layouts: iPad first, desktop, phones ≥ 360 px
+ 5166  ### 12.1 Shell (`index.html` body, X1)
+ 5193  ### 12.2 `src/ui/layout.js`
+ 5264  ### 12.3 The regions
+ 5288  ### 12.4 The conversation sheet (回看), the input and the keyboard
+ 5298  ### 12.5 The start overlay
+ 5306  ### 12.6 The game-over card
+ 5320  ### 12.7 The tentative move, step by step
+ 5345  ## (13) Save schema v2 and the v1 migration
+ 5347  ### 13.1 Records
+ 5368  ### 13.2 The v1 format (exactly what v1 `src/app.js` wrote)
+ 5380  ### 13.3 Field-by-field migration (`migrateV1`)
+ 5400  ### 13.4 Load algorithm, validation, corruption, future versions
+ 5423  ### 13.5 Backup (origin changes, D-23)
+ 5431  ### 13.6 Fixtures (`tests/fixtures/saves/`)
+ 5438  ## (14) Test plan
+ 5442  ### 14.1 Core
+ 5555  ### 14.2 Coach
+ 5626  ### 14.3 Server
+ 5662  ### 14.4 Game
+ 5753  ### 14.5 UI (pure parts in Node; the rest in the browser)
+ 5761  ### 14.6 Scripts
+ 5777  ### 14.7 End to end (Playwright, mock coach)
+ 5805  ### 14.8 Live acceptance (manual, with the key: `npm run coach:bench`)
+ 5809  ### 14.9 Benchmarks (`npm run bench`, informational)
+ 5816  ## (15) Work packages
+ 5824  ### Wave 0 — foundation
+ 5830  ### Wave 1 — leaves (all parallel)
+ 5849  ### Wave 2
+ 5860  ### Wave 3
+ 5869  ### Wave 4
+ 5876  ### Wave 5
+ 5883  ### Integration milestones
+ 5890  ### The five moments the build must protect (acceptance by eye, on the iPad)
+ 5901  ## Appendix A — the chess core in full
+ 5905  ### A1. Measured baseline and targets
+ 5951  ### A2. `position.js` — the compact board
+ 5953  #### A2.1 Representation
+ 5966  #### A2.2 Move generation and legality
+ 5994  #### A2.3 Evaluation
+ 6017  #### A2.4 Attack sets and static exchange evaluation (used by facts, not by the search hot path)
+ 6042  #### A2.5 Repetition status (search only)
+ 6046  #### A2.6 Exports
+ 6082  ### A3. `search.js`
+ 6084  #### A3.1 Request and result
+ 6097  #### A3.2 Node search
+ 6120  #### A3.3 Mate scores
+ 6124  #### A3.4 Repetition inside the search
+ 6138  #### A3.5 Transposition table
+ 6142  #### A3.6 Root: the table of all moves
+ 6186  #### A3.7 Time control
+ 6195  #### A3.8 Cooperative cancellation
+ 6206  #### A3.9 Self-calibration
+ 6211  #### A3.11 How correctness is verified
+ 6220  ### A4. `engine.js` additions: FEN and the draw rules
+ 6257  ### A5. `notation.js`
+ 6259  #### A5.1 Move -> notation (canonical)
+ 6284  #### A5.2 Notation -> move (tolerant parser)
+ 6312  ### A6. `facts.js`: the rules behind the typedefs of §3.3
+ 6324  #### A6.1 Position facts
+ 6338  #### A6.2 Move facts
+ 6361  #### A6.3 Danger kinds (why a move is bad)
+ 6378  #### A6.4 Named patterns and openings
+ 6436  ### A7. Tactical suite (used by `search.test.js` and `facts.test.js`)
