@@ -656,7 +656,7 @@ async function askCoach({ code, text }) {
   } else if (code === 'improve') {
     answer = { text: '吃子之前多看一眼，它有没有保镖。' };
   } else if (code === 'next') {
-    answer = { text: '下一盘，对方走完先问自己：它想干什么？' };
+    answer = { text: '下一盘，对方走完先问自己：他想干什么？' };
   } else if (code === 'free') {
     const found = /[帅将仕士相象马车炮兵卒][一二三四五六七八九1-9][进退平][一二三四五六七八九1-9]/.exec(text ?? '');
     answer = found ? { text: `亮摆过了：【${found[0]}】可以走，不过要先看对方的炮。`, tool: { notation: found[0] } } : { text: '这个问题有意思。咱们先把眼前这步棋想明白，好不好？' };

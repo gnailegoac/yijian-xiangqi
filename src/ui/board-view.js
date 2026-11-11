@@ -1875,6 +1875,10 @@ export function createBoardView(host, deps) {
     const badgeText = svgEl('text', { x: 110, y: 22, dy: '.36em' });
     badge.append(svgEl('rect', { x: 78, y: 4, width: 64, height: 36, rx: 18 }), badgeText);
     gTop.append(badge);
+    // On a small board the corner has no room for the counter (it lay over the file labels): there the same count rides
+    // on the ghost that has just moved, like the 试 tag of a trial. board.css shows one or the other (CONTRACT-NOTES 138).
+    const stepTag = document.createElement('span');
+    stepTag.className = 'piece__tag piece__tag--step';
     host.classList.add('is-previewing');
 
     let over_ = false;
@@ -1906,6 +1910,8 @@ export function createBoardView(host, deps) {
         if (src.rec) dim(src.el);                            // the real piece stays where it is; its ghost goes on
         stand.delete(code2(move.from));
         stand.set(code2(move.to), { el, rec: null });
+        stepTag.textContent = `${i + 1}/${n}`;
+        (el.querySelector('.piece__body') ?? el).append(stepTag);
         const a = toView(move.from, bottom), b = toView(move.to, bottom);
         seat({ row: 0, col: 0, el }, move.to);
         if (!reduced) {

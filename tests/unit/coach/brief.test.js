@@ -4,7 +4,7 @@
 // section 4.8.2 do it (brain.js is not used: it belongs to another package). Where a test needs a fact the engine does not
 // produce on demand (a sound sacrifice, a deep reveal, a given teaching choice), a real result is copied and that one field is
 // set by hand; such places say so. Expected values are those of the contract (the tables of 4.14, the examples of section 9,
-// CONTRACT-NOTES 28, 69 d, 88, 105, 107, 108) or are read off the board by hand in the comments next to them.
+// CONTRACT-NOTES 28, 69 d, 88, 105, 107, 108, 131) or are read off the board by hand in the comments next to them.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,7 +16,8 @@ import {
 import { createMoveBook } from '../../../src/coach/book.js';
 import { createGameMemory } from '../../../src/coach/memory.js';
 import { LIMITS, validateCoachRequest } from '../../../src/coach/protocol.js';
-import { composeLocal } from '../../../src/coach/fallback.js';
+import { composeLocal, cueFor, localLine } from '../../../src/coach/fallback.js';
+import { parseCoachText } from '../../../src/coach/markup.js';
 import { AREA } from '../../../src/coach/lexicon.js';
 import { MOTIF_CODES, MOTIF_TERM, NOTATION_RE, PATTERN_NAME, TACTIC_MOTIFS } from '../../../src/core/codes.js';
 import { START_FEN, applyMove, boardToFen, fenToBoard, getLegalMoves, opposite, plyRecord } from '../../../src/core/engine.js';
@@ -673,6 +674,39 @@ test('the flags of a trial: only, self, repeat, habit, avoided, vsPrev, chance, 
   assert.equal(buildTryPacket(fine, tryCtx(turn, withChance), bookOf(sv)).packet.chance, 'taken');
   assert.equal(buildTryPacket(held, tryCtx(turn, withChance), bookOf(sv)).packet.chance, 'missed');
   assert.equal(buildTryPacket(held, tryCtx(turn, report), bookOf(sv)).packet.chance, 'none');
+  // A taken chance is a good move (CONTRACT-NOTES 131 a). Hand-set: the verdict and the loss of the same real assessments.
+  // Another move than the chance's own, within 60 cp: taken when it is judged good or better, not when it is a 缓着.
+  const chanceOf = (assessed, cat, loss, lastOpp = withChance.lastOpp) => {
+    const copy = clone(assessed);
+    Object.assign(copy.assessment, { cat, loss });
+    return buildTryPacket(copy, tryCtx(turn, { ...report, lastOpp }), bookOf(sv)).packet.chance;
+  };
+  const elsewhere = { ...withChance.lastOpp, choice: { ...withChance.lastOpp.choice, chance: { ...chance, line: toLine(sv.board, 'red', [mv(HORSE_REPLY.trial)]) } } };
+  assert.equal(chanceOf(fine, 'good', 40, elsewhere), 'taken');
+  assert.equal(chanceOf(fine, 'best', 0, elsewhere), 'taken');
+  assert.equal(chanceOf(fine, 'good', 60, elsewhere), 'taken');      // a wider verdict scale: still within 60 cp
+  assert.equal(chanceOf(fine, 'good', 61, elsewhere), 'none');
+  assert.equal(chanceOf(fine, 'ok', 55, elsewhere), 'none');         // was 'taken': 抓住了对方的破绽, then 稍慢，但不算错
+  assert.equal(chanceOf(fine, 'ok', 60, elsewhere), 'none');
+  assert.equal(chanceOf(fine, 'ok', 149, elsewhere), 'none');
+  assert.equal(chanceOf(fine, 'ok', 150, elsewhere), 'missed');
+  // The chance's own first move: taken when it is good or better; with a worse verdict it is not praised, and it is never
+  // called a missed chance (the child did go for the hole).
+  assert.equal(chanceOf(fine, 'brilliant', 0), 'taken');
+  assert.equal(chanceOf(fine, 'good', 45), 'taken');
+  assert.equal(chanceOf(fine, 'ok', 55), 'none');
+  assert.equal(chanceOf(fine, 'mistake', 200), 'none');
+  assert.equal(chanceOf(fine, 'blunder', 600), 'none');
+  // what the narrators and the memory then make of it
+  for (const [cat, loss] of [['ok', 55], ['mistake', 200]]) {
+    const copy = clone(fine);
+    Object.assign(copy.assessment, { cat, loss });
+    const packet = buildTryPacket(copy, tryCtx(turn, withChance), bookOf(sv)).packet;
+    assert.doesNotMatch(composeLocal(turn, [{ i: 0, kind: 'opp', said: 'none' }, { i: 1, kind: 'try', n: 1, try: packet }], 0), /破绽|漏洞/, cat);
+    const memory = createGameMemory(null);
+    memory.noteMine(2, { move: packet.move, cat, waited: true, self: true, packet, more: null });
+    assert.ok(!memory.snapshot().moments.some((m) => m.tag === 'great'), `${cat}: no 'great' moment`);
+  }
 
   // eval.mate is the distance after the move: a move that starts a mate in three leaves two moves to play (hand-set flag);
   // distances beyond nine moves are left out (CONTRACT-NOTES 88)
@@ -754,7 +788,7 @@ test('turn.threats come from SEE-based hanging pieces, mates and the pass search
   const info = { kind: 'check', line, outcome: materialOutcome(line, 'black'), mate: null, facts: moveFacts(boardToFen(lone.board, 'black'), check) };
   assert.ok(info.facts.check !== null);
   assert.deepEqual(buildTurnBrief(reportOf(lone, { threat: info }), createGameMemory(null), bookOf(lone)).threats,
-    [{ k: 'check', by: { s: 'opp', t: 'R', f: 1 }, move: '车1进4', net: { gain: [], lose: [], cp: 0 }, sev: 'pawn' }]);
+    [{ k: 'check', by: { s: 'opp', t: 'R', f: 1 }, move: '车1进4', net: { gain: [], lose: [], cp: 0 }, sev: 'pawn', prep: true }]);
   assert.deepEqual(buildTurnBrief(reportOf(lone, { threat: { ...info, kind: 'plan' } }), createGameMemory(null), bookOf(lone)).threats, []);
   // A check whose line goes on to lose material for the rival threatens no more than the check: what the child would take
   // is not reported as the rival's intent. Hand-set: the outcome of the line (the rival's view).
@@ -782,6 +816,8 @@ test('turn.threats come from SEE-based hanging pieces, mates and the pass search
   const passed = buildTurnBrief(passOnly, createGameMemory(null), bookOf(bolt)).threats;
   assert.equal(passed.length, 1);
   assert.deepEqual([passed[0].k, passed[0].sev, passed[0].net], ['mate_threat', 'mate', { gain: [], lose: [], cp: 0 }]);
+  // a mate threat never carries `prep`: "he mates next" is true of the position as it stands
+  assert.ok(!('prep' in passed[0]) && !bolted.threats.some((t) => 'prep' in t) && !turn.threats.some((t) => 'prep' in t));
   assertValid(bolted, [{ i: 0, kind: 'start' }], 'mate threat');
 
   // A guarded piece that can still be taken with profit: the balance is the exchange, not the piece alone. The red rook on 五
@@ -810,9 +846,10 @@ test('a threat of the pass search names the piece that acts, where it stands now
   assert.equal(info.facts.threats[0].by.type, 'cannon');
   const book = bookOf(sv);
   const turn = buildTurnBrief(reportOf(sv, { threat: info }), createGameMemory(null), book);
+  // The cannon does not aim yet: the threat carries `prep` (CONTRACT-NOTES 131 b), and the narrators name the move.
   assert.deepEqual(turn.threats, [{ k: 'cannon_mount', by: { s: 'opp', t: 'C', f: 2 }, on: { s: 'me', t: 'H', f: 8 }, move: '兵三平二',
-    net: { gain: [], lose: [], cp: 0 }, sev: 'pawn' }]);
-  assert.equal(composeLocal(turn, [{ i: 0, kind: 'ask', ask: 'danger' }], 0), '要当心：对方的二路炮瞄着你的8路马。');
+    net: { gain: [], lose: [], cp: 0 }, sev: 'pawn', prep: true }]);
+  assert.equal(composeLocal(turn, [{ i: 0, kind: 'ask', ask: 'danger' }], 0), '要当心：对方想走【兵三平二】，走完他的二路炮就能吃掉你的8路马了。');
   assert.equal(book.lookup('兵三平二').src, 'threat');
   assertValid(turn, [{ i: 0, kind: 'start' }], 'pass-search threat');
 
@@ -829,6 +866,138 @@ test('a threat of the pass search names the piece that acts, where it stands now
   pinned.facts.threats = [];
   pinned.facts.fork = null;
   assert.equal(buildTurnBrief(reportOf(sv, { threat: pinned }), createGameMemory(null), bookOf(sv)).threats[0].k, 'pin');
+});
+
+test('a threat that does not stand yet carries prep; a mate threatened at a price is told by what the line shows', () => {
+  // The facts of each first move are real; that the pass search chose the line is given (as in the tests above).
+  const passed = (fen, ply, codes, kind = 'wins-material') => {
+    const sv = survey(fen, ply, 3);
+    const rival = opposite(sv.turn);
+    const line = toLine(sv.board, rival, codes.map(mv));
+    const info = { kind, line, outcome: materialOutcome(line, rival), mate: null, facts: moveFacts(boardToFen(sv.board, rival), mv(codes[0])) };
+    return { sv, info, turn: (more = {}) => buildTurnBrief(reportOf(sv, { threat: info, ...more }), createGameMemory(null), bookOf(sv)) };
+  };
+  const danger = (turn) => composeLocal(turn, [{ i: 0, kind: 'ask', ask: 'danger' }], 0);
+
+  // 1. prep exactly when the first move takes nothing. The lone rook: 车1进4 gives check (prep); 车1平5 takes the horse on
+  //    the river (no prep). Hand-set for the second: the hanging list is emptied, so that only the pass search reports it.
+  const rook = passed('3k5/9/9/9/9/r3N4/9/9/9/4K4 w', 60, ['5054']);
+  assert.equal(rook.info.line.moves[0].captured, 'horse');
+  const taking = rook.turn({ facts: { ...rook.sv.facts, hanging: [] } }).threats;
+  assert.deepEqual(taking, [{ k: 'attack', by: { s: 'opp', t: 'R', f: 1 }, on: { s: 'me', t: 'H', f: 5 }, move: '车1平5', net: { gain: [], lose: ['H'], cp: -400 }, sev: 'piece' }]);
+  // the threats of the facts (a hanging piece) stand now: never prep
+  assert.ok(rook.turn().threats.length === 1 && !('prep' in rook.turn().threats[0]));
+
+  // 2. A move that threatens mate while its line only wins a pawn (炮4平7: 重炮 next, parried by 相七进五, then 卒9进1 takes).
+  //    It is no mate threat of the position (its severity is a pawn): the wire never carries mate_threat with another
+  //    severity. The move also sets the cannon on the elephant on 三 through the pawn: that attack is what is told.
+  const mount = passed('rnbakab1r/9/8n/p1pCp1p2/3c4p/P6cP/2P1P1P2/9/R3A2C1/1NB1KABNR w', 18, ['4346', '9274', '4858']);
+  assert.equal(mount.info.line.moves.map((m) => m.notation).join(' '), '炮4平7 相七进五 卒9进1');
+  assert.equal(mount.info.facts.mateThreat.in, 1);
+  const mounted = mount.turn().threats.find((t) => t.move === '炮4平7');
+  assert.deepEqual(mounted, { k: 'cannon_mount', by: { s: 'opp', t: 'C', f: 4 }, on: { s: 'me', t: 'E', f: 3 }, move: '炮4平7',
+    net: { gain: [], lose: ['P'], cp: -100 }, sev: 'pawn', prep: true });
+  assert.equal(danger({ ...mount.turn(), threats: [mounted] }), '要当心：对方想走【炮4平7】，走完他的4路炮就能吃掉你的三路相了。');
+
+  // 3. A mate threat with no attack of its own (士6进5), whose line goes on to take an elephant that can be taken already
+  //    (卒9进1): nothing new is threatened. The capture is listed once, as the threat that stands; the quiet move is not listed.
+  const quiet = passed('rnbaka2r/6c2/4b1n2/6p2/p2C5/4P4/c5P1p/B3p1N1B/3R1K3/1N1A1A2R w', 50, ['0514', '4345', '6878']);
+  assert.equal(quiet.info.line.moves.map((m) => m.notation).join(' '), '士6进5 炮六平四 卒9进1');
+  assert.ok(quiet.info.facts.mateThreat !== null && quiet.info.facts.threats.length === 0);
+  const listed = quiet.turn().threats;
+  assert.ok(listed.some((t) => t.move === '卒9进1' && t.k === 'attack' && !('prep' in t)));
+  assert.ok(!listed.some((t) => t.move === '士6进5'), J(listed));
+  //    When the facts of the move name no attack but its line goes on to take a piece that the move sets up, the line
+  //    shows the threat. Hand-set: the position of 2 with a line in which the cannon itself takes the elephant (炮7进5), and
+  //    the facts' list of new attacks emptied, so that only the line shows it.
+  const byLine = passed('rnbakab1r/9/8n/p1pCp1p2/3c4p/P6cP/2P1P1P2/9/R3A2C1/1NB1KABNR w', 18, ['4346', '9274', '4696']);
+  assert.equal(byLine.info.line.moves.map((m) => m.notation).join(' '), '炮4平7 相七进五 炮7进5');
+  byLine.info.facts.threats = [];
+  byLine.info.facts.fork = null;
+  assert.deepEqual(byLine.turn().threats.find((t) => t.move === '炮4平7'), { k: 'cannon_mount', by: { s: 'opp', t: 'C', f: 4 }, on: { s: 'me', t: 'E', f: 3 },
+    move: '炮4平7', net: { gain: [], lose: ['E'], cp: -200 }, sev: 'pawn', prep: true });
+  for (const t of [...mount.turn().threats, ...listed, ...byLine.turn().threats]) assert.ok(!(t.k === 'mate_threat' && t.sev !== 'mate'), J(t));
+
+  // 4. A fork: the pawn steps next to the horse and the elephant (卒8进1) and attacks both. A Threat has no `on2`.
+  const fork = passed('rnbaka3/6c2/4b1n2/6p2/p8/4PCP2/4c2pr/B3p1N1B/3R1K3/1N1A1A2R w', 58, ['6777']);
+  assert.deepEqual(fork.info.facts.fork.targets.map((x) => x.type), ['horse', 'elephant']);
+  const forked = fork.turn().threats.find((t) => t.move === '卒8进1');
+  assert.deepEqual({ ...forked, net: null }, { k: 'fork', by: { s: 'opp', t: 'P', f: 8 }, on: { s: 'me', t: 'H', f: 3 }, move: '卒8进1', net: null, sev: forked.sev, prep: true });
+  assert.notEqual(forked.sev, 'mate');
+  assert.equal(danger({ ...fork.turn(), threats: [forked] }), '要当心：对方想走【卒8进1】，走完他的8路卒就同时捉住你的三路马和另一个子了。');
+
+  //    A fork that is a check as well keeps its name, check_fork: nothing else tells that the other target is the king.
+  //    炮七进三 lands in the corner of the back rank: over the horse it attacks the rook on 1, over the advisor it checks.
+  const corner = passed('rn1akab1r/9/4b1n2/2C3p1p/1c7/9/P1P1P1P1P/9/4C4/RNBAKABNR b', 17, ['3202']);
+  assert.equal(corner.info.line.moves[0].notation, '炮七进三');
+  assert.ok(corner.info.facts.fork.withCheck && corner.info.facts.check !== null);
+  const checking = corner.turn().threats.find((t) => t.move === '炮七进三');
+  assert.deepEqual({ ...checking, net: null, sev: null }, { k: 'fork', by: { s: 'opp', t: 'C', f: 7 }, on: { s: 'me', t: 'R', f: 1 }, move: '炮七进三', net: null, sev: null,
+    name: 'check_fork', prep: true });
+  assert.equal(danger({ ...corner.turn(), threats: [checking] }), '要当心：对方想走【炮七进三】，走完他的七路炮就将军，同时捉住你的1路车。');
+  assert.ok(!('name' in forked), 'a fork of two pieces carries no name');
+
+  // 5. Two pieces attacked by different pieces (马三进二: the cannon behind the horse aims at the horse on 8, the pawn on 三
+  //    attacks the pawn on 7): no single piece forks, so the threat is the attack on the first target, by its attacker,
+  //    named where it stands now.
+  const split = passed('1nbaka1n1/2r6/4b3r/p2c4p/P1p1p1p2/2P3P2/4P3c/B1N1C1NCB/4A4/R2A1KR2 b', 35, ['7657']);
+  assert.equal(split.info.facts.fork.by, null);
+  const retold = split.turn().threats.find((t) => t.move === '马三进二');
+  assert.deepEqual([retold.k, retold.by, retold.on, retold.prep], ['cannon_mount', { s: 'opp', t: 'C', f: 2 }, { s: 'me', t: 'H', f: 8 }, true]);
+  assert.equal(danger({ ...split.turn(), threats: [retold] }), '要当心：对方想走【马三进二】，走完他的二路炮就能吃掉你的8路马了。');
+
+  // 6. The piece may aim at its target already, and the move only makes the capture pay: 车9平8 adds a second attacker to
+  //    the horse on 二, which the cannon on 6 aims at over the elephant while the rook on 一 guards it. The threat is the
+  //    cannon's capture (the facts' new threat); the narrators say that it can take the horse once the move is played, not
+  //    that it will aim at it (it does now).
+  const second = passed('r2a1ab2/3nk4/4b2c1/p3p3r/6p2/9/P1P1P1P1P/N8/R3K4/3A1cBNR w', 20, ['3837']);
+  assert.equal(second.info.line.moves[0].notation, '车9平8');
+  const paying = second.turn().threats.find((t) => t.move === '车9平8');
+  assert.deepEqual([paying.k, paying.by, paying.on, paying.prep], ['cannon_mount', { s: 'opp', t: 'C', f: 6 }, { s: 'me', t: 'H', f: 2 }, true]);
+  assert.ok(!second.sv.facts.hanging.some((h) => h.piece.type === 'horse' && h.piece.color === 'red' && h.piece.at.col === 7), 'the horse cannot be taken with profit yet');
+  assert.equal(danger({ ...second.turn(), threats: [paying] }), '要当心：对方想走【车9平8】，走完他的6路炮就能吃掉你的二路马了。');
+
+  // 7. A fork by a piece that stays where it is and attacks both targets already: 车6进5 threatens mate, and the rook on 7,
+  //    which aims at both elephants now, can then take one. The move does not bring a double attack about: the threat is
+  //    the capture that then pays, by the rook on 7 (named where it stands), never 走完…就同时捉住… of a rook that does so now.
+  const standing = passed('2Rak4/9/c8/2p2rp1P/6b2/9/9/4B1r2/4A4/1N1AK1B2 w', 52, ['3585', '9678', '7674']);
+  assert.equal(standing.info.line.moves.map((m) => m.notation).join(' '), '车6进5 相三进一 车7平5');
+  assert.deepEqual([standing.info.facts.fork.by.name, standing.info.facts.fork.targets.map((x) => x.name), standing.info.facts.fork.withCheck],
+    ['7路车', ['五路相', '三路相'], false]);
+  const pays = standing.turn().threats.find((t) => t.move === '车6进5');
+  assert.deepEqual(pays, { k: 'attack', by: { s: 'opp', t: 'R', f: 7 }, on: { s: 'me', t: 'E', f: 5 }, move: '车6进5', net: { gain: [], lose: ['E'], cp: -200 }, sev: 'pawn', prep: true });
+  assert.equal(danger({ ...standing.turn(), threats: [pays] }), '要当心：对方想走【车6进5】，走完他的7路车就能吃掉你的五路相了。');
+  //    (the pawn of 4 moves there itself: that fork is new with the move and stays a fork)
+  assert.equal(forked.k, 'fork');
+
+  // 8. A check that leaves a piece en prise to another piece (炮7进1: the cannon checks over the advisor on 四, and the cannon
+  //    on 2 aims at the advisor on 六 over the elephant): no single piece forks. The threat is the check, with what the line
+  //    wins (two rooks), not "the cannon on 2 can then take your advisor".
+  const checks = passed('1rbakab2/9/2n6/p1C1p1p1p/9/2P6/P3P3P/1R7/6c2/1cBAKA1rR w', 20, ['8696', '9584', '9698', '8495', '9777', '9584', '7771']);
+  assert.equal(checks.info.line.moves.map((m) => m.notation).join(' '), '炮7进1 仕四进五 炮7平9 仕五退四 车8退2 仕四进五 车8平2');
+  assert.ok(checks.info.facts.check !== null && checks.info.facts.fork.by === null && checks.info.facts.fork.withCheck);
+  const checked = checks.turn().threats.find((t) => t.move === '炮7进1');
+  assert.deepEqual(checked, { k: 'check', by: { s: 'opp', t: 'C', f: 7 }, move: '炮7进1', net: { gain: [], lose: ['R', 'R'], cp: -1800 }, sev: 'rook', prep: true });
+  assert.equal(danger({ ...checks.turn(), threats: [checked] }), '要当心：对方想走【炮7进1】，走完就是将军。');
+  assert.equal(composeLocal({ ...checks.turn(), threats: [checked] }, [{ i: 0, kind: 'ask', ask: 'intent' }], 0), '对方下一步想走【炮7进1】，那样你白丢两个车。');
+  //    ... but when the line does go on to take the piece that is left en prise, that attack is the threat: 前炮退五 uncovers
+  //    the rook's check and aims, over the pawn on 三, at the rook on 9, which the line takes two moves later.
+  const uncovers = passed('2ba1a3/4kC1R1/9/3r2p2/2p3b2/9/P1P1P1P1r/5C3/4K4/2B3BR1 b', 29, ['1565', '1404', '7574', '4624', '6568']);
+  assert.equal(uncovers.info.line.moves.map((m) => m.notation).join(' '), '前炮退五 将5退1 后炮平五 象7退5 炮四平一');
+  assert.ok(uncovers.info.facts.check !== null && uncovers.info.facts.fork.by === null && uncovers.info.facts.fork.withCheck);
+  assert.equal(uncovers.info.line.moves[4].captured, 'rook');
+  const aimed = uncovers.turn().threats.find((t) => t.move === '前炮退五');
+  assert.deepEqual(aimed, { k: 'cannon_mount', by: { s: 'opp', t: 'C', f: 4, q: 'front' }, on: { s: 'me', t: 'R', f: 9 }, move: '前炮退五',
+    net: { gain: [], lose: ['R'], cp: -900 }, sev: 'rook', prep: true });
+  assert.equal(danger({ ...uncovers.turn(), threats: [aimed] }), '要当心：对方想走【前炮退五】，走完他的四路前炮就能吃掉你的9路车了。');
+
+  // every one of these briefs is wire-valid, and every threat move is in the book
+  for (const p of [rook, mount, quiet, fork, corner, split, second, standing, checks, uncovers]) {
+    const book = bookOf(p.sv);
+    const turn = buildTurnBrief(reportOf(p.sv, { threat: p.info }), createGameMemory(null), book);
+    assertValid(turn, [{ i: 0, kind: 'start' }], 'prep');
+    for (const t of turn.threats) assert.ok(book.lookup(t.move), t.move);
+  }
 });
 
 test('a hanging piece of a child in check is worded as attacked, and a finished game lists no threat', () => {
@@ -961,7 +1130,26 @@ test('quality and overlooked are derived from the teaching choice', () => {
   assert.equal(quality({ kind: 'honest', loss: 16 }), 'normal');
   assert.equal(quality({ kind: 'variety', loss: 0 }), 'strong');
   assert.equal(quality({ kind: 'variety', loss: 25 }), 'normal');
-  assert.equal(quality({ kind: 'overlook', loss: 300 }), 'normal');
+  // What the move gave up, whatever its kind (CONTRACT-NOTES 131 c): since CONTRACT-NOTES 129 a move of kind `honest` can
+  // give up 500 cp. More than a steady move may (50) is soft, as much as a chance (150) is a hole.
+  assert.equal(quality({ kind: 'honest', loss: 50 }), 'normal');
+  assert.equal(quality({ kind: 'honest', loss: 51 }), 'soft');
+  assert.equal(quality({ kind: 'honest', loss: 149 }), 'soft');
+  assert.equal(quality({ kind: 'honest', loss: 150 }), 'slip');
+  assert.equal(quality({ kind: 'honest', loss: 500 }), 'slip');
+  assert.equal(quality({ kind: 'variety', loss: 60 }), 'soft');
+  assert.equal(quality({ kind: 'concession', loss: 149 }), 'soft');
+  assert.equal(quality({ kind: 'concession', loss: 150 }), 'slip');
+  assert.equal(quality({ kind: 'overlook', loss: 300 }), 'slip');    // was 'normal': he passed up a piece
+  assert.equal(quality({ kind: 'overlook', loss: 100 }), 'soft');
+  assert.equal(quality({ kind: 'overlook', loss: 10 }), 'normal');   // an overlook that cost nothing is not called a strong move
+  assert.equal(quality({ kind: 'chance', loss: 0 }), 'slip');        // a hole by its kind
+  // ... and the local narrator can point at it when the child asks what the rival is up to
+  const asked = (choice) => composeLocal(buildTurnBrief(reportOf(sv, { lastOpp: rivalTurn(AFTER_CENTRAL_CANNON, mv('0726'), 1, choice) }), createGameMemory(null), bookOf(sv)),
+    [{ i: 0, kind: 'opp', said: 'none' }, { i: 1, kind: 'ask', ask: 'intent' }], 0);
+  assert.equal(asked({ kind: 'honest', loss: 0 }), '对方这步的用意：给自己的5路卒补上保护。');
+  assert.equal(asked({ kind: 'honest', loss: 300 }), '对方这步的用意：给自己的5路卒补上保护。不过这步有漏洞。');
+  assert.equal(asked({ kind: 'honest', loss: 80 }), '对方这步的用意：给自己的5路卒补上保护。不过这步走得偏软。');
   // after an undo or a reload the last rival move comes without a choice (CONTRACT-NOTES 28)
   const bare = buildTurnBrief(reportOf(sv, { lastOpp: rivalTurn(AFTER_CENTRAL_CANNON, mv('0726'), 1, null), back: 'undo' }), createGameMemory(null), bookOf(sv));
   assert.equal(bare.opp.quality, 'normal');
@@ -1120,6 +1308,18 @@ test('hint packets: levels 1 and 2 contain no notation; level 3 registers its mo
   assert.equal(shielded.theme, 'save_piece');
   assert.deepEqual(shielded.one, { focus: 'danger', theme: 'block' });
   assert.deepEqual(shielded.two.piece, { s: 'me', t: 'R', f: 7 });
+  // ... or the move saves it in a way no effect names: the horse on 七 is the screen of the cannon that aims at the elephant
+  // on 九 and jumps away (马七进六). The piece to move is not the piece in danger, so the theme is not `escape` (the narrators
+  // say 该照顾一下… of that theme): the elephant is protected.
+  const screen = themeOf('r3k2nr/2Rna4/3ab3b/2p3p1p/p3p4/P1P5P/4P1P2/B1N2c3/6R2/3AK1B2 w', 32, mv('7253'));
+  assert.equal(screen.theme, 'save_piece');
+  assert.deepEqual(screen.one, { focus: 'danger', theme: 'defend' });
+  assert.deepEqual(screen.two, { piece: { s: 'me', t: 'H', f: 7 }, area: 'river', theme: 'defend' });
+  // what pouch 2 then says, locally: 该照顾一下… only of the piece that is in danger itself
+  const pouch2 = (x) => composeLocal(worked.turn, [{ i: 0, kind: 'opp', said: 'none' }, { i: 1, kind: 'hint', level: 1, hint: x.one, said: 'none' }, { i: 2, kind: 'hint', level: 2, hint: x.two }], 0);
+  assert.equal(pouch2(screen), '看看你的七路马，它能帮上忙。');
+  assert.equal(pouch2(shielded), '看看你的七路车，它能帮上忙。');
+  assert.match(pouch2(stepped), /^该照顾一下你的.路车了。$/);
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -1242,6 +1442,332 @@ test('isEarned: tactical find, only move, tactic motif, deep reveal, avoided tra
   good.assessment.cat = 'good';
   assert.equal(isEarned(good, { found: true, avoided: null }), false);
 });
+
+test('isEarned: a forced move earns no praise, whatever the search found in it (CONTRACT-NOTES 138)', () => {
+  // Red is in check on the e-file and both flights of the king are covered: the horse steps in on e3 or on e2 (two legal
+  // moves). With an advisor on f1 that can step in too, there are three; there the rook on f8 is left out and red has a
+  // rook of its own, so that red is not mated after its best move (a move after which the child is mated earns no praise
+  // either: CONTRACT-NOTES 150) and does not stay far behind (item 147).
+  const two = survey('3k5/9/5r3/3r5/9/4r4/9/2N6/9/4K4 w', 40, 3);
+  const three = survey('3k5/9/9/3r5/9/4r4/9/2N6/9/R3KA3 w', 40, 3);
+  assert.deepEqual([two.table.lines.length, three.table.lines.length], [2, 3]);
+  const sound = assess(three, three.table.lines[0].move).assessment;
+  assert.ok(!sound.flags.allowsMate && sound.moveCp > -500, `the best of the three moves: ${sound.moveCp}`);
+  const every = { found: true, avoided: 'greedy' };
+  for (const [sv, forced] of [[two, true], [three, false]]) {
+    const best = assess(sv, sv.table.lines[0].move);
+    // every clause of the rule at once: a found test, the only move, a deep reveal, an avoided trap
+    const lifted = clone(best);
+    lifted.assessment.cat = 'best';
+    lifted.assessment.flags.onlyMove = true;
+    lifted.assessment.revealBest = 4;
+    assert.equal(isEarned(lifted, every), !forced, forced ? 'two legal moves' : 'three legal moves');
+    lifted.assessment.cat = 'brilliant';                               // facts.js never says so of a forced move; the rule holds anyway
+    assert.equal(isEarned(lifted, every), !forced);
+  }
+  // one legal move
+  const one = survey('3k5/9/5r3/3r5/9/4r4/9/9/9/4KA3 w', 40, 3);
+  assert.equal(one.table.lines.length, 1);
+  const sole = clone(assess(one, one.table.lines[0].move));
+  sole.assessment.cat = 'best';
+  assert.equal(isEarned(sole, every), false);
+});
+
+/** The position of the task notes of fix package PG (CONTRACT-NOTES 147): red, a rook and more behind, to move at ply 50. */
+const FAR_BEHIND = '4kab2/9/b8/2p1p3p/p8/6p1P/1r2n3R/3c5/4K1c2/N2A1A3 w';
+
+test('isEarned: praise needs something to praise: not a move whose line still costs two points, not a quiet best move far behind (CONTRACT-NOTES 147)', () => {
+  const { fine } = worked;
+  // every clause that earns praise at once (a found test, the only move, a deep reveal, an avoided trap), on a real best move
+  const every = { found: true, avoided: 'greedy' };
+  const lifted = (patch = {}, flags = {}) => {
+    const copy = clone(fine);
+    copy.assessment.flags.onlyMove = true;
+    copy.assessment.revealBest = 4;
+    Object.assign(copy.assessment, patch);
+    Object.assign(copy.assessment.flags, flags);
+    return copy;
+  };
+  const netOf = (net) => ({ outcome: { ...clone(fine.assessment.outcome), net } });
+  assert.equal(isEarned(lifted(), every), true);
+  // (1) the move's own main line leaves the child two points of material or more down (hand-set balance of the line)
+  assert.equal(isEarned(lifted(netOf(-1)), every), true);
+  assert.equal(isEarned(lifted(netOf(-2)), every), false);
+  assert.equal(isEarned(lifted(netOf(-8.5)), every), false);
+  // ... unless it mates, or is a sacrifice that keeps the evaluation (the flags of the assessment)
+  assert.equal(isEarned(lifted({ ...netOf(-9), cat: 'brilliant' }, { givesMate: 2 }), every), true);
+  assert.equal(isEarned(lifted({ ...netOf(-9), cat: 'brilliant' }, { sacrifice: true }), every), true);
+  // (2) the child stays 500 cp or more behind after the move and its line wins nothing
+  assert.equal(isEarned(lifted({ moveCp: -499, bestCp: -499 }), every), true);
+  assert.equal(isEarned(lifted({ moveCp: -500, bestCp: -500 }), every), false);
+  assert.equal(isEarned(lifted({ moveCp: -1900, bestCp: -1900 }), every), false);
+  assert.equal(isEarned(lifted({ moveCp: -1900, bestCp: -1900, ...netOf(-0.5) }), every), false);
+  // ... but a move that wins material back keeps its praise however far behind the child is, and so does a move that mates
+  assert.equal(isEarned(lifted({ moveCp: -1900, bestCp: -1900, ...netOf(1) }), every), true);
+  assert.equal(isEarned(lifted({ moveCp: -1900, bestCp: -1900, ...netOf(0.5) }), every), true);
+  assert.equal(isEarned(lifted({ moveCp: -1900, bestCp: -1900, cat: 'brilliant' }, { givesMate: 3 }), every), true);
+  // ... and so does a tactic (TACTIC_MOTIFS lead the effects): the free capture of the horse (real), far behind by hand and
+  // with a line that is made to win nothing
+  const lift = survey(ROOK_LIFT, 1, 4);
+  const capture = clone(assess(lift, mv('2797')));
+  assert.equal(capture.facts.capture.free, true);
+  Object.assign(capture.assessment, { moveCp: -1900, bestCp: -1900, outcome: { ...capture.assessment.outcome, net: 0 } });
+  assert.equal(isEarned(capture, { found: false, avoided: null }), true);
+  // with two points lost in its line even the tactic earns none
+  capture.assessment.outcome.net = -2;
+  assert.equal(isEarned(capture, { found: false, avoided: null }), false);
+
+  // The position of the task notes, analysed for real: 车一平三 gives the rook away and is no longer "best"; the best move
+  // of that position (a king step) is the best there is, and earns no praise: nothing is won and red stays far behind.
+  const sv = survey(FAR_BEHIND, 50, 4);
+  const gift = assess(sv, mv('6866'), { level: 2 });
+  assert.equal(gift.assessment.move.notation, '车一平三');
+  assert.ok(['mistake', 'blunder'].includes(gift.assessment.cat), gift.assessment.cat);
+  assert.ok(gift.assessment.loss >= 600, `the true loss, not the clamped one: ${gift.assessment.loss}`);
+  assert.equal(isEarned(gift, every), false);
+  const best = assess(sv, sv.table.lines[0].move, { level: 2 });
+  assert.equal(best.assessment.cat, 'best');
+  assert.ok(best.assessment.moveCp <= -500 && best.assessment.outcome.net <= 0);
+  assert.equal(isEarned(best, every), false);
+  // what the two narrators then get: the packet of the best move is told from the grim row, never from a praising one
+  const report = reportOf(sv, { evalCp: best.assessment.bestCp });
+  const turn = buildTurnBrief(report, createGameMemory(null), bookOf(sv));
+  const packet = buildTryPacket(best, tryCtx(turn, report), bookOf(sv)).packet;
+  assert.equal(packet.eval.b, 'lost');
+  const events = [{ i: 0, kind: 'opp', said: 'none' }, { i: 1, kind: 'try', n: 1, try: packet }];
+  assertValid(turn, events, 'the grim packet');
+  assert.equal(composeLocal(turn, events, 0), `【${packet.move}】是眼下最顽强的一步。`);
+  // and the rook that was given away is a held trial: a guiding question, never a comment that could praise
+  const givenAway = buildTryPacket(gift, tryCtx(turn, report), bookOf(sv)).packet;
+  assert.deepEqual([givenAway.held, givenAway.cost.cp <= -200], [true, true]);
+  assert.doesNotMatch(composeLocal(turn, [events[0], { i: 1, kind: 'try', n: 1, try: givenAway }], 0), /漂亮|走得好|好一步|此计可行/);
+});
+
+test('only: a capture that wins material at once is told as what it is, not as the only way out (CONTRACT-NOTES 147)', () => {
+  // 炮8进7 takes the horse for nothing (real). Hand-set: it is the only good move of the position, and its line goes on to
+  // give the material back (net below one point), which is when `only` used to be set: 此计可行：【炮8进7】是唯一的路。
+  const lift = survey(ROOK_LIFT, 1, 4);
+  const report = reportOf(lift);
+  const turn = buildTurnBrief(report, createGameMemory(null), bookOf(lift));
+  const capture = clone(assess(lift, mv('2797')));
+  assert.deepEqual([capture.facts.capture.exchange, capture.assessment.isBest], ['wins', true]);
+  capture.assessment.flags.onlyMove = true;
+  // ... with a second-best move that leaves black clearly worse off, as the only-move flag implies (CONTRACT-NOTES 150)
+  capture.assessment.alternatives = [{ ...capture.assessment.alternatives[0], loss: 800 }];
+  capture.assessment.outcome.net = 0;
+  const packet = buildTryPacket(capture, tryCtx(turn, report), bookOf(lift)).packet;
+  assert.ok(!('only' in packet), 'a winning capture is not the only way out');
+  assert.equal(packet.does[0].k, 'capture_free');
+  const events = [{ i: 0, kind: 'opp', said: 'none' }, { i: 1, kind: 'try', n: 1, try: packet }];
+  for (let v = 0; v < 6; v++) assert.doesNotMatch(composeLocal(turn, events, v), /唯一|解围/, `variant ${v}`);
+  assert.match(composeLocal(turn, events, 3), /^【炮8进7】这步白吃，漂亮。$/);
+  // praise is still earned by the only-move flag of the assessment: the interjection goes with the praise row
+  assert.equal(isEarned(capture, { found: false, avoided: null }), true);
+  // the same flag on a move that takes nothing, and on a capture that does not win on the square, is the only way as before
+  const { sv, turn: workedTurn, report: workedReport, fine } = worked;
+  const sole = clone(fine);
+  sole.assessment.flags.onlyMove = true;
+  assert.equal(buildTryPacket(sole, tryCtx(workedTurn, workedReport), bookOf(sv)).packet.only, true);
+  const even = clone(capture);
+  even.facts.capture.exchange = 'even';
+  assert.equal(buildTryPacket(even, tryCtx(turn, report), bookOf(lift)).packet.only, true);
+});
+
+test('only: said when the best other move is really worse off, not of the better of two winning moves (CONTRACT-NOTES 150)', () => {
+  // A real best move with the only-move flag set by hand, as the table gives it when the second line is 150 cp or more
+  // short; what the tried move and the second move are worth is set by hand as well. 只有【车四平三】能解围 was said at +1247
+  // with the second move at +1097.
+  const { sv, turn, report, fine } = worked;
+  const only = (moveCp, secondLoss) => {
+    const copy = clone(fine);
+    copy.assessment.flags.onlyMove = true;
+    Object.assign(copy.assessment, { moveCp, bestCp: moveCp });
+    copy.assessment.alternatives = secondLoss === null ? [] : [{ ...fine.assessment.alternatives[0], loss: secondLoss }];
+    return buildTryPacket(copy, tryCtx(turn, report), bookOf(sv)).packet.only === true;
+  };
+  assert.ok(fine.assessment.alternatives.length > 0);
+  assert.equal(only(1247, 150), false, 'both moves win');
+  assert.equal(only(1247, 800), true, 'the second move gives the win away: 胜势 against 占优');
+  assert.equal(only(1247, 648), true, 'one centipawn below 胜势');
+  assert.equal(only(1247, 647), false);
+  assert.equal(only(500, 300), false, 'both moves keep an advantage');
+  assert.equal(only(500, 351), true, 'the second move keeps none');
+  assert.equal(only(140, 150), true, 'a level position, and the second move falls behind');
+  assert.equal(only(-100, 160), true);
+  assert.equal(only(-700, 200), true, 'the one move that holds a bad position together');
+  assert.equal(only(-700, 1300), true, 'the one move that is not mated');
+  assert.equal(only(1900, 300), false, 'beyond the scale: both read 胜势');
+  assert.equal(only(1900, 3900), true);
+  assert.equal(only(1247, null), true, 'no table: nothing to compare with');
+  // the local narrator and the model's block follow the packet
+  const copy = clone(fine);
+  copy.assessment.flags.onlyMove = true;
+  Object.assign(copy.assessment, { moveCp: 1247, bestCp: 1247 });
+  copy.assessment.alternatives = [{ ...fine.assessment.alternatives[0], loss: 150 }];
+  const packet = buildTryPacket(copy, tryCtx(turn, report), bookOf(sv)).packet;
+  const events = [{ i: 0, kind: 'opp', said: 'none' }, { i: 1, kind: 'try', n: 1, try: packet }];
+  for (let v = 0; v < 6; v++) assert.doesNotMatch(composeLocal(turn, events, v), /唯一|解围/, `variant ${v}`);
+});
+
+test('a move that gives material away while the better move mates is a held trial (CONTRACT-NOTES 150)', () => {
+  // The position of the finding: red mates in two with 车一平六, and 马二进一 leaves the rook on the 1 file to be taken. The
+  // move was 稳健 with a loss of 100, not held, and told 局面吃紧，【马二进一】可以走。
+  const sv = survey('9/3k5/R2a5/p8/8p/9/P1P1P1P1P/2N1C2NB/3r4R/2BAKA3 w', 60, 5);
+  assert.equal(sv.table.lines[0].mate, 2);
+  const report = reportOf(sv, { evalCp: 2000, mate: 2 });
+  const turn = buildTurnBrief(report, createGameMemory(null), bookOf(sv));
+  for (const level of [1, 5, 9]) {
+    const assessed = assess(sv, mv('7758'), { level });
+    const { packet, more } = buildTryPacket(assessed, tryCtx(turn, report), bookOf(sv));
+    assert.equal(packet.move, '马二进一');
+    assert.ok(packet.cat === 'mistake' || packet.cat === 'blunder', `level ${level}: ${packet.cat}`);
+    assert.equal(packet.held, true, `level ${level}`);
+    assert.ok(packet.loss >= 800 && packet.cost.cp <= -800 && packet.cost.lose.includes('R'), J(packet.cost));
+    assert.deepEqual([packet.flaws[0].k, packet.reply, more.reply.moves[0], more.better[0].move], ['miss_mate', null, '车4平9', '车一平六']);
+    assert.equal(isEarned(assessed, { found: true, avoided: 'greedy' }), false);
+    const events = [{ i: 0, kind: 'opp', said: 'none' }, { i: 1, kind: 'try', n: 1, try: packet }];
+    assertValid(turn, events, 'the held packet');
+    // a guiding question about the rook, never a comment
+    const line = localLine(turn, events, []);
+    assert.equal(line.row, 'held.cost');
+    assert.match(line.text, /车.*？$/);
+    assert.doesNotMatch(line.text, /可以走|没有走错/);
+  }
+});
+
+test('no praise when the child is being mated: not earned, the grim row, no interjection (CONTRACT-NOTES 150)', () => {
+  // A lost ending in which every move of red is mated, so every move is 好棋. 马六退七 forks, 车六进二 pins and 车六平五
+  // takes a pawn, each one move before the mate: the three were praised (妙哉！好一步【马六退七】：捉双。).
+  const sv = survey('3nk1b2/4ac3/5a3/3Rp1r1p/2pNc4/9/4N4/B3n4/4K4/3r5 w', 70, 4);
+  assert.ok(sv.table.lines.every((l) => l.mate !== null && l.mate < 0), 'every move is mated');
+  const report = reportOf(sv, { evalCp: -2000, mate: -2 });
+  const turn = buildTurnBrief(report, createGameMemory(null), bookOf(sv));
+  const every = { found: true, avoided: 'greedy' };
+  const leads = [];
+  for (const [code, notation] of [['4362', '马六退七'], ['3313', '车六进二'], ['3334', '车六平五']]) {
+    const assessed = assess(sv, mv(code), { level: 2 });
+    const a = assessed.assessment;
+    assert.deepEqual([a.move.notation, a.cat, a.loss, a.flags.allowsMate, a.moveCp], [notation, 'best', 0, true, -2000]);
+    // every clause that earns praise at once, by hand: a found test, an avoided trap, the only move, a deep reveal
+    const lifted = clone(assessed);
+    lifted.assessment.flags.onlyMove = true;
+    lifted.assessment.revealBest = 4;
+    assert.equal(isEarned(lifted, every), false, notation);
+    assert.equal(isEarned(assessed, { found: false, avoided: null }), false, notation);
+    const { packet } = buildTryPacket(assessed, tryCtx(turn, report), bookOf(sv));
+    assert.ok(packet.eval.mate < 0 && packet.held === false, J(packet.eval));
+    leads.push(packet.does[0].k);
+    const events = [{ i: 0, kind: 'opp', said: 'none' }, { i: 1, kind: 'try', n: 1, try: packet }];
+    assertValid(turn, events, notation);
+    const line = localLine(turn, events, []);
+    assert.equal(line.row, 'try.grim', `${notation}: ${line.text}`);
+    assert.match(line.text, /最顽强|局面吃紧|难是难/);
+    for (let v = 0; v < 6; v++) assert.doesNotMatch(composeLocal(turn, events, v), /漂亮|走得好|好一步|此计可行|难受|走得稳|可行|没有毛病|没问题/, `${notation}, variant ${v}`);
+    for (const flags of [{ earned: true }, { earned: true, lord: true }, { earned: false }]) assert.equal(cueFor(turn, events[1], flags), null, notation);
+    // the trap that was avoided is not cheered either when the child is mated after the move
+    const avoided = buildTryPacket(assessed, tryCtx(turn, report, { avoided: 'greedy' }), bookOf(sv)).packet;
+    assert.equal(localLine(turn, [events[0], { i: 1, kind: 'try', n: 1, try: avoided }], []).row, 'try.grim');
+  }
+  assert.ok(leads.some((k) => TACTIC_MOTIFS.includes(k)), `a tactic leads one of the moves: ${leads}`);
+});
+
+test('a move whose line only returns to the position is a slow move in the packet: not held, no flaw, the evaluation of the position before (CONTRACT-NOTES 150)', () => {
+  // Red is far ahead; after 帅五进一 the rook checks, the king returns and so does the rook. It was 漏着 with a loss of
+  // 2600, 走后形势 均势, and told 这步没有实际作用，白让对方走一步.
+  const sv = survey('3akab2/1C2n4/1C7/p1P1p2rp/6p2/9/P3N1P2/R1N1B3R/9/3AKAB2 w', 32, 4);
+  const report = reportOf(sv, { evalCp: 1900 });
+  const turn = buildTurnBrief(report, createGameMemory(null), bookOf(sv));
+  const assessed = assess(sv, mv('9484'), { level: 2 });
+  const { packet, more } = buildTryPacket(assessed, tryCtx(turn, report), bookOf(sv));
+  assert.deepEqual([packet.move, packet.cat, packet.loss, packet.held, packet.flaws, packet.cost, packet.eval], ['帅五进一', 'ok', 172, false, [], null, { b: 'won' }]);
+  assert.deepEqual(packet.reply.moves, ['车8进5', '帅五退一', '车8退5']);
+  assert.equal(more.better[0].move, sv.table.lines[0] && assessed.assessment.best.notation);
+  const events = [{ i: 0, kind: 'opp', said: 'none' }, { i: 1, kind: 'try', n: 1, try: packet }];
+  assertValid(turn, events, 'the returning move');
+  assert.equal(localLine(turn, events, []).row, 'try.ok');
+  assert.equal(isEarned(assessed, { found: true, avoided: null }), false);
+});
+
+test('the moments of a brief are told to the book as history: a notation copied from 本局回顾 is never drawn as another move (CONTRACT-NOTES 150)', () => {
+  // After 1. 兵三进一 马8进7 2. 马二进三 车9平8 3. 车一平二 卒1进1 (the child is red). The memory holds four moments, with
+  // their notations only (the verdicts are set by hand): the child's 兵三进一 and 马二进三, the rival's 马8进7 and 车9平8.
+  // None is a move of this position; but the pawn can play 兵三进一 again from where it stands now, and the text 马8进7
+  // fits the child's own horse on the mirrored file (马八进七).
+  /** The positions of a game, one per ply, and the board after its last move. */
+  const play = (codes) => {
+    let board = START;
+    const fens = [];
+    for (const [i, code] of codes.entries()) {
+      fens.push(boardToFen(board, i % 2 === 0 ? 'red' : 'black'));
+      board = applyMove(board, mv(code));
+    }
+    return { fens, board };
+  };
+  const game = play(['6656', '0726', '9776', '0807', '9897', '3040']);
+  const sv = survey(boardToFen(game.board, 'red'), 6, 3);
+  const memory = createGameMemory(null);
+  memory.noteMine(0, { move: '兵三进一', cat: 'mistake', waited: true, self: true, packet: null, more: null });
+  memory.noteOpp(1, { move: '马8进7', does: [{ k: 'develop' }], punishes: true, quality: 'normal' });
+  memory.noteMine(2, { move: '马二进三', cat: 'mistake', waited: true, self: true, packet: null, more: null });
+  memory.noteOpp(3, { move: '车9平8', does: [{ k: 'develop' }], punishes: true, quality: 'normal' });
+  memory.noteMine(4, { move: '车一平二', cat: 'best', waited: true, self: true, packet: null, more: null });
+  const lastOpp = rivalTurn(game.fens[5], mv('3040'), 5);
+  const prev = { move: describeMove(fenToBoard(game.fens[4]).board, mv('9897')), cat: 'best', waited: true, self: true, packet: null, more: null, assessed: null };
+  const book = bookOf(sv);
+  const turn = buildTurnBrief(reportOf(sv, { lastOpp, prev }), memory, book);
+  /** The move each moment's notation was when it was played. */
+  const playedAs = { 兵三进一: '6656', 马8进7: '0726', 马二进三: '9776', 车9平8: '0807' };
+  assert.deepEqual(turn.moments.map((m) => [m.n, m.s, m.move]), [[1, 'me', '兵三进一'], [1, 'opp', '马8进7'], [2, 'me', '马二进三'], [2, 'opp', '车9平8']]);
+  assert.equal(bookOf(sv).resolveLoose('兵三进一').code, '5646', 'a book that was told nothing draws the pawn\'s next step');
+  for (const moment of turn.moments) {
+    assert.equal(book.lookup(moment.move), null, `${moment.move} is older than the previous move: not registered`);
+    assert.equal(book.resolveLoose(moment.move), null, `${moment.move} is history`);
+    const segments = parseCoachTextQuietly(`第${moment.n}回合${moment.s === 'me' ? '我方' : '对方'}【${moment.move}】。`, book);
+    assert.deepEqual(segments.filter((s) => s.type === 'move').map((s) => s.link.code).filter((code) => code !== playedAs[moment.move]), [], moment.move);
+    assert.deepEqual(segments.map((s) => s.type), ['text'], `${moment.move} shows as plain text`);
+  }
+  // what the brief registered still resolves, as the moves they were: the previous move and the rival's last move
+  assert.deepEqual([book.lookup('车一平二').code, book.lookup('卒1进1').code], ['9897', '3040']);
+  // ... and so does every move of the child that is no moment
+  assert.deepEqual([book.resolveLoose('兵七进一').code, book.resolveLoose('兵七进一').playable], ['6252', true]);
+  assert.equal(book.resolveLoose('马八进七').code, '9172');
+
+  // A moment that is the child's previous move is registered, and resolves to that move.
+  const recent = createGameMemory(null);
+  recent.noteMine(4, { move: '车一平二', cat: 'mistake', waited: true, self: true, packet: null, more: null });
+  const recentBook = bookOf(sv);
+  const again = buildTurnBrief(reportOf(sv, { lastOpp, prev }), recent, recentBook);
+  assert.deepEqual(again.moments.map((m) => m.move), ['车一平二']);
+  const link = parseCoachTextQuietly('第3回合我方【车一平二】。', recentBook).find((s) => s.type === 'move').link;
+  assert.deepEqual([link.code, link.playable, link.src], ['9897', false, 'mine']);
+
+  // A previous move that could not be registered (the report carries no move for it, as after a reload) is history too.
+  // After 1. 兵三进一 卒1进1 the pawn can play 兵三进一 again.
+  const short = play(['6656', '3040']);
+  const early = survey(boardToFen(short.board, 'red'), 2, 3);
+  const pushed = createGameMemory(null);
+  pushed.noteMine(0, { move: '兵三进一', cat: 'good', waited: true, self: true, packet: null, more: null });
+  const answer = rivalTurn(short.fens[1], mv('3040'), 1);
+  const bare = bookOf(early);
+  const reloaded = buildTurnBrief(reportOf(early, { lastOpp: answer, prev: null }), pushed, bare);
+  assert.deepEqual([reloaded.mine.move, reloaded.moments], ['兵三进一', []]);
+  assert.equal(bare.lookup('兵三进一'), null);
+  assert.equal(bare.resolveLoose('兵三进一'), null);
+  // ... while with the move in the report it is registered as the move it was
+  const known = bookOf(early);
+  buildTurnBrief(reportOf(early, { lastOpp: answer, prev: { ...prev, move: describeMove(START, mv('6656')), cat: 'good' } }), pushed, known);
+  assert.deepEqual([known.lookup('兵三进一').code, known.lookup('兵三进一').playable], ['6656', false]);
+  // a stand-in for a book that has no past() is served as before
+  const plain = { base: bare.base, add: () => [], lookup: () => null, resolveLoose: () => null, size: () => 0 };
+  assert.doesNotThrow(() => buildTurnBrief(reportOf(sv, { lastOpp, prev }), memory, plain));
+});
+
+/** parseCoachText without the console warning of an ungrounded notation. */
+function parseCoachTextQuietly(text, book) {
+  const original = console.warn;
+  console.warn = () => {};
+  try { return parseCoachText(text, book); } finally { console.warn = original; }
+}
 
 test('worthSpeaking: a good move with an empty does is not worth a sentence', () => {
   const base = { move: '马二进三', cat: 'good', loss: 20, held: false, eval: { b: 'even' }, does: [], flaws: [], cost: null, reply: null, toward: null, chance: 'none' };
@@ -1375,6 +1901,96 @@ test('buildOverPacket: lesson -> habit takeaway and goal; pattern -> idea; stren
   assert.deepEqual(empty.packet, { result: 'draw', reason: 'move_limit', moves: 0, stats: { good: 0, taken: 0, captures: 0, brilliant: 0 },
     takeaway: null, proud: null, goal: null, kept: null, rank: null });
   assertValid(worked.turn, [{ i: 0, kind: 'over', over: empty.packet }], 'empty over');
+});
+
+test('buildOverPacket: the proud move was judged good or better and was not forced; a game without one has none (CONTRACT-NOTES 138)', () => {
+  const sv = worked.sv;
+  const bestMove = worked.fine.assessment.move;                       // 马二进三
+  const kingStep = describeMove(fenToBoard('3k5/9/9/9/9/9/9/9/4r4/3K5 w').board, mv('9383'));
+  const other = describeMove(START, mv('7774'));                      // 炮二平五
+  const best = { move: bestMove, loss: 0, cat: 'best' };
+  const forcedBest = { move: kingStep, loss: 0, cat: 'best' };
+  const proudOf = (samples, takeaways) => {
+    const out = buildOverPacket(overInput(samples, takeaways, { result: 'loss', reason: 'checkmate' }), bookOf(sv));
+    if (out.packet.proud) assertValid(worked.turn, [{ i: 0, kind: 'over', over: out.packet }], 'over');
+    return out.packet.proud ? [out.packet.proud.move, out.packet.proud.n, out.proudPly] : [null, null, out.proudPly];
+  };
+  const highlight = (ply, move, more = {}) => [{ kind: 'highlight', ply, move, self: true, ...more }];
+
+  // the case of the lost game: the brain's highlight is the king's forced step out of check, one move before the mate
+  const lost = [sample(0), sample(2), sample(26, { first: forcedBest, final: forcedBest, legalCount: 1 })];
+  assert.deepEqual(proudOf(lost, highlight(26, kingStep)), [null, null, null], 'only steady moves besides: no proud move');
+  // ... and with two legal moves (in check, the horse given away): the same
+  assert.deepEqual(proudOf(lost.map((x) => (x.ply === 26 ? { ...x, legalCount: 2 } : x)), highlight(26, kingStep)), [null, null, null]);
+  // three legal moves are a choice: the highlight stands
+  assert.deepEqual(proudOf(lost.map((x) => (x.ply === 26 ? { ...x, legalCount: 3 } : x)), highlight(26, kingStep)), [kingStep.notation, 14, 26]);
+  // a count of 0 means "not known" (confirmed before any table): not taken for forced
+  assert.deepEqual(proudOf(lost.map((x) => (x.ply === 26 ? { ...x, legalCount: 0 } : x)), highlight(26, kingStep)), [kingStep.notation, 14, 26]);
+
+  // the same rule then picks among the moves that may be proud: a 好棋 the child found, the latest of those confirmed at once
+  const withBest = [sample(10, { first: best, final: best }), sample(12, { first: { ...best, move: other }, final: { ...best, move: other }, tries: 2 }),
+    sample(26, { first: forcedBest, final: forcedBest, legalCount: 2 })];
+  assert.deepEqual(proudOf(withBest, highlight(26, kingStep)), ['马二进三', 6, 10]);
+  // a found test comes before a 好棋, a 妙手 before a 好棋; moves the child found before moves found with a pouch
+  const found = sample(4, { first: best, final: best, test: { tier: 1, kind: 'win', found: true } });
+  assert.deepEqual(proudOf([...withBest, found], highlight(26, kingStep)), ['马二进三', 3, 4]);
+  const brilliant = sample(6, { first: { ...best, cat: 'brilliant', move: other }, final: { ...best, cat: 'brilliant', move: other }, self: false });
+  assert.deepEqual(proudOf([...withBest, brilliant], highlight(26, kingStep)), ['马二进三', 6, 10], 'self first');
+  assert.deepEqual(proudOf([sample(0, { self: false }), brilliant, lost[2]], highlight(26, kingStep)), ['炮二平五', 4, 6], 'then all');
+  // a forced move with a found test (the tactical test of a position in check) is not proud either
+  const forcedFind = sample(26, { first: forcedBest, final: forcedBest, legalCount: 2, test: { tier: 2, kind: 'save', found: true } });
+  assert.deepEqual(proudOf([sample(0), forcedFind], highlight(26, kingStep)), [null, null, null]);
+
+  // a move made when the mate could no longer be avoided (every move is "the best" there) is not proud, whatever choice there was
+  const doomed = sample(40, { first: forcedBest, final: forcedBest, legalCount: 8, bestCp: -2000, captured: 'pawn' });
+  assert.deepEqual(proudOf([sample(0), doomed], highlight(40, kingStep)), [null, null, null]);
+  assert.deepEqual(proudOf([sample(10, { first: best, final: best }), doomed], highlight(40, kingStep)), ['马二进三', 6, 10]);
+  assert.deepEqual(proudOf([sample(0), { ...doomed, bestCp: -1900 }], highlight(40, kingStep)), [kingStep.notation, 21, 40], 'a lost position that is not a forced mate');
+
+  // The best there was in a position that stays bad is 最顽强, not 最漂亮 (CONTRACT-NOTES 148): the child was 500 cp or more
+  // behind and the move won nothing. The case of the scripted game: 第22回合的仕六进五最漂亮, a rook down, an advisor falling next.
+  const behind = sample(42, { first: forcedBest, final: forcedBest, legalCount: 8, bestCp: -900 });
+  assert.deepEqual(proudOf([sample(0), behind], highlight(42, kingStep)), [null, null, null]);
+  assert.deepEqual(proudOf([sample(10, { first: best, final: best }), behind], highlight(42, kingStep)), ['马二进三', 6, 10], 'an earlier 好棋 takes its place');
+  assert.deepEqual(proudOf([sample(0), { ...behind, bestCp: -500 }], highlight(42, kingStep)), [null, null, null]);
+  assert.deepEqual(proudOf([sample(0), { ...behind, bestCp: -499 }], highlight(42, kingStep)), [kingStep.notation, 22, 42], 'behind, but not that far');
+  // ... a move that won something there keeps its place: a capture, a found test that wins, a named pattern, a 妙手
+  for (const more of [{ captured: 'cannon' }, { test: { tier: 1, kind: 'win', found: true } }, { patterns: ['fork_two'] },
+    { first: { ...forcedBest, cat: 'brilliant' }, final: { ...forcedBest, cat: 'brilliant' } }]) {
+    assert.deepEqual(proudOf([sample(0), { ...behind, ...more }], highlight(42, kingStep)), [kingStep.notation, 22, 42], JSON.stringify(more));
+  }
+  assert.deepEqual(proudOf([sample(0), { ...behind, test: { tier: 1, kind: 'win', found: false } }], highlight(42, kingStep)), [null, null, null], 'a test that was not found');
+  // ... a found test that only saves is the most stubborn move there, not the prettiest (CONTRACT-NOTES 152); not far behind it counts
+  assert.deepEqual(proudOf([sample(0), { ...behind, test: { tier: 1, kind: 'save', found: true } }], highlight(42, kingStep)), [null, null, null]);
+  assert.deepEqual(proudOf([sample(0), { ...behind, bestCp: -500, test: { tier: 1, kind: 'save', found: true } }], highlight(42, kingStep)), [null, null, null]);
+  assert.deepEqual(proudOf([sample(0), { ...behind, bestCp: -499, test: { tier: 1, kind: 'save', found: true } }], highlight(42, kingStep)), [kingStep.notation, 22, 42]);
+
+  // judged good or better: a highlight chosen for the pattern it played, on a move that was only 缓着, is not proud
+  const slow = sample(8, { first: { ...best, cat: 'ok' }, final: { ...best, cat: 'ok' }, patterns: ['fork_two'] });
+  assert.deepEqual(proudOf([sample(0), slow], highlight(8, bestMove, { pattern: 'fork_two' })), [null, null, null]);
+  // ... the first sound move that played a pattern is
+  const sound = sample(10, { patterns: ['central_cannon'] });
+  assert.deepEqual(proudOf([sample(0), slow, sound], highlight(8, bestMove, { pattern: 'fork_two' })), [sound.final.move.notation, 6, 10]);
+  // a highlight that is good and not forced is left alone, whatever else there is
+  assert.deepEqual(proudOf([sample(10, { first: best, final: best }), found, brilliant], highlight(10, bestMove)), ['马二进三', 6, 10]);
+
+  // A move of the first five rounds is a book move: it is the proud move only when it won something (CONTRACT-NOTES 148).
+  // The case of the scripted game: 第1回合的炮二退一最漂亮 on the card of a game of twenty rounds.
+  const early = (ply, more = {}) => sample(ply, { first: best, final: best, ...more });
+  assert.deepEqual(proudOf([early(0), sample(2)], highlight(0, bestMove)), [null, null, null]);
+  assert.deepEqual(proudOf([early(8), sample(10)], highlight(8, bestMove)), [null, null, null], 'round 5');
+  assert.deepEqual(proudOf([early(9), sample(11)], highlight(9, bestMove)), [null, null, null], 'round 5 of a child who plays black');
+  assert.deepEqual(proudOf([early(10), sample(12)], highlight(10, bestMove)), ['马二进三', 6, 10], 'round 6');
+  assert.deepEqual(proudOf([early(0), early(14)], highlight(0, bestMove)), ['马二进三', 8, 14], 'a later 好棋 takes its place');
+  for (const more of [{ captured: 'pawn' }, { test: { tier: 1, kind: 'win', found: true } }, { patterns: ['central_cannon'] }, { bestCp: 2000 }]) {
+    assert.deepEqual(proudOf([early(4, more), sample(6)], highlight(4, bestMove)), ['马二进三', 3, 4], JSON.stringify(more));
+  }
+
+  // the packet of the lost game: no proud move; the forced step still counts among the good moves
+  const none = buildOverPacket(overInput(lost, highlight(26, kingStep), { result: 'loss', reason: 'checkmate' }), bookOf(sv)).packet;
+  assert.equal(none.proud, null);
+  assert.equal(none.stats.good, 3);
+  assertValid(worked.turn, [{ i: 0, kind: 'over', over: none }], 'over without proud');
 });
 
 // ---------------------------------------------------------------------------------------------------------------------

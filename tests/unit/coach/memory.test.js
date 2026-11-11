@@ -96,6 +96,43 @@ test('a moment is recorded for a slip, an earned or chance-taking move, a missed
   assertWireValid(memory.snapshot());
 });
 
+test('a forced move is never a great moment (CONTRACT-NOTES 138); its slip and its packet are remembered as before', () => {
+  const noted = (cat, pk, forced) => {
+    const memory = createGameMemory(null);
+    memory.noteMine(6, { ...info('马二进三', cat, pk), ...(forced === undefined ? {} : { forced }) });
+    return memory;
+  };
+  const tagOf = (cat, pk, forced) => noted(cat, pk, forced).snapshot().moments[0]?.tag ?? null;
+  const fork = [{ k: 'fork', by: P('me', 'H', 4), on: P('opp', 'R', 3), on2: P('opp', 'C', 7) }];
+  // every way to a 'great' moment, with and without the flag
+  const greats = [
+    ['best', packet({ does: fork })],
+    ['brilliant', packet({ cat: 'brilliant', does: fork })],
+    ['best', packet({ only: true })],
+    ['best', packet({ avoided: 'greedy' })],
+    ['good', packet({ cat: 'good', chance: 'taken' })],
+  ];
+  for (const [cat, pk] of greats) {
+    assert.equal(tagOf(cat, clone(pk)), 'great', `${cat}: not forced (no flag)`);
+    assert.equal(tagOf(cat, clone(pk), false), 'great', `${cat}: forced false`);
+    assert.equal(tagOf(cat, clone(pk), true), null, `${cat}: forced`);
+  }
+  // only the literal true counts
+  assert.equal(tagOf('best', packet({ only: true }), 'yes'), 'great');
+  // a forced slip is still a slip, a forced miss still a miss
+  assert.equal(tagOf('blunder', clone(HELD), true), 'slip');
+  assert.equal(tagOf('ok', packet({ cat: 'ok', chance: 'missed', loss: 200, toward: { area: 'left', theme: 'fork' } }), true), 'missed');
+  // the move itself is remembered with its packet, and the flag is not part of what is stored or reported
+  const memory = noted('best', packet({ only: true }), true);
+  assert.equal(memory.snapshot().mine.move, '马二进三');
+  assert.equal(memory.snapshot().mine.try.only, true);
+  assert.ok(!JSON.stringify(memory.toJSON()).includes('forced'));
+  assertWireValid(memory.snapshot());
+  // noting the move again without the flag (the late verdict of a pending sample carries no packet) leaves no moment either
+  memory.noteMine(6, info('马二进三', 'best', null));
+  assert.deepEqual(memory.snapshot().moments, []);
+});
+
 test('mine is the previous move of the child with nothing withheld', () => {
   const memory = createGameMemory(null);
   memory.noteMine(0, info('炮二平五', 'best', packet({ move: '炮二平五' })));

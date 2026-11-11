@@ -1,10 +1,13 @@
 // Unit tests of src/core/teacher.js (contract sections 4.7 and 14.1): the skill model, the teaching opponent, tension and
-// takeaways. The opponent is tested on hand-built root tables with a stub `verify`; no search runs here and nothing
-// depends on the clock (Date.now is stubbed where finishGame reads it). Expected values are the numbers of section 4.7
-// or are computed here independently of the implementation.
+// takeaways. The opponent is tested on hand-built root tables with a stub `verify`; nothing depends on the clock
+// (Date.now is stubbed where finishGame reads it). One test searches real opening positions, bounded by depth and
+// nodes: the first moves of the rival (CONTRACT-NOTES 143 c). Expected values are the numbers of section 4.7 and of the
+// owner's rulings, or are computed here independently of the implementation.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MATE, mateIn, revealDepth, revealTier, scoreToCp } from '../../../src/core/search.js';
+import { applyMove, boardToFen, createInitialBoard, getLegalMoves } from '../../../src/core/engine.js';
+import { describeMove } from '../../../src/core/notation.js';
+import { MATE, createSearcher, mateIn, revealDepth, revealTier, scoreToCp } from '../../../src/core/search.js';
 import {
   createSkillProfile, migrateSkillProfile, createGameSkill, reviveGameSkill, recordChildMove, recordOpponentMove, rewindGameSkill,
   effectiveLevel, revealFor, findRate, levelParams, teachingContext, chooseTeachingMove, tension, gameTakeaways, finishGame,
@@ -16,7 +19,7 @@ import { mulberry32 } from '../../helpers/playout.js';
 // builders
 // ---------------------------------------------------------------------------------------------------------------
 
-/** Only an input of the opponent's random generator here: no test replays a move on it. */
+/** The start position, the rival (black) to move. The codes of most tables below are no moves of it: there it is only an input of the opponent's random generator. */
 const FEN = 'rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR b';
 const ref = code => ({ from: { row: Number(code[0]), col: Number(code[1]) }, to: { row: Number(code[2]), col: Number(code[3]) } });
 const codeOf = move => `${move.from.row}${move.from.col}${move.to.row}${move.to.col}`;
@@ -2385,6 +2388,608 @@ test('ease below level 5: without a gift the rival plays the move of a shallower
   const mate = tableOf([line('5051', [100, 100, MATE - 3, MATE - 3, MATE - 3]), flat('5052', 1900), flat('5053', 1890)], { fen: RAIL_FEN });
   c = await chooseTeachingMove(mate, ctxOf({ level: 1, spared: 2 }), noVerify);
   assert.deepEqual([c.kind, codeOf(c.move)], ['honest', '5051']);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// the wrap-up of a long game (CONTRACT-NOTES 143 b)
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * The numbers of the wrap-up as the simulation left them: from his move 60 on he cracks when the child is level
+ * (within half a pawn: -50 cp or better) or ahead; from his move 80 on he presses when he is 250 cp or more ahead.
+ * While the child stands below +250 (clear) the crack is a slip: no mate, 500 cp at most, no rook for less than a rook
+ * (CONTRACT-NOTES 151).
+ */
+const WRAP = Object.freeze({ move: 60, ahead: -50, clear: 250, pressMove: 80, behind: 250 });
+
+/** The child stands at `e` cp after the rival's best move ('0001'). With `crack`, '5051' looks as good at depth 1 and lets the child mate at once. */
+const aheadTable = (e, crack = true) => tableOf([
+  flat('0001', -e), flat('1011', -e - 100),
+  ...(crack ? [line('5051', [-e, childMates(1), childMates(1), childMates(1), childMates(1)], { pv: ['5051', '6665'] })] : []),
+]);
+/** A line that looks as good as the best move at depth 1 and gives the child `gain` cp from depth 2 on. */
+const winLine = (e, gain) => line('2021', [-e, -e - gain, -e - gain, -e - gain, -e - gain], { pv: ['2021', '6665'] });
+/** The child stands at `e` cp; '2021' gives `gain` cp, visible at depth 2. */
+const winTable = (e, gain) => tableOf([flat('0001', -e), flat('1011', -e - 100), winLine(e, gain)]);
+/** The child stands at `e` cp; '4041' lets the child mate in two, visible at depth 4. */
+const mate2Table = e => tableOf([
+  flat('0001', -e), flat('1011', -e - 100),
+  line('4041', [-e, -e, -e, childMates(2), childMates(2)], { pv: ['4041', '6665', '0010', '6564'] }),
+]);
+/**
+ * The rival is `b` cp ahead. '5051' is his best move from depth 3 on (the honest move of every level), '5053' looks best
+ * at depth 1 (what a level-1 rival plays while he eases off without a gift); nothing stands out by 150, so nothing is overlooked.
+ */
+const behindTable = b => tableOf([
+  line('5051', [b - 200, b - 200, b, b, b]), flat('5052', b - 50), line('5053', [b - 20, b - 100, b - 100, b - 100, b - 100]), flat('5054', b - 110),
+], { fen: RAIL_FEN });
+
+test('wrap-up (a): from his move 60 on a child who is level (-50 cp or better) or ahead meets a rival who cracks, whatever aheadRun says; -51 cp and move 59 are as before', async () => {
+  const { move, ahead, clear } = WRAP;
+  assert.deepEqual([ahead, clear], [-50, 250]);
+  // Level 1: T' = 300, the band begins at +180, so the rival eases off against a child who is level. No gift is due (his last move was one).
+  const low = over => ctxOf({ level: 1, reveal: 2, lastKind: 'chance', ...over });
+  let c = await chooseTeachingMove(aheadTable(ahead), low({ moveNo: move - 1 }), noVerify);
+  assert.deepEqual([c.mode, c.kind, codeOf(c.move)], ['ease', 'honest', '0001']);
+  // the mode is 'finish'; from a level game he does not walk into the mate, though (the slip, in the next test)
+  c = await chooseTeachingMove(aheadTable(ahead), low({ moveNo: move }), noVerify);
+  assert.deepEqual([c.mode, c.kind, codeOf(c.move), c.chance], ['finish', 'honest', '0001', null]);
+  c = await chooseTeachingMove(aheadTable(clear), low({ moveNo: move }), noVerify);
+  assert.deepEqual([c.mode, c.kind, codeOf(c.move)], ['finish', 'finisher', '5051']);
+  assert.deepEqual(c.chance, { gain: 2000 - clear, points: (2000 - clear) / 100, tier: 1, revealDepth: 2, line: [ref('6665')] });
+  assert.deepEqual([c.evalBest, c.evalAfter], [clear, 2000]);
+  c = await chooseTeachingMove(aheadTable(ahead - 1), low({ moveNo: move }), noVerify);
+  assert.deepEqual([c.mode, c.kind, codeOf(c.move), c.evalBest], ['ease', 'honest', '0001', ahead - 1]);
+  // on every later move, and aheadRun plays no part
+  for (const moveNo of [move + 1, 80, 119]) {
+    for (const aheadRun of [0, 1, 5]) {
+      assert.equal((await chooseTeachingMove(aheadTable(ahead), low({ moveNo, aheadRun }), noVerify)).mode, 'finish', `move ${moveNo}, aheadRun ${aheadRun}`);
+      assert.equal((await chooseTeachingMove(aheadTable(ahead - 1), low({ moveNo, aheadRun }), noVerify)).mode, 'ease', `move ${moveNo}, aheadRun ${aheadRun}`);
+    }
+  }
+  // the finish of section 4.7.6 is what it was before move 60: +600 on two decisions running
+  assert.equal((await chooseTeachingMove(aheadTable(600), low({ moveNo: move - 1, aheadRun: 1 }), noVerify)).mode, 'finish');
+  assert.equal((await chooseTeachingMove(aheadTable(600), low({ moveNo: move - 1, aheadRun: 0 }), noVerify)).mode, 'press');
+  assert.equal((await chooseTeachingMove(aheadTable(600), low({ moveNo: move, aheadRun: 0 }), noVerify)).mode, 'finish');
+
+  // whatever the band says: a level-5 rival spars with a child who is level (the band reaches from -60 to +140) and presses one at +250
+  for (const [e, before] of [[ahead, 'spar'], [clear, 'press']]) {
+    c = await chooseTeachingMove(winTable(e, 500), ctxOf({ moveNo: move - 1, lastKind: 'chance' }), noVerify);
+    assert.deepEqual([c.mode, c.kind, codeOf(c.move)], [before, 'honest', '0001'], `child at ${e}`);
+    c = await chooseTeachingMove(winTable(e, 500), ctxOf({ moveNo: move, lastKind: 'chance' }), noVerify);
+    assert.deepEqual([c.mode, c.kind, codeOf(c.move)], ['finish', 'finisher', '2021'], `child at ${e}`);
+  }
+
+  // the finisher step is used as it is once the child is clearly ahead: a mate inside the child's horizon first, else a
+  // win of 300 to 900 cp inside it, else his honest move
+  c = await chooseTeachingMove(winTable(clear, 900), low({ moveNo: move }), noVerify);
+  assert.deepEqual([c.mode, c.kind, codeOf(c.move), c.chance.gain], ['finish', 'finisher', '2021', 900]);
+  c = await chooseTeachingMove(winTable(clear, 901), low({ moveNo: move }), noVerify);
+  assert.deepEqual([c.mode, c.kind, codeOf(c.move)], ['finish', 'honest', '0001']);
+  c = await chooseTeachingMove(aheadTable(clear, false), low({ moveNo: move }), noVerify);
+  assert.deepEqual([c.mode, c.kind, codeOf(c.move), c.loss, c.chance], ['finish', 'honest', '0001', 0, null]);
+  // a mate beyond the child's horizon is no finish: reveal 2 sees a mate in one, not in two
+  c = await chooseTeachingMove(mate2Table(clear), low({ moveNo: move }), noVerify);
+  assert.deepEqual([c.mode, c.kind, codeOf(c.move)], ['finish', 'honest', '0001']);
+  c = await chooseTeachingMove(mate2Table(clear), low({ moveNo: move, reveal: 4 }), noVerify);
+  assert.deepEqual([c.mode, c.kind, codeOf(c.move)], ['finish', 'finisher', '4041']);
+});
+
+test('wrap-up (a), the slip: while the child is not clearly ahead (below +250) the crack is no mate, 300 to 500 cp, and no rook for less than a rook; from +250 on it is the finisher as written (CONTRACT-NOTES 151)', async () => {
+  const { move, ahead, clear } = WRAP;
+  const low = over => ctxOf({ level: 1, reveal: 4, lastKind: 'chance', ...over });
+  const pick = async (table, over = {}) => {
+    const c = await chooseTeachingMove(table, low({ moveNo: move, ...over }), noVerify);
+    return [c.mode, c.kind, codeOf(c.move), c.chance === null ? null : c.chance.gain];
+  };
+  for (const e of [ahead, 0, 100, clear - 1]) {
+    // no mate: neither in one nor in two, though both lie inside the child's horizon
+    assert.deepEqual(await pick(aheadTable(e)), ['finish', 'honest', '0001', null], `mate in one, child at ${e}`);
+    assert.deepEqual(await pick(mate2Table(e)), ['finish', 'honest', '0001', null], `mate in two, child at ${e}`);
+    // the size: 300 to 500 cp
+    assert.deepEqual(await pick(winTable(e, 299)), ['finish', 'honest', '0001', null], `299 cp, child at ${e}`);
+    assert.deepEqual(await pick(winTable(e, 300)), ['finish', 'finisher', '2021', 300], `300 cp, child at ${e}`);
+    assert.deepEqual(await pick(winTable(e, 500)), ['finish', 'finisher', '2021', 500], `500 cp, child at ${e}`);
+    assert.deepEqual(await pick(winTable(e, 501)), ['finish', 'honest', '0001', null], `501 cp, child at ${e}`);
+    assert.deepEqual(await pick(winTable(e, 900)), ['finish', 'honest', '0001', null], `900 cp, child at ${e}`);
+    // with a mate and a slip on the table he slips
+    assert.deepEqual(await pick(tableOf([...aheadTable(e).lines, winLine(e, 400)])), ['finish', 'finisher', '2021', 400], `mate and slip, child at ${e}`);
+  }
+  // from +250 on: the mate first, and a win of up to 900 cp
+  assert.deepEqual(await pick(aheadTable(clear)), ['finish', 'finisher', '5051', 2000 - clear]);
+  assert.deepEqual(await pick(mate2Table(clear)), ['finish', 'finisher', '4041', 2000 - clear]);
+  assert.deepEqual(await pick(winTable(clear, 501)), ['finish', 'finisher', '2021', 501]);
+  assert.deepEqual(await pick(tableOf([...aheadTable(clear).lines, winLine(clear, 400)])), ['finish', 'finisher', '5051', 2000 - clear]);
+  // before move 60 the finish of section 4.7.6 never meets a child below +600, so nothing changes there
+  assert.deepEqual(await pick(aheadTable(600), { moveNo: move - 1, aheadRun: 1 }), ['finish', 'finisher', '5051', 1400]);
+
+  // no rook for less than a rook (rail j): in the line the child's rook takes his rook on 51 and he takes nothing
+  const rook = (e, pv) => tableOf([flat('5055', -e), flat('5052', -e - 100), line('5051', [-e, -e - 400, -e - 400, -e - 400, -e - 400], { pv })], { fen: RAIL_FEN });
+  assert.deepEqual(await pick(rook(ahead, ['5051', '9151'])), ['finish', 'honest', '5055', null]);
+  assert.deepEqual(await pick(rook(clear - 1, ['5051', '9151'])), ['finish', 'honest', '5055', null]);
+  assert.deepEqual(await pick(rook(ahead, ['5051', '9181'])), ['finish', 'finisher', '5051', 400], 'the same loss without the rook is a slip');
+  assert.deepEqual(await pick(rook(clear, ['5051', '9151'])), ['finish', 'finisher', '5051', 400], 'clearly ahead, the finisher is as written');
+});
+
+test('wrap-up (a), the slip on a line the table did not search to its depth: the verified line decides (no mate, 500 cp at most), and the candidates are the five largest provisional losses among those of 500 cp or less', async () => {
+  const { move, ahead, clear } = WRAP;
+  const low = over => ctxOf({ level: 1, reveal: 4, lastKind: 'chance', ...over });
+  const pick = async (table, verify) => {
+    const c = await chooseTeachingMove(table, low({ moveNo: move }), verify);
+    return [c.mode, c.kind, codeOf(c.move), c.chance === null ? null : c.chance.gain, c.loss];
+  };
+  /** The child stands at `e`; '2021' was exact up to depth 3 only and loses `shallow` cp there: its provisional loss. */
+  const open = (e, shallow, opts = {}) => tableOf([
+    flat('0001', -e), flat('1011', -e - 100), line('2021', [-e, -e - shallow, -e - shallow], { pv: ['2021', '6665'], ...opts }),
+  ]);
+  /** What the verification of '2021' finds at depth 5: a loss of `gain` cp, or a mate in two for the child. */
+  const lossOf = (e, shallow, gain) => line('2021', [-e, -e - shallow, -e - shallow, -e - gain, -e - gain], { pv: ['2021', '6665'] });
+  const mateOf = (e, shallow) => line('2021', [-e, -e - shallow, -e - shallow, childMates(2), childMates(2)], { pv: ['2021', '6665', '0010', '6564'] });
+  const honest = ['finish', 'honest', '0001', null, 0];
+
+  for (const e of [ahead, 0, clear - 1]) {
+    // a provisional loss of 200 cp: the line is verified, and what the verification finds decides
+    let v = verifier({ 2021: lossOf(e, 200, 400) });
+    assert.deepEqual(await pick(open(e, 200), v.verify), ['finish', 'finisher', '2021', 400, 400], `verified 400, child at ${e}`);
+    assert.deepEqual(v.calls, ['2021']);
+    assert.deepEqual(await pick(open(e, 200), verifier({ 2021: lossOf(e, 200, 500) }).verify), ['finish', 'finisher', '2021', 500, 500], `verified 500, child at ${e}`);
+    assert.deepEqual(await pick(open(e, 200), verifier({ 2021: lossOf(e, 200, 501) }).verify), honest, `verified 501, child at ${e}`);
+    assert.deepEqual(await pick(open(e, 200), verifier({ 2021: lossOf(e, 200, 900) }).verify), honest, `verified 900, child at ${e}`);
+    // the mate that only the verification sees: he does not walk into it, though it lies inside the child's horizon
+    v = verifier({ 2021: mateOf(e, 200) });
+    assert.deepEqual(await pick(open(e, 200), v.verify), honest, `verified mate in two, child at ${e}`);
+    assert.deepEqual(v.calls, ['2021']);
+    // the verification budget is used up: no slip
+    assert.deepEqual(await pick(open(e, 200), async () => null), honest, `no budget, child at ${e}`);
+
+    // the candidates: a provisional loss of 500 cp is verified, one of 501 cp is not looked at (by its shallow score or by its bound)
+    assert.deepEqual(await pick(open(e, 500), verifier({ 2021: lossOf(e, 500, 400) }).verify), ['finish', 'finisher', '2021', 400, 400], `provisional 500, child at ${e}`);
+    assert.deepEqual(await pick(open(e, 501), noVerify), honest, `provisional 501, child at ${e}`);
+    assert.deepEqual(await pick(open(e, 200, { upper: -e - 500 }), verifier({ 2021: lossOf(e, 200, 500) }).verify), ['finish', 'finisher', '2021', 500, 500], `bound 500, child at ${e}`);
+    assert.deepEqual(await pick(open(e, 200, { upper: -e - 501 }), noVerify), honest, `bound 501, child at ${e}`);
+    assert.deepEqual(await pick(open(e, 200, { upper: childMates(1) }), noVerify), honest, `a proven mate, child at ${e}`);
+  }
+  // from +250 on the same lines are the finisher as written: the verified mate first, a verified win of up to 900 cp
+  assert.deepEqual(await pick(open(clear, 200), verifier({ 2021: mateOf(clear, 200) }).verify), ['finish', 'finisher', '2021', 2000 - clear, 2000 - clear]);
+  assert.deepEqual(await pick(open(clear, 200), verifier({ 2021: lossOf(clear, 200, 501) }).verify), ['finish', 'finisher', '2021', 501, 501]);
+  assert.deepEqual(await pick(open(clear, 501), verifier({ 2021: lossOf(clear, 501, 400) }).verify), ['finish', 'finisher', '2021', 400, 400]);
+
+  // the five candidates of a slip: five mates and two larger wins on the table do not crowd out the one move that is a slip
+  const crowd = e => tableOf([
+    flat('0001', -e), flat('1011', -e - 100),
+    ...['5051', '5052', '5053', '5054', '5055'].map(code => line(code, [-e, childMates(1), childMates(1), childMates(1), childMates(1)], { pv: [code, '6665'] })),
+    line('3031', [-e, -e - 900, -e - 900, -e - 900, -e - 900], { pv: ['3031', '6665'] }),
+    line('3032', [-e, -e - 600, -e - 600, -e - 600, -e - 600], { pv: ['3032', '6665'] }),
+    winLine(e, 400),
+  ]);
+  for (const e of [ahead, 0, clear - 1]) assert.deepEqual(await pick(crowd(e), noVerify), ['finish', 'finisher', '2021', 400, 400], `child at ${e}`);
+  assert.deepEqual(await pick(crowd(clear), noVerify), ['finish', 'finisher', '5051', 2000 - clear, 2000 - clear], 'clearly ahead, the five largest of all: a mate');
+});
+
+test('wrap-up (a), the manners of a gift: no crack as the answer to a blunder, two honest moves after a chance of his, a slip until his last chance is five moves old, and of two slips the one that does not show at a glance (CONTRACT-NOTES 151)', async () => {
+  const { move, ahead, clear } = WRAP;
+  const low = over => ctxOf({ level: 1, reveal: 4, ...over });
+  const pick = async (table, over = {}) => {
+    const c = await chooseTeachingMove(table, low({ moveNo: move, ...over }), noVerify);
+    return [c.mode, c.kind, codeOf(c.move), c.chance === null ? null : c.chance.gain];
+  };
+  const honest = ['finish', 'honest', '0001', null];
+  const slip400 = ['finish', 'finisher', '2021', 400];
+  /** A mate in one for the child and a slip of 400 cp on the same table. */
+  const both = e => tableOf([...aheadTable(e).lines, winLine(e, 400)]);
+
+  // 1. Never as the answer to a blunder of the child: one rival move of waiting below level 5, two from level 5 up (GIFT_WAIT).
+  for (const e of [ahead, 0, clear, 599]) {
+    assert.deepEqual(await pick(winTable(e, 400), { sinceBlunder: 0 }), honest, `level 1, the answer to a blunder, child at ${e}`);
+    assert.deepEqual(await pick(winTable(e, 400), { sinceBlunder: 1 }), slip400, `level 1, one move later, child at ${e}`);
+    assert.deepEqual(await pick(winTable(e, 400), { level: 4.9, sinceBlunder: 1 }), slip400, `level 4.9, child at ${e}`);
+    assert.deepEqual(await pick(winTable(e, 400), { level: 5, sinceBlunder: 1 }), honest, `level 5, one move later, child at ${e}`);
+    assert.deepEqual(await pick(winTable(e, 400), { level: 5, sinceBlunder: 2 }), slip400, `level 5, two moves later, child at ${e}`);
+  }
+
+  // 2. After a chance of his (a slip is one) he plays two honest moves before the wrap-up cracks again.
+  for (const e of [ahead, 0, clear, 599]) {
+    assert.deepEqual(await pick(winTable(e, 400), { sinceChance: 0 }), honest, `the move after his chance, child at ${e}`);
+    assert.deepEqual(await pick(winTable(e, 400), { sinceChance: 1 }), honest, `the second move after it, child at ${e}`);
+    assert.deepEqual(await pick(winTable(e, 400), { sinceChance: 2 }), slip400, `the third move after it, child at ${e}`);
+  }
+
+  // 3. Until his last chance is five moves old the crack stays a slip, however far ahead the child is: no mate, 500 cp at most.
+  for (const e of [clear, 400, 599]) {
+    for (const sinceChance of [2, 3, 4]) {
+      assert.deepEqual(await pick(aheadTable(e), { sinceChance }), honest, `mate in one, child at ${e}, his chance ${sinceChance} moves old`);
+      assert.deepEqual(await pick(winTable(e, 501), { sinceChance }), honest, `501 cp, child at ${e}, his chance ${sinceChance} moves old`);
+      assert.deepEqual(await pick(both(e), { sinceChance }), slip400, `mate and slip, child at ${e}, his chance ${sinceChance} moves old`);
+    }
+    assert.deepEqual(await pick(aheadTable(e), { sinceChance: 5 }), ['finish', 'finisher', '5051', 2000 - e], `mate in one, child at ${e}, his chance five moves old`);
+    assert.deepEqual(await pick(winTable(e, 501), { sinceChance: 5 }), ['finish', 'finisher', '2021', 501], `501 cp, child at ${e}, his chance five moves old`);
+    assert.deepEqual(await pick(both(e), { sinceChance: 5 }), ['finish', 'finisher', '5051', 2000 - e], `mate and slip, child at ${e}, his chance five moves old`);
+  }
+  // a level game stays a slip whatever the age of his last chance
+  assert.deepEqual(await pick(both(clear - 1), { sinceChance: 99 }), slip400);
+
+  // 4. Section 4.7.6 is not held up: at +600 on the second decision running the finisher is as written, whatever he gave
+  //    a move ago and whatever the child has just blundered; on the first such decision the wrap-up's manners hold.
+  assert.deepEqual(await pick(aheadTable(600), { aheadRun: 1, sinceChance: 0, sinceBlunder: 0 }), ['finish', 'finisher', '5051', 1400]);
+  assert.deepEqual(await pick(aheadTable(600), { aheadRun: 0, sinceChance: 0 }), honest);
+  assert.deepEqual(await pick(aheadTable(600), { aheadRun: 0, sinceBlunder: 0 }), honest);
+  assert.deepEqual(await pick(aheadTable(600), { aheadRun: 0, sinceChance: 4 }), honest);
+  assert.deepEqual(await pick(aheadTable(600), { aheadRun: 0, sinceChance: 5 }), ['finish', 'finisher', '5051', 1400]);
+  // ... and before move 60 nothing of this applies
+  assert.deepEqual(await pick(aheadTable(600), { moveNo: move - 1, aheadRun: 1, sinceChance: 0, sinceBlunder: 0 }), ['finish', 'finisher', '5051', 1400]);
+
+  // 5. Of two slips, the one that does not show at a glance. '3031' leaves a piece hanging: it loses 450 cp from depth 1 on
+  //    and only the naive glance of a low level likes it. '2021' loses 400 cp from depth 2 on.
+  const two = e => tableOf([
+    flat('0001', -e), flat('1011', -e - 100),
+    line('3031', Array(5).fill(-e - 450), { naive: -e, pv: ['3031', '6665'] }),
+    winLine(e, 400),
+  ]);
+  const hanging = e => tableOf([flat('0001', -e), flat('1011', -e - 100), line('3031', Array(5).fill(-e - 450), { naive: -e, pv: ['3031', '6665'] })]);
+  for (const e of [ahead, 0, clear - 1]) {
+    assert.deepEqual(await pick(two(e)), slip400, `child at ${e}`);
+    assert.deepEqual(await pick(hanging(e)), ['finish', 'finisher', '3031', 450], `alone it is a slip all the same, child at ${e}`);
+  }
+  // of two slips that both need a second look, the larger
+  assert.deepEqual(await pick(tableOf([...winTable(0, 400).lines, line('3031', [0, -350, -350, -350, -350], { pv: ['3031', '6665'] })])), slip400);
+  assert.deepEqual(await pick(tableOf([...winTable(0, 350).lines, line('3031', [0, 0, -400, -400, -400], { pv: ['3031', '6665'] })])), ['finish', 'finisher', '3031', 400]);
+  // a slip that shows at depth 3 is not preferred to a larger one that shows at depth 2: only the glance counts
+  assert.deepEqual(await pick(tableOf([...winTable(0, 400).lines, line('3031', [0, 0, -350, -350, -350], { pv: ['3031', '6665'] })])), slip400);
+  // clearly ahead and settled, the finisher as written takes the largest win
+  assert.deepEqual(await pick(two(clear)), ['finish', 'finisher', '3031', 450]);
+  // of two slips that both show at a glance, the larger
+  const glance = (code, gain) => line(code, Array(5).fill(-gain), { naive: 0, pv: [code, '6665'] });
+  assert.deepEqual(await pick(tableOf([flat('0001', 0), flat('1011', -100), glance('3031', 350), glance('3032', 450)])), ['finish', 'finisher', '3032', 450]);
+
+  // 6. Section 4.7.6 needs the stand of this decision too: a child who was at +600 a decision ago (aheadRun 1) and is
+  //    below it now meets the wrap-up's manners, not the finisher as written.
+  assert.deepEqual(await pick(aheadTable(599), { aheadRun: 1, sinceChance: 0 }), honest);
+  assert.deepEqual(await pick(aheadTable(599), { aheadRun: 1, sinceBlunder: 0 }), honest);
+  assert.deepEqual(await pick(aheadTable(599), { aheadRun: 1, sinceChance: 4 }), honest);
+  assert.deepEqual(await pick(aheadTable(599), { aheadRun: 1, sinceChance: 5 }), ['finish', 'finisher', '5051', 1401]);
+
+  // 7. The move he holds with is the honest move of his level, not the table's best: '1011' is the best move of a
+  //    search of depth 3 (level 1), '0001' the best at the table's depth.
+  const deep = e => tableOf([line('0001', [-e - 80, -e - 80, -e - 80, -e, -e]), line('1011', [-e - 30, -e - 30, -e - 30, -e - 30, -e - 60]), winLine(e, 400)]);
+  for (const e of [0, clear, 599]) {
+    assert.deepEqual(await pick(deep(e), { sinceChance: 0 }), ['finish', 'honest', '1011', null], `after his chance, child at ${e}`);
+    assert.deepEqual(await pick(deep(e), { sinceBlunder: 0 }), ['finish', 'honest', '1011', null], `the answer to a blunder, child at ${e}`);
+    assert.deepEqual(await pick(deep(e)), slip400, `nothing to wait for, child at ${e}`);
+  }
+
+  // 8. The wait counts from a blunder only: a move judged a mistake leaves sinceBlunder as it is.
+  const blundered = recordOpponentMove(recordChildMove(profileOf(), createGameSkill(1), sample(0, { first: { loss: 400, cat: 'blunder' } })), 1, choiceOf());
+  assert.equal(blundered.sinceBlunder, 1);
+  assert.equal(recordChildMove(profileOf(), blundered, sample(2, { first: { loss: 200, cat: 'mistake' } })).sinceBlunder, 1);
+});
+
+test('wrap-up (b): from his move 80 on a rival who is 250 or more ahead plays properly and wins his won game: no ease move, no overlook, no gift; 249 cp and move 79 are as before', async () => {
+  const { move, pressMove, behind } = WRAP;
+  // 1. No ease move. A level-1 rival who may not give (his last move was a gift) plays the move of a depth-1 search while
+  //    he eases off, and his honest move, the best of depth 3, once he wraps the game up.
+  const low = over => ctxOf({ level: 1, lastKind: 'chance', ...over });
+  for (const moveNo of [move - 1, move, pressMove - 1]) {
+    const c = await chooseTeachingMove(behindTable(behind), low({ moveNo }), noVerify);
+    assert.deepEqual([c.mode, c.kind, codeOf(c.move), c.evalBest], ['ease', 'honest', '5053', -behind], `move ${moveNo}: he is ahead and still eases off`);
+  }
+  let c = await chooseTeachingMove(behindTable(behind), low({ moveNo: pressMove }), noVerify);
+  assert.deepEqual([c.mode, c.kind, codeOf(c.move), c.loss, c.chance, c.overlooked], ['press', 'honest', '5051', 0, null, null]);
+  c = await chooseTeachingMove(behindTable(behind - 1), low({ moveNo: pressMove }), noVerify);
+  assert.deepEqual([c.mode, c.kind, codeOf(c.move), c.evalBest], ['ease', 'honest', '5053', 1 - behind]);
+  for (const moveNo of [pressMove + 1, 100, 119]) {
+    assert.equal((await chooseTeachingMove(behindTable(behind), low({ moveNo }), noVerify)).mode, 'press', `move ${moveNo}`);
+    assert.equal((await chooseTeachingMove(behindTable(behind - 1), low({ moveNo }), noVerify)).mode, 'ease', `move ${moveNo}`);
+  }
+  // at every level: he plays the honest move of his level (from level 5 up his best move here, as ever in press)
+  for (const level of [1, 2.5, 4, 5, 7, 9]) {
+    c = await chooseTeachingMove(behindTable(behind), ctxOf({ level, moveNo: pressMove }), noVerify);
+    assert.deepEqual([c.mode, c.kind, codeOf(c.move)], ['press', 'honest', '5051'], `level ${level}`);
+  }
+
+  // 2. No overlook. One move wins 200 cp more than every other from depth 3 on: before move 80 the easing rival misses
+  //    it on most seeds; from move 80 on he never does.
+  const slip = tableOf([line('5051', [0, 0, 300, 300, 300]), flat('5052', 100), flat('5053', 90), flat('5054', -100)], { fen: RAIL_FEN });
+  let missed = 0;
+  for (let seed = 1; seed <= 100; seed++) {
+    const before = await chooseTeachingMove(slip, ctxOf({ level: 1, moveNo: pressMove - 1, seed }), echo(slip));
+    assert.equal(before.mode, 'ease');
+    if (before.kind === 'overlook') missed++;
+    const after = await chooseTeachingMove(slip, ctxOf({ level: 1, moveNo: pressMove, seed }), noVerify);
+    assert.deepEqual([after.mode, after.kind, codeOf(after.move), after.overlooked, after.chance], ['press', 'honest', '5051', null, null], `seed ${seed}`);
+  }
+  assert.ok(missed >= 80, `before move 80 the punishing move was missed on ${missed} of 100 seeds`);
+
+  // 3. No gift. The child of the ease table (300 behind a level-5 rival) is given a chance on move 79 and meets the best move from move 80 on.
+  const table = easeTable();
+  c = await chooseTeachingMove(table, ctxOf({ moveNo: pressMove - 1 }), verifier({ 9091: hiddenBlunder }).verify);
+  assert.deepEqual([c.mode, c.kind, codeOf(c.move)], ['ease', 'chance', '7071']);
+  for (let seed = 1; seed <= 40; seed++) {
+    c = await chooseTeachingMove(table, ctxOf({ moveNo: pressMove, seed }), noVerify);
+    assert.deepEqual([c.mode, c.kind, codeOf(c.move), c.loss, c.chance, c.overlooked], ['press', 'honest', '0001', 0, null, null]);
+  }
+
+  // 4. What is true of press stays true: a forced mate is played, and far ahead he does not take his last move back (rail l).
+  const mate = tableOf([line('5051', [100, 100, MATE - 3, MATE - 3, MATE - 3]), flat('5052', 1900), flat('5053', 1890)], { fen: RAIL_FEN });
+  c = await chooseTeachingMove(mate, ctxOf({ level: 1, moveNo: pressMove }), noVerify);
+  assert.deepEqual([c.mode, c.kind, codeOf(c.move)], ['press', 'honest', '5051']);
+  const back = tableOf([flat('5040', 700), flat('5051', 690), flat('5052', 400)], { fen: RAIL_FEN });
+  c = await chooseTeachingMove(back, ctxOf({ level: 5, moveNo: pressMove, lastRival: LAST_4050 }), noVerify);
+  assert.deepEqual([c.mode, codeOf(c.move)], ['press', '5051']);
+});
+
+test('wrap-up (c): in between nothing changes: a child who is behind by more than 50 and less than 250 cp gets the choice of move 59 on every later move, seed by seed, and one who is behind by 250 or more gets it up to move 79', async () => {
+  const { move, pressMove, behind } = WRAP;
+  /** The table with every score moved by `by` cp. */
+  const moved = (table, by) => tableOf(table.lines.map(l => ({
+    ...l, score: l.score + by, byDepth: l.byDepth.map(s => s + by), naive: l.naive + by, upper: l.upper === null ? null : l.upper + by,
+  })), { fen: table.fen });
+  const between = [aheadTable(WRAP.ahead - 1), aheadTable(-100), behindTable(behind - 1), behindTable(100), moved(quietTable(), 60), oneWinner(51), oneWinner(200), takingTable(RAIL_FEN, 240)];
+  const behindMore = [behindTable(behind), behindTable(600), oneWinner(300), easeTable()];
+  const kinds = new Set(), modes = new Set();
+  let compared = 0;
+  for (const [tables, later, inBetween] of [[between, [move, pressMove - 1, pressMove, 119], true], [behindMore, [move, pressMove - 1], false]]) {
+    for (const table of tables) {
+      const eBest = -scoreToCp(table.lines[0].score);
+      assert.ok(inBetween ? eBest > -behind && eBest < WRAP.ahead : eBest <= -behind, `the premise: the child stands at ${eBest}`);
+      for (const level of [1, 3, 5, 7]) {
+        for (let seed = 1; seed <= 20; seed++) {
+          const at = moveNo => chooseTeachingMove(table, ctxOf({ level, moveNo, seed }), echo(table));
+          const before = await at(move - 1);
+          for (const moveNo of later) assert.deepEqual(await at(moveNo), before, `level ${level}, seed ${seed}, child at ${eBest}, move ${moveNo}`);
+          kinds.add(before.kind);
+          modes.add(before.mode);
+          compared++;
+        }
+      }
+    }
+  }
+  // the comparison covered both modes a child who is behind can meet (no band presses a child who is behind), and soft moves as well as honest ones
+  assert.deepEqual([...modes].sort(), ['ease', 'spar']);
+  assert.ok(kinds.has('honest') && kinds.has('overlook') && (kinds.has('chance') || kinds.has('concession')), `kinds ${[...kinds].join(' ')} in ${compared} choices`);
+});
+
+test('wrap-up: a move of mode press or finish made from his move 60 on leaves the drift and both runs as they are', async () => {
+  // his move 60 is ply 119 when he is black and ply 118 when he is red; move 59 is ply 117 or 116
+  const at = (run, ply, mode) => {
+    const game = recordOpponentMove({ ...createGameSkill(3), ...run }, ply, choiceOf({ mode }));
+    return [game.easeRun, game.pressRun, game.drift];
+  };
+  for (const mode of ['press', 'finish']) {
+    for (const [last, first] of [[117, 119], [116, 118]]) {
+      // the tenth press move running lifts the level by half a step before move 60 ...
+      assert.deepEqual(at({ pressRun: 9 }, last, mode), [0, 10, 0.5], `${mode}, ply ${last}`);
+      // ... and from move 60 on it is not counted: no step, and the run stays where it was
+      assert.deepEqual(at({ pressRun: 9 }, first, mode), [0, 9, 0], `${mode}, ply ${first}`);
+      assert.deepEqual(at({ pressRun: 9 }, 239, mode), [0, 9, 0]);
+      // a run of ease moves is not ended by it either, and a drift that is there stays
+      assert.deepEqual(at({ easeRun: 5, drift: -1 }, last, mode), [0, 1, -1]);
+      assert.deepEqual(at({ easeRun: 5, drift: -1 }, first, mode), [5, 0, -1]);
+    }
+  }
+  // ease and spar moves count on move 60 and later as they always did
+  assert.deepEqual(at({ easeRun: 5 }, 119, 'ease'), [6, 0, -0.5]);
+  assert.deepEqual(at({ easeRun: 5, pressRun: 0 }, 119, 'spar'), [0, 0, 0]);
+  assert.deepEqual(at({ pressRun: 9 }, 119, 'spar'), [0, 0, 0]);
+  // a whole game: 59 press moves lift the drift to its ceiling; sixty more from move 60 on change nothing
+  let game = createGameSkill(1);
+  for (let no = 1; no <= 59; no++) game = recordOpponentMove(game, 2 * no - 1, choiceOf({ mode: 'press' }));
+  assert.deepEqual([game.pressRun, game.drift], [59, 2]);
+  let slow = createGameSkill(1);
+  for (let no = 1; no <= 59; no++) slow = recordOpponentMove(slow, 2 * no - 1, choiceOf({ mode: no % 2 === 0 ? 'spar' : 'press' }));
+  assert.deepEqual([slow.pressRun, slow.drift], [1, 0]);
+  for (let no = 60; no <= 119; no++) slow = recordOpponentMove(slow, 2 * no - 1, choiceOf({ mode: no % 2 === 0 ? 'finish' : 'press' }));
+  assert.deepEqual([slow.easeRun, slow.pressRun, slow.drift], [0, 1, 0], 'sixty wrap-up moves: nothing moved');
+
+  // everything else a rival move records is recorded for a wrap-up move too, and the mark carries the unchanged drift
+  const before = { ...createGameSkill(3), pressRun: 9, drift: 0.5, aheadRun: 2, sinceChance: 4, sinceBlunder: 7, missRun: 1 };
+  const after = recordOpponentMove(before, 119, choiceOf({ mode: 'finish', kind: 'finisher', chance: aChance, evalBest: 700, move: ref('4050') }));
+  assert.deepEqual([after.pressRun, after.drift, after.aheadRun, after.sinceChance, after.sinceBlunder, after.lastKind, after.chances, after.missRun, after.lastRival],
+    [9, 0.5, 3, 0, 8, 'finisher', 1, 0, LAST_4050]);
+  assert.deepEqual([after.marks.at(-1).ply, after.marks.at(-1).pressRun, after.marks.at(-1).drift], [119, 9, 0.5]);
+
+  // through the selection: the move he plays when the game is wrapped up does not move the drift, the same move on move 59 does
+  const profile = profileOf({ level: 5, games: 5 });
+  for (const [table, mode, moveNo] of [[behindTable(WRAP.behind), 'press', WRAP.pressMove], [aheadTable(WRAP.ahead), 'finish', WRAP.move]]) {
+    const ready = { ...createGameSkill(9), pressRun: 9 };
+    const ctx = teachingContext(profile, ready, { moveNo, lastChildMove: null });
+    const choice = await chooseTeachingMove(table, ctx, noVerify);
+    assert.equal(choice.mode, mode);
+    const wrapped = recordOpponentMove(ready, 2 * moveNo - 1, choice);
+    assert.deepEqual([wrapped.pressRun, wrapped.drift, effectiveLevel(profile, wrapped)], [9, 0, 5], mode);
+    assert.equal(recordOpponentMove(ready, 117, choice).drift, 0.5, 'the same choice on move 59 is counted');
+  }
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// first moves that look like an opening (CONTRACT-NOTES 143 c)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** The start position with the rival to move, as black and as red. */
+const START_BLACK = 'rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR b';
+const START_RED = 'rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w';
+/** A table of the given moves, all of them equally good, for the side that is to move in `fen`. */
+const openingTable = (fen, codes) => ({ ...tableOf(codes.map(code => flat(code, 0)), { fen }), turn: fen.endsWith(' w') ? 'red' : 'black' });
+/** The moves picked on the first move of a later game over the seeds 1..count, as a map code -> times. */
+async function openingPicks(table, count = 120, over = {}) {
+  const counts = {};
+  for (let seed = 1; seed <= count; seed++) {
+    const c = await chooseTeachingMove(table, ctxOf({ moveNo: 1, seed, ...over }), noVerify);
+    assert.equal(c.kind, 'variety');
+    counts[codeOf(c.move)] = (counts[codeOf(c.move)] ?? 0) + 1;
+  }
+  return counts;
+}
+
+test('opening variety: a developing move is preferred when the pool holds one; the pool as before when it holds none or nothing else', async () => {
+  // Every move below is a legal first move. 卒1进1 ('3040' for black, '6858' for red) is no developing move: next to it a
+  // developing move is always picked, and any other move shares the picks with it.
+  const cases = [
+    // [black's move, the same move of red (the board turned by 180 degrees), developing?, what it is]
+    ['0122', '9776', true, '马2进3: a horse from the back rank to the third rank'],
+    ['0120', '9778', true, '马2进1: to the edge'],
+    ['0726', '9172', true, '马8进7'],
+    ['0728', '9170', true, '马8进9'],
+    ['2124', '7774', true, '炮2平5: a cannon sideways along its rank'],
+    ['2725', '7173', true, '炮8平6'],
+    ['2120', '7778', true, '炮2平1'],
+    ['2131', '7767', false, '炮2进1: a cannon forward'],
+    ['2161', '7737', false, '炮2进4'],
+    ['2111', '7787', false, '炮2退1'],
+    ['2191', '7707', true, '炮2进7: it takes the horse (any capture)'],
+    ['0224', '9674', true, '象3进5: an elephant from the back rank'],
+    ['0624', '9274', true, '象7进5'],
+    ['0220', '9678', true, '象3进1'],
+    ['0314', '9584', true, '士4进5: an advisor from the back rank'],
+    ['0514', '9384', true, '士6进5'],
+    ['3242', '6656', true, '卒3进1: a pawn of the third file'],
+    ['3646', '6252', true, '卒7进1: a pawn of the seventh file'],
+    ['3444', '6454', false, '卒5进1: the centre pawn'],
+    ['3848', '6050', false, '卒9进1: an edge pawn'],
+    ['0010', '9888', true, '车1进1: a rook one step forward from its corner'],
+    ['0818', '9080', true, '车9进1'],
+    ['0020', '9878', false, '车1进2: two steps forward'],
+    ['0414', '9484', false, '将5进1: the king'],
+  ];
+  for (const [black, red, developing, what] of cases) {
+    // the two codes name the same move on a board turned around
+    assert.equal(red, [9 - Number(black[0]), 8 - Number(black[1]), 9 - Number(black[2]), 8 - Number(black[3])].join(''), what);
+    for (const [fen, code, plain] of [[START_BLACK, black, '3040'], [START_RED, red, '6858']]) {
+      const picks = await openingPicks(openingTable(fen, [plain, code]));
+      if (developing) assert.deepEqual(picks, { [code]: 120 }, `${what} (${code}) is a developing move`);
+      else assert.ok(picks[code] >= 30 && picks[plain] >= 30 && picks[code] + picks[plain] === 120, `${what} (${code}) is none: ${JSON.stringify(picks)}`);
+    }
+  }
+  // rook moves along the back rank and along the second rank, on a board where they exist: black's left rook stands on
+  // the second rank (after 车1进1), the right horse is out and the right rook's way along the back rank is free
+  const ROOKS = '1nbakab1r/r8/1c4nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR b';
+  for (const [code, developing, what] of [
+    ['0807', true, '车9平8: from the corner along the back rank'], ['1013', true, '车1平4: along the second rank'], ['1020', false, '车1进1 from the second rank: forward'],
+    ['0818', true, '车9进1: one step forward from the corner'], ['0828', false, '车9进2'], ['1000', false, '车1退1: back to the corner'],
+  ]) {
+    const picks = await openingPicks(openingTable(ROOKS, ['3040', code]));
+    if (developing) assert.deepEqual(picks, { [code]: 120 }, what);
+    else assert.ok(picks[code] >= 30 && picks['3040'] >= 30, `${what}: ${JSON.stringify(picks)}`);
+  }
+  // a cannon that has left its rank does not develop by moving sideways there; a horse that is out already does not by moving on
+  const OUT = 'r1bakabnr/9/2n4c1/p1p1p1p1p/1c7/9/P1P1P1P1P/1C5C1/9/RNBAKABNR b';      // 炮2进2 and 马2进3 have been played
+  for (const code of ['4142', '2243', '2234']) {
+    const picks = await openingPicks(openingTable(OUT, ['3040', code]));
+    assert.ok(picks[code] >= 30 && picks['3040'] >= 30, `${code}: ${JSON.stringify(picks)}`);
+  }
+  // pieces that are out do not develop a second time: a horse that comes back to the third rank (马4退3), an elephant
+  // and an advisor that have left the back rank (象5进3, 士5退4), a rook moving along the third rank (车1平2 up there)
+  const BACK = 'r3kabnr/4a4/1c2b2c1/p1p1p1p1p/3n5/9/P1P1P1P1P/1C5C1/9/RNBAKABNR b';      // 马2进3, 马3进4, 象3进5 and 士4进5 have been played
+  const THIRD = '1nbakab1r/9/r3c1nc1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR b';       // the left rook stands on the third rank, 炮2平5 and 马8进7 are played
+  for (const [fen, code] of [[BACK, '4322'], [BACK, '2442'], [BACK, '1403'], [THIRD, '2021']]) {
+    const picks = await openingPicks(openingTable(fen, ['3040', code]));
+    assert.ok(picks[code] >= 30 && picks['3040'] >= 30, `${code}: ${JSON.stringify(picks)}`);
+  }
+
+  // a pool with several developing moves: uniform among them, the others are never picked
+  const mixed = openingTable(START_BLACK, ['0122', '2131', '2724', '3040', '0624', '2161']);
+  const picks = await openingPicks(mixed, 600);
+  assert.deepEqual(Object.keys(picks).sort(), ['0122', '0624', '2724']);
+  for (const code of ['0122', '0624', '2724']) withinThreeSigma(picks[code] / 600, 1 / 3, 600, `share of ${code}`);
+  // a pool without a developing move: uniform among all of it, as before
+  const none = await openingPicks(openingTable(START_BLACK, ['3040', '2131', '3848']), 600);
+  for (const code of ['3040', '2131', '3848']) withinThreeSigma(none[code] / 600, 1 / 3, 600, `share of ${code}`);
+  // "Otherwise the pool as today": with developing moves only, or with none, the pick is the very move it was before the
+  // rule. The generator of section 4.7.5 (mulberry32 of seed ^ fnv1a(fen)) is asked once and indexes the near-best moves
+  // in table order; it is written out here.
+  const fnv1a = text => {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+    return h >>> 0;
+  };
+  for (const codes of [['0122', '2724', '0624', '3242'], ['3040', '2131', '3848', '2161', '0414']]) {
+    const table = openingTable(START_BLACK, codes);
+    for (let seed = 1; seed <= 80; seed++) {
+      const expected = codes[Math.floor(mulberry32((seed ^ fnv1a(START_BLACK)) >>> 0)() * codes.length)];
+      assert.equal(codeOf((await chooseTeachingMove(table, ctxOf({ moveNo: 2, seed }), noVerify)).move), expected, `seed ${seed}`);
+    }
+  }
+  // the margin and the move numbers of step 1 are what they were: a developing move 26 cp below the best is not in the pool,
+  // and on move 5 (move 3 of a first game) there is no variety
+  const far = { ...tableOf([flat('3040', 0), flat('2131', -10), flat('0122', -26)], { fen: START_BLACK }) };
+  assert.deepEqual(Object.keys(await openingPicks(far)).sort(), ['2131', '3040']);
+  const near = { ...tableOf([flat('3040', 0), flat('2131', -10), flat('0122', -25)], { fen: START_BLACK }) };
+  assert.deepEqual(await openingPicks(near), { '0122': 120 });
+  assert.deepEqual(await openingPicks(near, 40, { moveNo: 4 }), { '0122': 40 });
+  assert.deepEqual(await openingPicks(near, 40, { moveNo: 2, firstGame: true }), { '0122': 40 });
+  assert.equal((await chooseTeachingMove(near, ctxOf({ moveNo: 5 }), noVerify)).kind === 'variety', false);
+  assert.equal((await chooseTeachingMove(near, ctxOf({ moveNo: 3, firstGame: true }), noVerify)).kind === 'variety', false);
+  // a table whose position cannot be read has no developing move: the pool as it is
+  const blind = await openingPicks({ ...mixed, fen: 'not a position' }, 300);
+  assert.equal(Object.keys(blind).length, 6);
+});
+
+/** A developing move told from its notation and from where the piece stands, for either side (the rule of the owner, written out on the move's text). */
+function isDevelopingByText(info, side) {
+  const back = side === 'black' ? 0 : 9, step = side === 'black' ? 1 : -1;
+  const n = info.notation;
+  if (info.captured !== null) return true;
+  const row = info.from.row;
+  if (/^马[28二八]进[1379一三七九]$/u.test(n)) return row === back;
+  if (/^炮.平.$/u.test(n)) return row === back + 2 * step;
+  if (/^[象相士仕].进.$/u.test(n)) return row === back;
+  if (/^[卒兵][37三七]进[1一]$/u.test(n)) return true;
+  if (/^车.平.$/u.test(n)) return row === back || row === back + step;
+  if (/^车[19一九]进[1一]$/u.test(n)) return row === back;
+  return false;
+}
+
+test('opening variety on real positions: after 炮二平五, 马二进三, 兵三进一 and 相三进五 his first moves are developing moves whenever the pool holds one, and the same for the same seed', { timeout: 60000 }, async t => {
+  const start = createInitialBoard();
+  const firsts = [['炮二平五', '7774'], ['马二进三', '9776'], ['兵三进一', '6656'], ['相三进五', '9674']];
+  const report = [];
+  let mixedPools = 0;
+  /** Checks the picks on one real table: the rival to move in `board`, his move number `moveNo`. */
+  const check = async (board, side, moveNo, what) => {
+    const fen = boardToFen(board, side);
+    // the table of his turn below level 5: depth 5, every move exact to depth 3, the best six exact (bounded: it ends by its depth)
+    const table = createSearcher().analyzeSync({ fen, history: [], allDepth: 3, multiPV: 6, maxDepth: 5, maxNodes: 3_000_000, timeMs: 3_600_000 });
+    assert.equal(table.depth, 5, `${what}: the search reached its depth`);
+    const best = scoreToCp(table.lines[0].score);
+    const pool = table.lines.filter(l => l.depth === table.depth && best - scoreToCp(l.score) <= 25).map(l => describeMove(board, l.move));
+    const developing = pool.filter(info => isDevelopingByText(info, side));
+    if (developing.length > 0 && developing.length < pool.length) mixedPools++;
+    const picked = new Set();
+    for (let seed = 1; seed <= 150; seed++) {
+      const ctx = ctxOf({ level: 2, moveNo, seed });
+      const c = await chooseTeachingMove(table, ctx, noVerify);
+      assert.equal(c.kind, 'variety');
+      const info = describeMove(board, c.move);
+      assert.ok(pool.some(m => m.notation === info.notation), `${what}: ${info.notation} is one of the near-best moves`);
+      if (developing.length > 0) assert.ok(isDevelopingByText(info, side), `${what}, seed ${seed}: ${info.notation} is no developing move, the pool has ${developing.map(m => m.notation).join(' ')}`);
+      assert.deepEqual(await chooseTeachingMove(table, { ...ctx }, noVerify), c, `${what}, seed ${seed}: the same seed and position give the same pick`);
+      picked.add(info.notation);
+    }
+    // every developing move of the pool gets its turn (the pick is uniform among them)
+    if (developing.length > 0) assert.deepEqual([...picked].sort(), developing.map(m => m.notation).sort(), what);
+    report.push(`${what}: pool ${pool.map(m => m.notation).join(' ')} -> picked ${[...picked].join(' ')}`);
+    return table;
+  };
+  for (const [name, code] of firsts) {
+    const move = getLegalMoves(start, 'red').find(m => codeOf(m) === code);
+    assert.equal(describeMove(start, move).notation, name);
+    let board = applyMove(start, move);
+    // his first move, and his second after the child's 马八进七 (a move that is there after each of the four)
+    const table = await check(board, 'black', 1, `after ${name}`);
+    const reply = table.lines.find(l => {
+      const info = describeMove(board, l.move);
+      return info.captured === null && isDevelopingByText(info, 'black') && scoreToCp(table.lines[0].score) - scoreToCp(l.score) <= 25 && l.depth === table.depth;
+    });
+    assert.ok(reply, `after ${name} the pool holds a developing move`);
+    board = applyMove(board, getLegalMoves(board, 'black').find(m => codeOf(m) === codeOf(reply.move)));
+    const second = getLegalMoves(board, 'red').find(m => codeOf(m) === '9172');
+    assert.ok(second, '马八进七 is there');
+    assert.equal(describeMove(board, second).notation, '马八进七');
+    await check(applyMove(board, second), 'black', 2, `after ${name}, his reply and 马八进七`);
+  }
+  // the rival with the red pieces, on the very first move of a game: the same rule seen from the other side of the board
+  await check(start, 'red', 1, 'the start position, he is red');
+  assert.ok(mixedPools >= 3, `in ${mixedPools} of these positions the pool holds developing moves and others`);
+  t.diagnostic(report.join('; '));
 });
 
 // ---------------------------------------------------------------------------------------------------------------

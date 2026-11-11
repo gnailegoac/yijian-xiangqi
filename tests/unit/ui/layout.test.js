@@ -808,8 +808,14 @@ test('index.html: the head of 4.30.4, the shell of 12.1, and the manifest', () =
   // The eight stylesheets in the order of §4.30.4, tokens first.
   const sheets = [...html.matchAll(/<link rel="stylesheet" href="\.\/styles\/([a-z]+)\.css">/g)].map(match => match[1]);
   assert.deepEqual(sheets, ['tokens', 'themes', 'layout', 'board', 'fx', 'buddy', 'chat', 'hud']);
-  // One script, no inline script or style (the build rewrites `="./src/` and `="./styles/` only).
-  assert.equal((html.match(/<script/g) ?? []).length, 1);
+  // Two scripts and no style element (the build rewrites `="./src/` and `="./styles/` only): the module, and right after
+  // it one small inline classic script that says so when the game does not come up (CONTRACT-NOTES 150). It loads nothing.
+  assert.equal((html.match(/<script/g) ?? []).length, 2);
+  const inline = html.match(/<script type="module" src="\.\/src\/app\.js"><\/script>\n<script>\n([\s\S]*?)<\/script>\n<\/head>/);
+  assert.ok(inline, 'the inline script follows the module script and closes the head');
+  assert.ok(inline[1].includes('棋局没能打开，点这里重新加载'));
+  assert.ok(inline[1].includes('window.__bootFailed = '), 'src/app.js tells a fault before its stage exists through it');
+  assert.doesNotMatch(inline[1], /\b(?:href|src)\s*=|\bimport\b|\bfetch\b|<\//, 'no reference, no request, nothing that ends the element early');
   assert.equal((html.match(/<style/g) ?? []).length, 0);
   assert.equal((html.match(/="\.\/src\//g) ?? []).length + (html.match(/="\.\/styles\//g) ?? []).length, 9);
   // The six regions are the children of #app in grid order; no element is ever re-parented by script.

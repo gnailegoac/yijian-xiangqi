@@ -9,7 +9,7 @@ export const STR = {
   firstTrial: '亮替你看一眼。想好了，再点一下就落子。',
   seenIt: ['好眼力！再挑一步。', '看出来就好，换一步。'],
   rightPiece: '对，就是它！',
-  ownWay: '小主公心里有数，亮放心。',
+  ownWay: '好，听小主公的，亮不多问了。',
   repeatWarn: '再回到这个局面，就要算和棋了。',
   perpetual: '不能一直将军，得换一招。',
   sparedMate: '好险！司马懿没看见那步杀棋。',
@@ -24,6 +24,7 @@ export const STR = {
   toolBusy: (notation) => `亮在沙盘上摆一摆【${notation}】……`,
   refusedFree: '这件事亮帮不上忙。要是心里有事，记得找爸爸妈妈或老师说说。咱们接着看棋？',
   undoDone: '好，退回小主公上一步之前。再想想！',
+  undoResign: '好，这盘接着下！',                           // a resignation was taken back: no move went back
   undoNone: '已经回到开局啦，没有可以悔的棋。',
   undoOpening: '司马懿刚走第一步，还轮不到悔棋呢。',
   tapOver: '这盘已经下完了——可以悔棋回看，或者再来一盘。',

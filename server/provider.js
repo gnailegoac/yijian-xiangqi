@@ -95,9 +95,15 @@ export async function* streamChat(config, { model, messages, tools, toolChoice, 
     // Only the COACH_* variables configure the proxy. Left to itself the SDK would also read OPENAI_ORG_ID and
     // OPENAI_PROJECT_ID (sent to the gateway as headers) and OPENAI_LOG (its own console logging) from the
     // environment of the machine, so those three are fixed here: no such header, and nothing on the console.
+    // The SDK also adds the headers of OPENAI_CUSTOM_HEADERS, after its own Authorization header: a machine on which
+    // that variable holds an Authorization line (set for another tool) would send that credential to the gateway in
+    // the place of the coach's key. A default header given here wins over the variable, so the key of the config is
+    // the one that is sent, whatever the machine has set (CONTRACT-NOTES 150). Other headers of the variable still
+    // travel, as the README says.
     client = new Sdk({
       apiKey: config.apiKey, baseURL: config.baseUrl, maxRetries: 1, timeout: config.upstreamTimeoutMs,
       organization: null, project: null, logLevel: 'off',
+      defaultHeaders: { Authorization: `Bearer ${config.apiKey}` },
     });
     clients.set(config, client);
   }

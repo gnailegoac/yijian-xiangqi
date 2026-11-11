@@ -854,8 +854,9 @@ test('dangers: one constructed position per DANGER_CODES entry with its focus', 
     walks_into_pin: ['4k4/9/5n3/9/9/8R/9/9/9/3K5 b', '2506', 5, '车一进五', ['06', '08']],
     // the cannon gives up its attack on the rook: the focus is the capture it could have played
     misses_win: ['4k4/9/1r7/9/1p7/4P4/9/1C7/9/4K4 w', '7172', 5, null, ['71', '21']],
-    // a free pawn is left alone and the rook comes to guard it: nothing concrete goes wrong
-    slow: ['4k3r/9/9/1p7/9/1R2P4/9/9/9/3K5 w', '9383', 9, null, []],
+    // a free pawn is left alone and the rook comes to guard it: nothing concrete goes wrong. (The king step 帅六进一 was
+    // the case here until its line, which only returns to this position, stopped being a mistake: CONTRACT-NOTES 150.)
+    slow: ['4k3r/9/9/1p7/9/1R2P4/9/9/9/3K5 w', '5152', 9, null, []],
   };
   assert.deepEqual(Object.keys(cases).sort(), [...DANGER_CODES].sort(), 'one case per danger code');
   for (const danger of DANGER_CODES) {
@@ -992,6 +993,80 @@ test('materialOutcome is settled: for 500 searched lines net*100 is within 150 c
   assert.ok(within / counted >= 0.95, `${within} of ${counted} lines are within 150 cp`);
 });
 
+test('materialOutcome: the balance of a line is what the line does: the whole line is walked, and the tail never counts what the other side takes back (CONTRACT-NOTES 150)', () => {
+  const lineOfCodes = (fen, codes) => {
+    const { board, turn } = fenToBoard(fen);
+    const line = toLine(board, turn, codes.map(ref));
+    assert.equal(line.moves.length, codes.length, 'every move of the test line is legal');
+    return line;
+  };
+  const brief = out => [out.net, out.kind, out.won.map(p => p.piece), out.lost.map(p => p.piece), out.plies];
+
+  // (a) Without maxPlies the whole line is walked. A searched line of eight plies (炮二平一 车7平1 仕四进五 车1进1 帅六进一
+  // 炮2退1 车一退一 车1退1): after six of them the red cannon could take the rook on the edge, but the line goes on 车一退一
+  // and takes nothing. The balance read "red wins a rook".
+  const eight = lineOfCodes('2bakab1r/9/2n3nc1/p1p1p1p1p/9/7C1/P3P1P1P/6r2/3K4R/1c3A3 w', ['5758', '7670', '9584', '7080', '8373', '9181', '8898', '8070']);
+  assert.deepEqual(brief(materialOutcome(eight, 'red')), [0, 'none', [], [], 8]);
+  // an explicit maxPlies keeps its meaning: the walk stops there and the position reached is settled, now by the same
+  // rule as a cut line. The cannon takes the rook and the red rook falls in return: nothing is counted there either.
+  assert.deepEqual(brief(materialOutcome(eight, 'red', 6)), [0, 'none', [], [], 6]);
+  assert.equal(materialOutcome(eight, 'red', 8).net, 0);
+
+  // (b) A line that really ends cut. At the end of this one black can take a cannon with the elephant, and red then
+  // takes a horse with the rook: half a point, not a cannon. The tail claimed the cannon (net 4 with the line's own -0.5).
+  const cutLine = { ...lineOfCodes('rn1akab1r/9/4b1nc1/p3pC2p/2p3C2/P8/4P1P1P/N1c1B4/5N3/R1BAKA2R b', ['0010', '7051', '1015', '9897', '1535', '9727', '3585', '5172']), end: 'cut' };
+  assert.deepEqual(brief(materialOutcome(cutLine, 'black')), [-0.5, 'even-trade', ['cannon', 'horse'], ['cannon', 'cannon'], 8]);
+  assert.deepEqual(materialOutcome(cutLine, 'black'), materialOutcome({ ...cutLine, end: 'quiet' }, 'black'), 'nothing is added to the line');
+  assert.equal(materialOutcome(cutLine, 'red').net, 0.5);
+
+  // The three cases on small boards. Black has just played the horse to h6, where it attacks the piece on i4; the red
+  // horse c3 can take the piece on b5, which nothing guards. Every line is one ply long and marked cut.
+  const tail = (fen, pov = 'red') => brief(materialOutcome({ ...lineOfCodes(fen, ['2647']), end: 'cut' }, pov));
+  // ... a cannon to take, but then the horse takes the rook: red would rather not. Nothing is counted (it read +4.5).
+  assert.deepEqual(tail('3k5/9/6n2/9/9/1c7/8R/2N6/9/4K4 b'), [0, 'none', [], [], 1]);
+  // ... a rook to take, and the horse takes a cannon in return: both are counted (it read "wins a rook", +9).
+  assert.deepEqual(tail('3k5/9/6n2/9/9/1r7/8C/2N6/9/4K4 b'), [4.5, 'good-trade', ['rook'], ['cannon'], 1]);
+  assert.deepEqual(tail('3k5/9/6n2/9/9/1r7/8C/2N6/9/4K4 b', 'black'), [-4.5, 'bad-trade', ['cannon'], ['rook'], 1]);
+  // ... a cannon to take, and the horse takes a horse in return: less than a pawn is left, nothing is counted.
+  assert.deepEqual(tail('3k5/9/6n2/9/9/1c6P/8N/2N6/9/4K4 b'), [0, 'none', [], [], 1]);
+  // ... and a piece that is simply en prise is counted as before
+  assert.deepEqual(tail('3k5/9/6n2/9/9/1c7/9/2N6/9/4K4 b'), [4.5, 'wins', ['cannon'], [], 1]);
+
+  // A line with no move at all is the question brain.js asks to mark a principal variation as cut ("is a capture
+  // pending here?"): the answer stays the best pending capture and the exchange on its square.
+  const pending = fen => brief(materialOutcome({ start: fen, moves: [], end: 'cut' }, 'red'));
+  assert.deepEqual(pending('3k5/9/9/9/7n1/1c7/8R/2N6/9/4K4 w'), [4.5, 'wins', ['cannon'], [], 0]);
+  assert.deepEqual(pending('3k5/9/9/9/7n1/1c6P/8N/2N6/9/4K4 w'), [4.5, 'wins', ['cannon'], [], 0]);
+});
+
+test('materialOutcome is settled at the depth the assess job uses: for 150 lines of pair depth 7 net*100 is within 150 cp of the score change in at least 95 % (CONTRACT-NOTES 150)', () => {
+  // The criterion of the test above on lines as long as the game's own (seven plies and the quiescence behind them): the
+  // same playouts, the best move and the second line of a four-ply table, each assessed with a pair of depth 7.
+  // Six plies and a static capture gave 124 of these 150 (82.7 %).
+  const lines = createSearcher();
+  let counted = 0, within = 0;
+  for (const p of playoutPositions(4000, { seed: 7, stride: 2, plies: 40 })) {
+    if (counted >= 150) break;
+    if (p.moves.length < 2 || p.ply < 6) continue;
+    const fen = boardToFen(p.board, p.turn);
+    const table = lines.analyzeSync({ fen, timeMs: FOREVER, maxDepth: 4, allDepth: 4 });
+    const best = table.lines[0];
+    if (Math.abs(best.score) >= WIN) continue;
+    for (const line of [best, table.lines[1]]) {
+      const pair = lines.analyzeSync({ fen, timeMs: FOREVER, maxDepth: 7, allDepth: 7, minDepth: 4, rootMoves: line === best ? [best.move] : [best.move, line.move] });
+      const score = lineOf(pair, line.move).score;
+      if (Math.abs(score) >= WIN) continue;
+      const assessment = assessMove({ fen, move: line.move, pair, table, level: 5, compare: best.move });
+      assert.equal(assessment.outcome.plies, assessment.line.moves.length, 'the whole line is walked');
+      if (assessment.outcome.mate !== null) continue;
+      counted++;
+      if (Math.abs(assessment.outcome.net * 100 - (score - Position.fromFen(fen).evaluate())) <= 150) within++;
+    }
+  }
+  assert.equal(counted, 150);
+  assert.ok(within / counted >= 0.95, `${within} of ${counted} lines are within 150 cp`);
+});
+
 test('a line that ends in checkmate reports the mate, not the pawn won on the way', () => {
   // Red takes the pawn i9 with the rook, black steps aside, and the other rook mates on the back rank.
   const fen = '4k4/8p/R8/9/9/8R/9/9/9/5K3 w';
@@ -1094,6 +1169,367 @@ test('verdict thresholds: every edge at levels 1, 5, 9; compression in won and l
   assert.deepEqual([winning(MATE - 3).flags.givesMate, winning(MATE - 3).cat], [2, 'brilliant']);
   assert.deepEqual([winning(MATE - 1).flags.givesMate, winning(MATE - 1).cat], [1, 'best']);
   assert.deepEqual([winning(MATE - 100 - 3).flags.givesMate, winning(MATE - 100 - 3).cat, winning(MATE - 100 - 3).moveCp], [null, 'best', 2000]);
+});
+
+test('a move is not best because the scale has run out: beyond +-1900 the loss is the difference of the search scores (CONTRACT-NOTES 147)', () => {
+  // scoreToCp clamps every score that is no mate to +-1900. The loss that decides the category is taken from the search
+  // scores themselves, so a move that gives a rook away far behind (or far ahead) is no longer "as good as the best".
+  const tried = '6252', best = '7774', reply = '3040';
+  const verdict = (bestScore, moveScore, level = 5) => {
+    const pair = tableOf(START, [
+      rootLine(best, bestScore, { pv: [ref(best), ref(reply)] }),
+      rootLine(tried, moveScore, { pv: [ref(tried), ref(reply)] }),
+    ].sort((a, b) => b.score - a.score));
+    const a = assessMove({ fen: START, move: ref(tried), pair, table: null, level, compare: ref(best) });
+    const q = quickVerdict(pair, ref(tried), level);
+    assert.equal(q.cat, a.cat === 'brilliant' ? 'best' : a.cat, `quickVerdict agrees at ${bestScore} / ${moveScore} / level ${level}`);
+    assert.deepEqual([q.loss, q.isBest], [a.loss, a.isBest], `quickVerdict agrees at ${bestScore} / ${moveScore}`);
+    // what is stored and shown stays clamped; other code reads -2000 as "mated"
+    assert.deepEqual([a.bestCp, a.moveCp], [Math.max(scoreToCp(bestScore), scoreToCp(moveScore)), scoreToCp(moveScore)]);
+    assert.equal(a.refutation !== null, a.cat === 'mistake' || a.cat === 'blunder');
+    return [a.cat, a.loss, a.isBest];
+  };
+
+  // far behind: both moves read -1900, the tried one is 900 worse. In a lost position the loss counts half (450).
+  assert.deepEqual(verdict(-2000, -2900, 1), ['mistake', 900, false]);       // 450 is not above 300 * 1.5
+  assert.deepEqual(verdict(-2000, -2900, 5), ['blunder', 900, false]);
+  assert.deepEqual(verdict(-2000, -2900, 9), ['blunder', 900, false]);
+  assert.deepEqual(verdict(-2000, -2902, 1), ['blunder', 902, false]);       // 451
+  // far ahead (the mirror case): both read +1900; in a won position the loss counts 0.4 (360)
+  assert.deepEqual(verdict(2900, 2000, 1), ['mistake', 900, false]);         // 360 is above 120 * 1.5, not above 450
+  assert.deepEqual(verdict(2900, 2000, 5), ['blunder', 900, false]);
+  assert.deepEqual(verdict(2900, 2000, 9), ['blunder', 900, false]);
+  // the thresholds and the compression are those of 4.6.1, applied to the true difference
+  assert.deepEqual(verdict(-2500, -2500), ['best', 0, true]);
+  assert.deepEqual(verdict(-2500, -2530), ['best', 30, false]);              // 0.5 * 30 = 15
+  assert.deepEqual(verdict(-2500, -2532), ['good', 32, false]);              // 16
+  assert.deepEqual(verdict(-2500, -2600), ['good', 100, false]);             // 50
+  assert.deepEqual(verdict(-2500, -2602), ['ok', 102, false]);               // 51
+  assert.deepEqual(verdict(-2500, -2740), ['ok', 240, false]);               // 120
+  assert.deepEqual(verdict(-2500, -2742), ['mistake', 242, false]);          // 121
+  assert.deepEqual(verdict(-2500, -3100), ['mistake', 600, false]);          // 300
+  assert.deepEqual(verdict(-2500, -3102), ['blunder', 602, false]);          // 301
+  assert.deepEqual(verdict(3000, 2700), ['ok', 300, false]);                 // 0.4 * 300 = 120
+  assert.deepEqual(verdict(3000, 2699), ['mistake', 301, false]);
+  // across the clamp: one score inside the scale, the other beyond it
+  assert.deepEqual(verdict(-1800, -2900), ['blunder', 1100, false]);         // read as 100 before: 'good'
+  assert.deepEqual(verdict(2900, 1800), ['blunder', 1100, false]);
+  // the better move is the better move also where both read the same: the tried move 900 above the comparison move
+  assert.deepEqual(verdict(-2900, -2000), ['best', 0, true]);
+  assert.deepEqual(verdict(2000, 2900), ['best', 0, true]);
+  const worse = assessMove({ fen: START, move: ref(tried), table: null, level: 5, compare: ref(best),
+    pair: tableOf(START, [rootLine(best, -2000, { pv: [ref(best), ref(reply)] }), rootLine(tried, -2001, { pv: [ref(tried), ref(reply)] })]) });
+  assert.deepEqual([worse.isBest, worse.best.notation, worse.loss, worse.cat], [false, '炮二平五', 1, 'best'], 'one centipawn behind is not "at least as good"');
+  // the stored loss is the true difference, capped as before
+  assert.deepEqual(verdict(5200, -5200), ['blunder', 9999, false]);
+
+  // A mate score on either side: nothing changes. The difference is that of the centipawn values (2000 against 1900).
+  const matedInOne = -(MATE - 2), mateInTwo = MATE - 3, banned = -(MATE - 100 - 3);
+  assert.deepEqual(verdict(-2500, matedInOne), ['blunder', 100, false]);     // forced: the move allows a mate and the best did not
+  assert.deepEqual(verdict(-2500, banned), ['good', 100, false]);            // a repetition verdict: 0.5 * 100, no forced blunder
+  assert.deepEqual(verdict(mateInTwo, 2500), ['good', 100, false]);          // 0.4 * 100 = 40
+  assert.deepEqual(verdict(mateInTwo, 400), ['blunder', 1600, false]);
+  assert.deepEqual(verdict(matedInOne, -2500), ['best', 0, true]);
+  // two mates of different length read the same, as before
+  assert.deepEqual(verdict(MATE - 3, MATE - 7), ['brilliant', 0, true]);
+  assert.deepEqual(verdict(-(MATE - 8), matedInOne), ['best', 0, true]);
+
+  // quickVerdict for a move that is not exact at the table's depth: the last all-exact iteration and the proven bound,
+  // whichever is worse, both as differences of search scores
+  const bounded = (upper, byDepth = [-2100, -2200, -2300, -2400]) => tableOf(START, [
+    rootLine('7774', -2000, { depth: 6, byDepth: Array(6).fill(-2000) }),
+    rootLine('6252', byDepth[3], { depth: 4, upper, byDepth }),
+  ], { depth: 6, allDepth: 4 });
+  assert.deepEqual(quickVerdict(bounded(-2600), ref('6252'), 5), { cat: 'mistake', loss: 600, depth: 4, isBest: false });      // bound: 0.5 * 600 = 300
+  assert.deepEqual(quickVerdict(bounded(-2602), ref('6252'), 5), { cat: 'blunder', loss: 602, depth: 4, isBest: false });
+  assert.deepEqual(quickVerdict(bounded(-2100), ref('6252'), 5), { cat: 'mistake', loss: 400, depth: 4, isBest: false });      // iteration 4: 400
+  assert.deepEqual(quickVerdict(bounded(-2100, [-2000, -2000, -2000, -2000]), ref('6252'), 5), { cat: 'good', loss: 100, depth: 4, isBest: false });
+  // ... a bound that is a mate score counts as centipawns (-1900 against -2000), so iteration 4 decides the loss; the
+  // category is that of a move that allows a forced mate when the best move does not (CONTRACT-NOTES 148)
+  assert.deepEqual(quickVerdict(bounded(matedInOne), ref('6252'), 5), { cat: 'blunder', loss: 400, depth: 4, isBest: false });
+  assert.deepEqual(quickVerdict(bounded(matedInOne, [-2000, -2000, -2000, -2000]), ref('6252'), 1), { cat: 'blunder', loss: 100, depth: 4, isBest: false });
+  assert.deepEqual(quickVerdict(bounded(null, [-2000, -2000, -2000, matedInOne]), ref('6252'), 1), { cat: 'blunder', loss: 100, depth: 4, isBest: false });
+  // a repetition verdict is no forced mate, and a best move that is mated itself leaves nothing to blunder
+  assert.deepEqual(quickVerdict(bounded(banned, [-2000, -2000, -2000, -2000]), ref('6252'), 5), { cat: 'good', loss: 100, depth: 4, isBest: false });
+  const allMated = tableOf(START, [
+    rootLine('7774', -(MATE - 8), { depth: 6, byDepth: Array(6).fill(-(MATE - 8)) }),
+    rootLine('6252', matedInOne, { depth: 4, upper: matedInOne, byDepth: Array(4).fill(matedInOne) }),
+  ], { depth: 6, allDepth: 4 });
+  assert.equal(quickVerdict(allMated, ref('6252'), 5).cat, 'best');
+  // ... and far ahead: the compression of a won position needs both moves above +500
+  const ahead = (upper) => tableOf(START, [
+    rootLine('7774', 3000, { depth: 6, byDepth: Array(6).fill(3000) }),
+    rootLine('6252', 2900, { depth: 4, upper, byDepth: [3000, 3000, 2950, 2900] }),
+  ], { depth: 6, allDepth: 4 });
+  assert.deepEqual(quickVerdict(ahead(2250), ref('6252'), 5), { cat: 'mistake', loss: 750, depth: 4, isBest: false });         // 0.4 * 750 = 300
+  assert.deepEqual(quickVerdict(ahead(2248), ref('6252'), 5), { cat: 'blunder', loss: 752, depth: 4, isBest: false });
+  assert.deepEqual(quickVerdict(ahead(400), ref('6252'), 5), { cat: 'blunder', loss: 2600, depth: 4, isBest: false });         // not compressed
+
+  // The other comparisons of two scores that decide what the child is told.
+  // onlyMove and the alternatives of an assessment (from the table; losses against its first line):
+  const others = getLegalMoves(fenToBoard(START).board, 'red').map(code).filter(c => c !== best && c !== tried).slice(0, 3);
+  const table = (second) => tableOf(START, [rootLine(best, -2000), rootLine(others[0], second), rootLine(others[1], -2700), rootLine(tried, -2900), rootLine(others[2], -3500)]);
+  const withTable = (second) => assessMove({ fen: START, move: ref(tried), table: table(second), level: 5, compare: ref(best),
+    pair: tableOf(START, [rootLine(best, -2000, { pv: [ref(best), ref(reply)] }), rootLine(tried, -2900, { pv: [ref(tried), ref(reply)] })]) });
+  assert.equal(withTable(-2150).flags.onlyMove, true, 'the second-best move is 150 below the best, though both read -1900');
+  assert.equal(withTable(-2149).flags.onlyMove, false);
+  assert.deepEqual(withTable(-2150).alternatives.map(x => [code(x.move), x.loss]), [[best, 0], [others[0], 150], [others[1], 700]]);
+  // missedWin needs a loss of 200 against a best move that wins: far ahead it is seen again
+  const winsRook = { pv: [ref('5030'), ref('0001')] }, quiet = { pv: [ref('5051'), ref('0001')] };
+  const hangingRook = '4k4/9/9/r8/9/R3P4/9/9/9/4K4 w';
+  const missed = assessMove({ fen: hangingRook, move: ref('5051'), table: null, level: 5, compare: ref('5030'),
+    pair: tableOf(hangingRook, [rootLine('5030', 2900, winsRook), rootLine('5051', 2000, quiet)]) });
+  assert.deepEqual([missed.flags.missedWin, missed.loss, missed.cat, missed.refutation.danger], [true, 900, 'blunder', 'misses_win']);
+
+  // The position of the task notes, searched for real (red, far behind, to move): 车一平三 puts the rook in front of a pawn
+  // that takes it. It was `best` with loss 0 at every level. 帅五退一 is one of the best moves there are.
+  const fen = '4kab2/9/b8/2p1p3p/p8/6p1P/1r2n3R/3c5/4K1c2/N2A1A3 w';
+  const far = analyze(fen, { maxDepth: 4, allDepth: 4 });
+  assert.ok(scoreToCp(far.lines[0].score) < -1500 && far.lines.filter(l => l.score < -1900).length >= 5, 'the scale has run out for most moves');
+  const rook = ref('6866'), king = ref('8494'), top = far.lines[0].move;
+  const pairOf = (move) => analyze(fen, { maxDepth: 4, allDepth: 4, rootMoves: code(move) === code(top) ? [move] : [top, move] });
+  const rookPair = pairOf(rook), kingPair = pairOf(king);
+  for (const level of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
+    const a = assessMove({ fen, move: rook, pair: rookPair, table: far, level, compare: top });
+    assert.equal(a.move.notation, '车一平三');
+    assert.ok(a.cat === 'mistake' || a.cat === 'blunder', `车一平三 at level ${level}: ${a.cat}`);
+    assert.ok(a.loss >= 600 && !a.isBest, `the loss is the true one: ${a.loss}`);
+    assert.ok(a.moveCp >= -2000 && a.bestCp <= 2000 && a.moveCp === -1900, 'what is stored stays clamped');
+    assert.ok(a.outcome.net <= -4 && a.outcome.lost.some(p => p.piece === 'rook'), 'its own line loses the rook');
+    assert.notEqual(a.refutation, null);
+    const q = quickVerdict(far, rook, level);
+    assert.ok(q.cat === 'mistake' || q.cat === 'blunder', `quickVerdict of 车一平三 at level ${level}: ${q.cat}`);
+    assert.deepEqual([q.loss, q.isBest], [a.loss, false]);
+    const k = assessMove({ fen, move: king, pair: kingPair, table: far, level, compare: top });
+    assert.equal(k.move.notation, '帅五退一');
+    assert.ok(['brilliant', 'best', 'good'].includes(k.cat), `帅五退一 at level ${level}: ${k.cat}`);
+    assert.ok(['best', 'good'].includes(quickVerdict(far, king, level).cat), `quickVerdict of 帅五退一 at level ${level}`);
+    // the engine's best move is never a mistake
+    assert.equal(quickVerdict(far, top, level).cat, 'best');
+  }
+
+  // The mirror case, searched for real: red is far ahead (two rooks, two cannons and two horses against a rook) and
+  // 车一进五 puts a rook where the black rook takes it for nothing. It was 妙手 (a "sacrifice" that kept the evaluation at
+  // +1900) at every level.
+  const won = '3aka3/9/9/9/r8/9/P1P1P1P2/1C5C1/9/RNBAKABNR w';
+  const rich = analyze(won, { maxDepth: 4, allDepth: 4 });
+  assert.ok(rich.lines.every(l => l.score > 1900), 'every move reads +1900');
+  const give = ref('9848'), first = rich.lines[0].move;
+  const givePair = analyze(won, { maxDepth: 4, allDepth: 4, rootMoves: [first, give] });
+  for (const level of [1, 5, 9]) {
+    const a = assessMove({ fen: won, move: give, pair: givePair, table: rich, level, compare: first });
+    assert.equal(a.move.notation, '车一进五');
+    assert.deepEqual([a.cat, a.isBest, a.flags.sacrifice, a.moveCp, a.bestCp], ['blunder', false, false, 1900, 1900], `level ${level}`);
+    assert.ok(a.loss >= 900 && a.outcome.net <= -7, `loss ${a.loss}, net ${a.outcome.net}`);
+    assert.equal(a.patterns.some(p => p.id === 'sacrifice_play'), false);
+    assert.equal(quickVerdict(rich, give, level).cat, 'blunder');
+    const b = assessMove({ fen: won, move: first, pair: analyze(won, { maxDepth: 4, allDepth: 4, rootMoves: [first] }), table: rich, level, compare: first });
+    assert.ok(b.cat === 'best' || b.cat === 'brilliant', b.cat);
+    assert.equal(quickVerdict(rich, first, level).cat, 'best');
+  }
+  // the sacrifice clause on its own, with hand-made scores: the rook is given (the reply takes it) and both scores read
+  // +1900; only a move that keeps the true evaluation within a pawn of the static one is a sacrifice
+  const staticEval = Position.fromFen(won).evaluate();
+  assert.ok(staticEval > 2500);
+  const given = (score) => assessMove({ fen: won, move: give, table: null, level: 5, compare: give,
+    pair: tableOf(won, [rootLine('9848', score, { pv: [ref('9848'), ref('4048')] })]) });
+  assert.equal(given(staticEval - 100).flags.sacrifice, true);
+  assert.equal(given(staticEval - 101).flags.sacrifice, false);
+  assert.equal(scoreToCp(staticEval - 101), 1900, 'which the clamped scores could not tell apart');
+});
+
+test('a move after which the mover is mated is no sacrifice, however far behind the mover is (CONTRACT-NOTES 147)', () => {
+  // The last position of a scripted game: red is far beyond -1900 and every one of its three moves is mated. 马九进七 puts
+  // the horse where the rook takes it and is mated one move later than the others. Mated (-2000) read as "within a pawn"
+  // of a static evaluation that reads -1900, so the horse was a sound sacrifice and the move 妙手.
+  const fen = '2bakab2/9/2n3n2/p1p1p2rp/c8/9/P1P5P/Br3Kc2/N8/3A1AB2 w';
+  assert.ok(Position.fromFen(fen).evaluate() < -1900);
+  const table = analyze(fen, { maxDepth: 4, allDepth: 4 });
+  assert.equal(table.lines.length, 3);
+  assert.ok(table.lines.every(l => l.mate !== null && l.mate < 0), 'every move is mated');
+  const horse = ref('8072'), top = table.lines[0].move;
+  const pair = analyze(fen, { maxDepth: 4, allDepth: 4, rootMoves: code(top) === code(horse) ? [horse] : [top, horse] });
+  for (const level of [1, 5, 9]) {
+    const a = assessMove({ fen, move: horse, pair, table, level, compare: top });
+    assert.equal(a.move.notation, '马九进七');
+    assert.ok(a.outcome.net <= -4 && a.flags.allowsMate, 'the horse is taken and red is mated');
+    assert.deepEqual([a.cat, a.flags.sacrifice, a.moveCp], ['best', false, -2000], `level ${level}`);
+    assert.equal(a.patterns.some(p => p.id === 'sacrifice_play'), false);
+  }
+  // the clause on its own, with hand-made scores: the same piece given for a score that is no mate keeps the flag when
+  // the evaluation stays within a pawn of the static one; a mated score and a repetition loss never do
+  const staticEval = Position.fromFen(fen).evaluate();
+  const given = (score) => assessMove({ fen, move: horse, table: null, level: 5, compare: horse,
+    pair: tableOf(fen, [rootLine('8072', score, { pv: [ref('8072'), ref('7172')] })]) });
+  assert.equal(given(staticEval - 100).flags.sacrifice, true);
+  assert.equal(given(staticEval - 101).flags.sacrifice, false);
+  assert.equal(given(-(MATE - 4)).flags.sacrifice, false, 'mated in two');
+  assert.equal(given(-(MATE - 100 - 3)).flags.sacrifice, false, 'a repetition verdict against the mover');
+});
+
+test('a move that gives material away is not steady because the better move mates: the loss is at least what its own line gives away (CONTRACT-NOTES 150)', () => {
+  // The end of a won game. Red mates in two with 车一平六; the black rook attacks the rook on the 1 file. 马二进一 (and 23
+  // other moves) leaves that rook to be taken. The move stays above +1900 and the best move reads 2000, so its loss was
+  // 100 and the move 稳健 at every level, not held.
+  const fen = '9/3k5/R2a5/p8/8p/9/P1P1P1P1P/2N1C2NB/3r4R/2BAKA3 w';
+  const table = analyze(fen, { maxDepth: 5, allDepth: 5 });
+  const [mate, slower] = table.lines;
+  assert.deepEqual([moveToNotation(fenToBoard(fen).board, mate.move), mate.mate], ['车一平六', 2]);
+  assert.ok(slower.mate !== null && slower.mate > mate.mate, 'a second mating move, one move longer');
+  const horse = ref('7758'), keeps = ref('9584');
+  const pairOf = move => analyze(fen, { maxDepth: 5, allDepth: 5, rootMoves: [mate.move, move] });
+  const horsePair = pairOf(horse), keepsPair = pairOf(keeps);
+  const horseScore = lineOf(horsePair, horse).score;
+  assert.ok(horseScore > 1900 && horseScore < WIN, `the move stays far ahead: ${horseScore}`);
+  for (const level of [1, 5, 9]) {
+    const a = assessMove({ fen, move: horse, pair: horsePair, table, level, compare: mate.move });
+    assert.equal(a.move.notation, '马二进一');
+    assert.ok(a.cat === 'mistake' || a.cat === 'blunder', `马二进一 at level ${level}: ${a.cat}`);
+    assert.ok(a.loss >= 800, `the loss is what the line gives away: ${a.loss}`);
+    assert.deepEqual([a.moveCp, a.bestCp, a.isBest, a.best.notation, a.flags.missedMate], [1900, 2000, false, '车一平六', true]);
+    assert.ok(a.outcome.net <= -8 && a.outcome.lost.some(p => p.piece === 'rook'), 'its own line loses the rook');
+    assert.deepEqual([a.refutation.danger, a.refutation.reply.notation], ['misses_mate', '车4平9']);
+    // the first face, from the table alone: measured against the best line that is no mate
+    const q = quickVerdict(table, horse, level);
+    assert.ok(q.cat === 'mistake' || q.cat === 'blunder', `quickVerdict of 马二进一 at level ${level}: ${q.cat}`);
+    assert.ok(q.loss >= 800 && !q.isBest, `quick loss ${q.loss}`);
+    // the mating move stays best, and so does the mate that takes a move longer
+    assert.deepEqual([quickVerdict(table, mate.move, level).cat, quickVerdict(table, slower.move, level).cat], ['best', 'best']);
+    const second = assessMove({ fen, move: slower.move, pair: pairOf(slower.move), table, level, compare: mate.move });
+    assert.ok(second.cat === 'best' || second.cat === 'brilliant', second.cat);
+    // a move that keeps everything misses the mate and nothing else: it loses the 100 it lost before
+    const k = assessMove({ fen, move: keeps, pair: keepsPair, table, level, compare: mate.move });
+    assert.deepEqual([k.move.notation, k.cat, k.loss, k.outcome.net, k.flags.missedMate], ['仕四进五', 'good', 100, 0, true]);
+    assert.equal(quickVerdict(table, keeps, level).cat, 'good');
+  }
+
+  // The first face agrees with the assessment for the moves that keep everything as well. Black mates in one with 车9平7;
+  // 车2进5 wins a rook without mating, 卒9进1 and 炮5平9 keep everything, 车9退2 leaves the rook to the elephant. Measured
+  // against 车2进5 the two quiet moves were 失误 or 漏着 at first sight and 稳健 in the assessment.
+  const second = '2bakab2/9/2n6/p1p1p3p/1r4p2/2Pnc1B1P/P3N1P2/9/4A4/R2AK1B1r b';
+  const board2 = fenToBoard(second).board;
+  const table2 = analyze(second, { maxDepth: 4, allDepth: 4 });
+  assert.deepEqual([moveToNotation(board2, table2.lines[0].move), table2.lines[0].mate], ['车9平7', 1]);
+  const winsRook = table2.lines.find(l => l.mate === null);
+  assert.equal(moveToNotation(board2, winsRook.move), '车2进5', 'the best line that is no mate');
+  for (const [code, notation, fine] of [['3848', '卒9进1', true], ['5458', '炮5平9', true], ['9878', '车9退2', false]]) {
+    const move = ref(code);
+    assert.equal(moveToNotation(board2, move), notation);
+    assert.ok(winsRook.score - lineOf(table2, move).score > 600, `${notation} is far behind the line that wins the rook`);
+    const pair2 = analyze(second, { maxDepth: 5, allDepth: 5, rootMoves: [table2.lines[0].move, move] });
+    for (const level of [1, 5, 9]) {
+      const a = assessMove({ fen: second, move, pair: pair2, table: table2, level, compare: table2.lines[0].move });
+      const q = quickVerdict(table2, move, level);
+      if (fine) assert.deepEqual([a.cat, a.loss, q.cat, q.loss], ['good', 100, 'good', 100], `${notation} at level ${level}`);
+      else assert.ok((a.cat === 'mistake' || a.cat === 'blunder') && (q.cat === 'mistake' || q.cat === 'blunder'), `${notation} at level ${level}: ${a.cat}, ${q.cat}`);
+    }
+  }
+
+  // The rule on its own, with hand-made scores. Red's rook a5 and the black rook a7 attack each other; 兵五进一 leaves the
+  // rook to be taken, 车九平八 steps aside. The comparison move mates in two.
+  const hanging = '4k4/9/9/r8/9/R3P4/9/9/9/4K4 w';
+  const gives = { pv: [ref('5444'), ref('3050')] }, steps = { pv: [ref('5051'), ref('0403')] };
+  const verdict = (bestScore, moveCode, moveScore, extra, level = 5) => {
+    const a = assessMove({ fen: hanging, move: ref(moveCode), table: null, level, compare: ref('5030'),
+      pair: tableOf(hanging, [rootLine('5030', bestScore), rootLine(moveCode, moveScore, extra)]) });
+    return [a.cat, a.loss, a.outcome.net];
+  };
+  const mateInTwo = MATE - 3;
+  assert.deepEqual(verdict(mateInTwo, '5444', 2277, gives, 1), ['mistake', 900, -9]);          // 0.4 * 900 = 360: above 180, not above 450
+  assert.deepEqual(verdict(mateInTwo, '5444', 2277, gives, 5), ['blunder', 900, -9]);
+  assert.deepEqual(verdict(mateInTwo, '5444', 2277, gives, 9), ['blunder', 900, -9]);
+  assert.deepEqual(verdict(mateInTwo, '5051', 2277, steps), ['good', 100, 0], 'a move whose line loses nothing keeps the difference of the centipawn values');
+  assert.deepEqual(verdict(mateInTwo, '5444', 400, gives), ['blunder', 1600, -9], 'a larger difference stands');
+  assert.deepEqual(verdict(mateInTwo, '5444', MATE - 7, gives), ['brilliant', 0, -9], 'a slower mate is no loss');
+  assert.deepEqual(verdict(2900, '5444', 2800, gives), ['good', 100, -9], 'without a mate on the better side the scores decide, as before');
+
+  // quickVerdict has no line: when the best line mates, a move that does not mate is measured against what the mover
+  // holds when nothing is given away, the static evaluation of the position. The same two rooks with red's whole army
+  // behind them: 前车进二 mates (by hand), 炮二平三 wins a piece, 前车平八 keeps everything, 兵五进一 leaves the rook.
+  const far = '4k4/9/9/r8/9/R3P4/9/1C5C1/9/RNBAKABNR w';
+  const held = Position.fromFen(far).evaluate();
+  assert.ok(held > 3000, `red is far ahead: ${held}`);
+  const quick = (lines, moveCode, level = 5, extra = {}) => quickVerdict(tableOf(far, lines, extra), ref(moveCode), level);
+  const four = [rootLine('5030', mateInTwo), rootLine('7776', held + 900), rootLine('5051', held + 20), rootLine('5444', held - 900)];
+  assert.deepEqual(quick(four, '5444', 1), { cat: 'mistake', loss: 900, depth: 3, isBest: false });    // 0.4 * 900 = 360
+  assert.deepEqual(quick(four, '5444', 5), { cat: 'blunder', loss: 900, depth: 3, isBest: false });
+  assert.deepEqual(quick(four, '5444', 9), { cat: 'blunder', loss: 900, depth: 3, isBest: false });
+  // A move that keeps everything misses the mate and nothing else, as in the assessment: it is not a mistake because
+  // another move that does not mate would have won a piece (880 behind that line: 失误 at first sight, 稳健 a moment later).
+  for (const level of [1, 5, 9]) {
+    assert.deepEqual(quick(four, '5051', level), { cat: 'good', loss: 100, depth: 3, isBest: false }, `the quiet move at level ${level}`);
+    assert.deepEqual(quick(four, '7776', level), { cat: 'good', loss: 100, depth: 3, isBest: false });
+    assert.deepEqual(quick(four, '5030', level), { cat: 'best', loss: 0, depth: 3, isBest: true });
+  }
+  assert.deepEqual(quick([rootLine('5030', mateInTwo), rootLine('5444', held - 900)], '5444'), { cat: 'blunder', loss: 900, depth: 3, isBest: false },
+    'no other line is needed to measure against');
+  assert.deepEqual(quick([rootLine('5030', mateInTwo), rootLine('5051', MATE - 5), rootLine('5444', held - 900)], '5051'), { cat: 'best', loss: 0, depth: 3, isBest: true },
+    'a mate that takes a move longer is no loss');
+  assert.deepEqual(quick([rootLine('5030', mateInTwo), rootLine('5444', held - 450)], '5444', 1), { cat: 'ok', loss: 450, depth: 3, isBest: false }, 'a cannon: 0.4 * 450 = 180');
+  assert.deepEqual(quick([rootLine('5030', mateInTwo), rootLine('5444', held - 450)], '5444', 5), { cat: 'mistake', loss: 450, depth: 3, isBest: false });
+  assert.deepEqual(quick([rootLine('5030', mateInTwo), rootLine('5444', 400)], '5444'), { cat: 'blunder', loss: held - 400, depth: 3, isBest: false }, 'a larger difference stands');
+  assert.deepEqual(quick([rootLine('5030', held + 1000), rootLine('5051', held + 900), rootLine('5444', held - 900)], '5051'), { cat: 'good', loss: 100, depth: 3, isBest: false },
+    'without a mate nothing changes');
+  assert.deepEqual(quick([rootLine('5030', held + 1000), rootLine('5051', held + 900), rootLine('5444', held - 900)], '5444', 1), { cat: 'blunder', loss: 1900, depth: 3, isBest: false },
+    'without a mate the best line is the measure, as before');
+  // ... also for a move that is not exact at the table's depth: by the last all-exact iteration and by the proven bound
+  const deep = (upper, byDepth) => [
+    rootLine('5030', mateInTwo, { depth: 6, byDepth: [held, held + 100, mateInTwo, mateInTwo, mateInTwo, mateInTwo] }),
+    rootLine('5051', held + 20, { depth: 6, byDepth: Array(6).fill(held + 20) }),
+    rootLine('5444', byDepth[3], { depth: 4, upper, byDepth }),
+  ];
+  const partly = { depth: 6, allDepth: 4 };
+  const flat = Array(4).fill(held);
+  assert.deepEqual(quick(deep(held - 900, flat), '5444', 5, partly), { cat: 'blunder', loss: 900, depth: 4, isBest: false }, 'the bound against what red holds');
+  assert.deepEqual(quick(deep(held - 10, [held, held, held - 900, held - 900]), '5444', 5, partly), { cat: 'blunder', loss: 900, depth: 4, isBest: false }, 'iteration 4 against what red holds');
+  assert.deepEqual(quick(deep(held - 10, [held, held, held + 50, held + 50]), '5444', 5, partly), { cat: 'good', loss: 100, depth: 4, isBest: false });
+});
+
+test('a move whose line only re-creates the position before it is at most 缓着: a turn is lost and nothing else (CONTRACT-NOTES 150)', () => {
+  // Red is far ahead. After 帅五进一 the black rook checks, the king steps back and the rook returns: the position of the
+  // move, with red to move again. The search scores that first return as a repetition (-20), on purpose; taken as the
+  // worth of the move it made the king step a 漏着 with the whole advantage as its loss, and 走后形势 均势.
+  const fen = '3akab2/1C2n4/1C7/p1P1p2rp/6p2/9/P3N1P2/R1N1B3R/9/3AKAB2 w';
+  const table = analyze(fen, { maxDepth: 4, allDepth: 4 });
+  const top = table.lines[0], king = ref('9484');
+  assert.ok(top.score > 2000, `red is far ahead: ${top.score}`);
+  const pair = analyze(fen, { maxDepth: 4, allDepth: 4, rootMoves: [top.move, king] });
+  assert.equal(lineOf(pair, king).score, -20, 'the search scores the return as a repetition');
+  // the smallest loss that is 缓着 where both moves stand above +500: 0.4 * loss > 50 * k
+  const smallest = { 1: 188, 2: 172, 5: 126, 9: 101 };
+  for (const level of [1, 2, 5, 9]) {
+    const a = assessMove({ fen, move: king, pair, table, level, compare: top.move });
+    assert.equal(a.move.notation, '帅五进一');
+    assert.deepEqual(notations(a.line), '帅五进一 车8进5 帅五退一 车8退5');
+    assert.deepEqual([a.cat, a.loss, a.isBest, a.refutation], ['ok', smallest[level], false, null], `level ${level}`);
+    assert.deepEqual([a.moveCp, a.bestCp], [1900, 1900], 'red stands as before');
+    assert.deepEqual([a.outcome.kind, a.flags.missedWin, a.flags.allowsMate], ['none', false, false]);
+    assert.equal(quickVerdict(table, king, level), null, 'the face waits for the assessment');
+    // the other moves of the table are judged as before
+    assert.equal(quickVerdict(table, top.move, level).cat, 'best');
+  }
+
+  // The rule on its own, with hand-made scores, in a level position (the pawn-and-rook position of the dangers test): the
+  // king steps up, the black rook checks from the back rank, the king returns and so does the rook.
+  const quiet = '4k3r/9/9/1p7/9/1R2P4/9/9/9/3K5 w';
+  const back = [ref('9383'), ref('0888'), ref('8393'), ref('8808')], away = [ref('9383'), ref('0888'), ref('8393'), ref('8858')];
+  const verdict = (bestScore, moveScore, pv, level = 5) => {
+    const lines = [rootLine('5131', bestScore), rootLine('9383', moveScore, { pv })].sort((x, y) => y.score - x.score);
+    const a = assessMove({ fen: quiet, move: ref('9383'), table: null, level, compare: ref('5131'), pair: tableOf(quiet, lines) });
+    const q = quickVerdict(tableOf(quiet, lines), ref('9383'), level);
+    return [a.cat, a.loss, a.moveCp, q === null ? null : q.cat];
+  };
+  assert.deepEqual(verdict(600, -20, back), ['ok', 126, 600, null], 'far ahead: the loss counts 0.4');
+  assert.deepEqual(verdict(90, -20, back), ['ok', 51, 90, null], 'a level position: 51 is the smallest loss above 50');
+  assert.deepEqual(verdict(90, -20, back, 9), ['ok', 41, 90, null]);
+  assert.deepEqual(verdict(10, -20, back), ['good', 30, 10, null], 'a smaller loss is not raised');
+  // a line that does not return is judged by its score, as before
+  assert.deepEqual(verdict(600, -20, away), ['blunder', 620, -20, 'blunder']);
+  assert.deepEqual(verdict(600, -20, back.slice(0, 2)), ['blunder', 620, -20, 'blunder']);
+  // the return that is the best there is (a side that is behind and finds the repetition): nothing changes
+  assert.deepEqual(verdict(-700, -20, back), ['best', 0, -20, 'best']);
+  // a mate score is never softened: the line returns, but the move is mated
+  assert.deepEqual(verdict(600, -(MATE - 6), back), ['blunder', 2600, -2000, 'blunder']);
 });
 
 test('quickVerdict returns null for a null or depth-1 table and equals assessMove\'s cat (ignoring brilliant) when the move is exact', () => {
@@ -1275,6 +1711,47 @@ test('brilliant is not for a plain winning capture: the only-move clause skips a
   assert.deepEqual([mating.capture.exchange, mating.a.flags.givesMate, mating.a.cat], ['wins', 2, 'brilliant']);
 });
 
+test('a forced move is never brilliant and never a sacrifice: with at most two legal moves every clause of 4.6.1 gives best', () => {
+  // CONTRACT-NOTES item 138. Red is in check on the e-file and both flights of the king are covered: the horse can step in
+  // on e3 or on e2, and that is all (two legal moves). With an advisor on f1 that can step in as well, there are three.
+  const two = '3k5/9/5r3/3r5/9/4r4/9/2N6/9/4K4 w';
+  const three = '3k5/9/5r3/3r5/9/4r4/9/2N6/9/4KA3 w';
+  const legal = (fen) => { const { board, turn } = fenToBoard(fen); return getLegalMoves(board, turn).map(code); };
+  assert.deepEqual([legal(two), legal(three)], [['7264', '7284'], ['7264', '7284', '9584']]);
+  /** The verdict on 马七进五 (the horse steps in on e2) with hand-made scores, and what the three clauses look at. */
+  const verdict = (fen, { score = 300, byDepth = [0, 0, score, score], pv = ['7284'], table = true } = {}) => {
+    const move = ref('7284');
+    const line = rootLine('7284', score, { depth: byDepth.length, byDepth, pv: pv.map(ref) });
+    const all = tableOf(fen, [line, rootLine('7264', score - 400, { depth: byDepth.length })]);
+    const a = assessMove({ fen, move, pair: tableOf(fen, [line]), table: table ? all : null, level: 5, compare: move });
+    return [a.cat, a.flags.onlyMove, a.revealBest, a.flags.sacrifice, a.flags.givesMate, a.patterns.some(p => p.id === 'sacrifice_play')];
+  };
+  // the only-move clause: alone at the top of the table, its value shows at the third ply
+  assert.deepEqual(verdict(three), ['brilliant', true, 3, false, null, false]);
+  assert.deepEqual(verdict(two), ['best', true, 3, false, null, false]);
+  // the sacrifice clause: the rook takes the horse and the king takes the rook. Of the forced move it is not said that it
+  // gave the horse up: no flag, no 弃子 pattern
+  const given = { byDepth: [300, 300, 300, 300], pv: ['7284', '5484', '9484'], table: false };
+  assert.deepEqual(verdict(three, given), ['brilliant', false, 1, true, null, true]);
+  assert.deepEqual(verdict(two, given), ['best', false, 1, false, null, false]);
+  // the forced-mate clause: the move starts a mate in two
+  assert.deepEqual(verdict(three, { score: MATE - 3, table: false }), ['brilliant', false, 3, false, 2, false]);
+  assert.deepEqual(verdict(two, { score: MATE - 3, table: false }), ['best', false, 3, false, 2, false]);
+  // one legal move: the same
+  const one = '3k5/9/5r3/3r5/9/4r4/9/9/9/4KA3 w';
+  assert.deepEqual(legal(one), ['9584']);
+  const only = assessMove({ fen: one, move: ref('9584'), pair: tableOf(one, [rootLine('9584', MATE - 3, { depth: 4 })]), table: null, level: 5, compare: ref('9584') });
+  assert.deepEqual([only.cat, only.flags.givesMate], ['best', 2]);
+  // a real search of the forced position agrees with itself: whatever the horse move is worth, it is never 妙手
+  const table = analyze(two, { maxDepth: 4, allDepth: 4 });
+  for (const line of table.lines) {
+    const pair = analyze(two, { maxDepth: 4, allDepth: 4, rootMoves: [table.lines[0].move, line.move].filter((m, i, list) => i === 0 || code(m) !== code(list[0])) });
+    const a = assessMove({ fen: two, move: line.move, pair, table, level: 5, compare: table.lines[0].move });
+    assert.notEqual(a.cat, 'brilliant', code(line.move));
+    assert.equal(a.flags.sacrifice, false, code(line.move));
+  }
+});
+
 test('hintFor: each theme row; area for red and for black', () => {
   /** The hint for a move with a real table of the position (and, where given, the real threat). */
   const hint = (fen, moveCode, { ply = 40, withThreat = false } = {}) => {
@@ -1432,6 +1909,49 @@ test('tacticalTest and habitTraps on constructed tables', () => {
   assert.deepEqual([known.kind, known.mate, notations(known.line), known.outcome.mate], ['mate', 1, '炮2平5', 'gives']);
   // in check there is no pass, hence no threat
   assert.equal(threatInfo(checkFen, analyze(checkFen, { pass: true }), positionFacts(checkFen)), null);
+});
+
+test('the tactical test, the greedy trap and a hint\'s alternatives are measured on the search scores, also beyond +-1900 (CONTRACT-NOTES 147)', () => {
+  const facts = positionFacts(START);
+  const lines = (scores, depth = 5) => ['7774', '9776', '9172', '6252', '6050'].slice(0, scores.length).map((c, i) => rootLine(c, scores[i], { depth }));
+  const test = scores => tacticalTest(START, tableOf(START, lines(scores)), facts);
+  // far behind: every score reads -1900. Two moves stand 150 or more above the rest: a test (it was none: "five moves within 60 cp")
+  assert.deepEqual(test([-2000, -2050, -2200, -2300, -2400]).group.map(code), ['7774', '9776']);
+  assert.equal(test([-2000, -2050, -2149, -2300, -2400]), null, 'the best line outside the group is 149 below the best');
+  assert.equal(test([-2000, -2061, -2300, -2400, -2500]), null, '61 below the best is outside the group and spoils the test');
+  // far ahead: the same
+  assert.deepEqual(test([2900, 2850, 2700, 2600, 2500]).group.map(code), ['7774', '9776']);
+  assert.equal(test([2900, 2850, 2751, 2600, 2500]), null);
+  // across the clamp: 1880 read as "20 below +1900" and joined the group of a move that is worth 2400
+  assert.deepEqual(test([2400, 1880, 1700, 1600, 1500]).group.map(code), ['7774']);
+  assert.deepEqual(test([-1700, -1750, -2400, -2500, -2600]).group.map(code), ['7774', '9776']);
+  // a mate score in the table is compared as centipawns, as before
+  assert.equal(test([MATE - 3, 2500, 2400, 2300, 2200]), null, '+2000 against +1900: not within 60, and not 150 apart');
+  assert.equal(test([-2500, -(MATE - 2), -(MATE - 2)]), null, '-1900 against -2000');
+  assert.deepEqual(test([-400, -(MATE - 2), -(MATE - 2)]).group.map(code), ['7774']);
+  // the tier: how deep one must look until the group stands out by 100 cp, on the same scores (it was always the deepest tier)
+  const tierOf = (separatedAt, high, low) => {
+    const byDepth = score => Array.from({ length: 5 }, (_, i) => (i + 1 >= separatedAt ? score : low));
+    return tacticalTest(START, tableOf(START, [rootLine('7774', high, { depth: 5, byDepth: byDepth(high) }), rootLine('9776', low, { depth: 5, byDepth: byDepth(low) }),
+      rootLine('9172', low - 10, { depth: 5, byDepth: byDepth(low - 10) })]), facts).tier;
+  };
+  assert.deepEqual([1, 2, 3, 4, 5].map(d => tierOf(d, -2000, -2600)), [1, 1, 2, 2, 3]);
+  assert.deepEqual([1, 2, 3, 4, 5].map(d => tierOf(d, 3200, 2600)), [1, 1, 2, 2, 3]);
+  assert.deepEqual([1, 2, 3, 4, 5].map(d => tierOf(d, 300, 100)), [1, 1, 2, 2, 3], 'inside the scale nothing changes');
+
+  // habitTraps: a losing capture (炮八进七 takes the guarded horse) that costs 150 cp or more, also where both scores read -1900
+  const greedy = (top, loss) => tableOf(START, [rootLine('7774', top, { depth: 4 }), rootLine('7101', top - loss, { depth: 4 })]);
+  assert.deepEqual(habitTraps(START, greedy(-2000, 150), facts, null), ['greedy']);
+  assert.deepEqual(habitTraps(START, greedy(-2000, 149), facts, null), []);
+  assert.deepEqual(habitTraps(START, greedy(3000, 150), facts, null), ['greedy']);
+  assert.deepEqual(habitTraps(START, greedy(3000, 149), facts, null), []);
+
+  // hintFor: the alternatives are the other moves within 30 cp of the hinted one (every move was "within 30" at -1900)
+  const hint = scores => hintFor({ fen: START, ply: 0, table: tableOf(START, lines(scores)), move: ref('7774'), facts: positionFacts(START, { ply: 0 }), threat: null });
+  assert.deepEqual(hint([-2500, -2520, -2531, -2900, -2900]).alternatives.map(code), ['9776']);
+  assert.deepEqual(hint([-2500, -2530, -2530, -2530, -2900]).alternatives.map(code), ['9776', '9172'], 'up to two');
+  assert.deepEqual(hint([2500, 2469, 2400, 2300, 2200]).alternatives.map(code), []);
+  assert.deepEqual(hint([40, 20, 10, 9, -30]).alternatives.map(code), ['9776', '9172'], 'inside the scale nothing changes');
 });
 
 test('openingName: each row of the table returns its PatternCode', () => {

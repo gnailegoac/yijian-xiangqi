@@ -98,10 +98,11 @@ test('functions return short strings', () => {
 });
 
 test('the keys of 4.23, each with text behind it', () => {
-  // importFull is the one key added to 4.23 (CONTRACT-NOTES 115); it sits next to importFailed
+  // importFull is a key added to 4.23 (CONTRACT-NOTES 115); it sits next to importFailed. undoResign is the other one
+  // (CONTRACT-NOTES 150): what is said when a resignation is taken back, next to undoDone
   assert.deepEqual(Object.keys(STR), [
     'firstTrial', 'seenIt', 'rightPiece', 'ownWay', 'repeatWarn', 'perpetual', 'sparedMate', 'takebackOffer', 'chanceNudge', 'idleOffer', 'avoided',
-    'hintWait', 'hintUnavailable', 'toolBusy', 'refusedFree', 'undoDone', 'undoNone', 'undoOpening', 'tapOver', 'noMoves', 'welcomeBack',
+    'hintWait', 'hintUnavailable', 'toolBusy', 'refusedFree', 'undoDone', 'undoResign', 'undoNone', 'undoOpening', 'tapOver', 'noMoves', 'welcomeBack',
     'welcomeBackRival', 'migrated', 'migratedLocal', 'saveCorrupt', 'saveNewer', 'saveTruncated', 'storageOff', 'imported', 'importFailed', 'importFull',
     'goalRecall', 'goalKept', 'goalNext', 'rankUp', 'streakPopup', 'announce', 'chips', 'intentLabel', 'dangerLabel',
   ]);
@@ -137,14 +138,14 @@ test('the lines the contract quotes elsewhere are these, character for character
   assert.equal(STR.perpetual, '不能一直将军，得换一招。');
   assert.equal(STR.sparedMate, '好险！司马懿没看见那步杀棋。');
   assert.equal(STR.takebackOffer, '刚才那步被抓住了。要不要悔一步重想？');
-  assert.equal(STR.ownWay, '小主公心里有数，亮放心。');
+  assert.equal(STR.ownWay, '好，听小主公的，亮不多问了。');      // CONTRACT-NOTES 152: 亮放心 was said one move before a mate
   assert.equal(STR.idleOffer, '要不要亮递个锦囊？');
   // the goal lines of the game-over card and of the next start
   assert.equal(STR.goalKept, '上盘说好的，做到了！');
   assert.equal(STR.goalNext(HABIT_FIX.greedy), '下一盘小目标——吃子之前，先看它有没有保镖。');
-  assert.equal(STR.goalNext(HABIT_FIX.miss_threat), '下一盘小目标——对方走完，先问自己：它想干什么。');
+  assert.equal(STR.goalNext(HABIT_FIX.miss_threat), '下一盘小目标——对方走完，先问自己：他想干什么。');
   assert.equal(STR.goalRecall(HABIT_FIX.greedy), '上盘说好的小目标——吃子之前，先看它有没有保镖。');
-  assert.equal(STR.goalRecall(HABIT_FIX.miss_threat), '上盘说好的小目标——对方走完，先问自己：它想干什么。');
+  assert.equal(STR.goalRecall(HABIT_FIX.miss_threat), '上盘说好的小目标——对方走完，先问自己：他想干什么。');
   // built from facts
   assert.equal(STR.chanceNudge('中路'), '中路好像有破绽，小主公找找看？');
   assert.equal(STR.toolBusy('马二进三'), '亮在沙盘上摆一摆【马二进三】……');
@@ -173,6 +174,7 @@ test('every other fixed line of 4.23, character for character', () => {
     hintUnavailable: '亮一时没算清楚，小主公先凭感觉走一步试试。',
     refusedFree: '这件事亮帮不上忙。要是心里有事，记得找爸爸妈妈或老师说说。咱们接着看棋？',
     undoDone: '好，退回小主公上一步之前。再想想！',
+    undoResign: '好，这盘接着下！',
     undoNone: '已经回到开局啦，没有可以悔的棋。',
     undoOpening: '司马懿刚走第一步，还轮不到悔棋呢。',
     tapOver: '这盘已经下完了——可以悔棋回看，或者再来一盘。',
@@ -269,6 +271,13 @@ test('the wording rules of CONTRACT-NOTES 113 to 115', () => {
   for (const n of [3, 4, 10]) assert.equal(STR.streakPopup(n), `${n}连好棋！`);
   assert.equal(CAT_LABEL.best, '好棋');
   assert.equal(CAT_LABEL.brilliant, '妙手');
+
+  // 150: a resignation that is taken back pops no move, so the line says that the game goes on and not that a move went
+  // back; it is a local line of one short sentence (the cap of a local template line is 20 characters, SPEC 8.3)
+  assert.equal(STR.undoResign, '好，这盘接着下！');
+  assert.ok(len(STR.undoResign) <= 20, STR.undoResign);
+  assert.ok(!STR.undoResign.includes('退') && !STR.undoResign.includes('上一步'), 'no move went back');
+  assert.ok(STR.undoDone.includes('退回'));
 
   // 115: a full store is not a bad file
   assert.equal(STR.importFull, '存储空间满了，这份存档放不进来。');

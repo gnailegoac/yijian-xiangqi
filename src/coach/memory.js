@@ -11,7 +11,8 @@ import { LIMITS, PROTOCOL_VERSION, validateCoachRequest } from './protocol.js';
 
 /**
  * @typedef {Object} GameMemory
- * @property {(ply:number, info:{move:N, cat:Cat, waited:boolean, self:boolean, packet:TryPacket|null, more:MorePacket|null}) => void} noteMine
+ * @property {(ply:number, info:{move:N, cat:Cat, waited:boolean, self:boolean, packet:TryPacket|null, more:MorePacket|null, forced?:boolean}) => void} noteMine
+ *           forced (optional, CONTRACT-NOTES 138): the move was made with at most two legal moves; it leaves no 'great' moment
  * @property {(ply:number, opp:OppMove) => void} noteOpp
  * @property {(codes:string[]) => void} noteTaught
  * @property {(code:HabitCode) => void} noteHabit           the habit was mentioned this game
@@ -124,18 +125,20 @@ function unwithheld(packet, more) {
  *   clauses of `isEarned` (section 4.14.5) that a packet shows are used: the only move, a trap stepped around, a tactic motif;
  * - a missed chance that cost nothing concrete (the try was not held) -> 'missed';
  * - a `mistake` / `blunder` -> 'slip'.
+ * A forced move (made with at most two legal moves, CONTRACT-NOTES 138) is never 'great': there was nothing to find.
  * @param {NonNullable<TurnBrief['mine']>} mine @param {boolean} held  the try was held (it loses something concrete)
+ * @param {boolean} forced
  * @returns {{tag:Moment['tag'], k:MotifCode|undefined}|null}
  */
-function momentOfMine(mine, held) {
+function momentOfMine(mine, held, forced) {
   const packet = mine.try;
   const lead = packet?.does[0]?.k;
   const flaw = packet?.flaws[0]?.k;
   if (packet) {
-    if (packet.chance === 'taken') return { tag: 'great', k: lead };
+    if (packet.chance === 'taken' && !forced) return { tag: 'great', k: lead };
     const earned = packet.only === true || packet.avoided !== undefined
       || (lead !== undefined && /** @type {readonly string[]} */ (TACTIC_MOTIFS).includes(lead));
-    if ((mine.cat === 'best' || mine.cat === 'brilliant') && earned) return { tag: 'great', k: lead };
+    if ((mine.cat === 'best' || mine.cat === 'brilliant') && earned && !forced) return { tag: 'great', k: lead };
     if (packet.chance === 'missed' && !held) return { tag: 'missed', k: flaw ?? packet.toward?.theme };
   }
   if (mine.cat === 'mistake' || mine.cat === 'blunder') return { tag: 'slip', k: flaw };
@@ -231,7 +234,7 @@ export function createGameMemory(saved) {
 
       dropMoment(ply);
       if (mine === null) return;
-      const found = momentOfMine(mine, mine.try !== undefined && packet?.held === true);
+      const found = momentOfMine(mine, mine.try !== undefined && packet?.held === true, info.forced === true);
       if (found !== null) putMoment(ply, found.tag, 'me', mine.move, found.k);
     },
 

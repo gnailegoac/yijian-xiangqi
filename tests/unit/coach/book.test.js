@@ -9,7 +9,7 @@ import { createMoveBook } from '../../../src/coach/book.js';
 import { parseCoachText, plainText } from '../../../src/coach/markup.js';
 import { NOTATION_RE } from '../../../src/core/codes.js';
 import { applyMove, createInitialBoard, fenToBoard, getLegalMoves, moveToNotation, opposite } from '../../../src/core/engine.js';
-import { describeMove, fromMoveCode, moveCode, toLine } from '../../../src/core/notation.js';
+import { describeMove, fromMoveCode, moveCode, parseNotation, toLine } from '../../../src/core/notation.js';
 import { COACH_EXAMPLE_POSITIONS } from '../../helpers/positions.js';
 import { playout } from '../../helpers/playout.js';
 
@@ -32,6 +32,11 @@ const replyLine = () => toLine(AFTER_TRIAL, 'black', [REFUTATION, ref('9172'), r
 const betterLine = () => toLine(BASE.board, 'red', [BEST, ref('0807'), ref('9897')]);
 
 const newBook = () => createMoveBook(BASE);
+/** The move a text names for `color` on a board by the tolerant parser, or null. */
+const fromText = (text, board, color) => {
+  const parsed = parseNotation(text, board, color);
+  return parsed.ok ? parsed.move : null;
+};
 
 /** Runs `fn` with console.warn replaced by a recorder. */
 function withWarnings(fn) {
@@ -226,6 +231,98 @@ test('resolveLoose never links a notation to another move: every move of both si
   }
   assert.ok(own > 2000 && replies > 1000, `moves checked: ${own} + ${replies}`);
   assert.ok(shared > 50, `texts that fit a move of each side: ${shared}`);
+});
+
+test('resolveLoose does not draw a move of the rival, or a move of an earlier position, as a move of the child (CONTRACT-NOTES 150)', () => {
+  // The parser reads both numeral scripts for both sides, so a notation of the rival (马8进7) fits the child's move on the
+  // mirrored file (马八进七) whenever that one is legal. Positions of random games, the child to move, no try on the board:
+  // every earlier move of the rival and every move he could play next, as the engine writes them.
+  let rivalTexts = 0, wouldFit = 0, ownEarlier = 0, ownFit = 0, ownNow = 0;
+  for (const seed of [3, 4, 5]) {
+    const game = playout({ seed, plies: 90, pawnBias: 0.2 });
+    /** The notation of the move that led to position i, by the side that played it. */
+    const played = game.slice(1).map((p, i) => ({ notation: moveToNotation(game[i].board, p.move), color: game[i].turn, code: moveCode(p.move) }));
+    for (let k = 2; k < game.length; k += 7) {
+      const { board, turn, moves } = game[k];
+      if (moves.length === 0) continue;
+      const rival = opposite(turn);
+      const book = createMoveBook({ board, turn });
+      const fits = (text) => fromText(text, board, turn) !== null;
+      const earlier = played.slice(0, k);
+      const his = [...earlier.filter((m) => m.color === rival).map((m) => m.notation), ...getLegalMoves(board, rival).map((m) => moveToNotation(board, m))];
+      for (const notation of his) {
+        rivalTexts++;
+        if (fits(notation)) wouldFit++;
+        assert.equal(book.resolveLoose(notation), null, `${notation} is a move of the rival (seed ${seed}, ply ${k})`);
+      }
+      // An earlier move of the child, read in this position, is whatever move of the child has that notation now (often
+      // on other squares). Told to the book as history it is no move of this position at all.
+      const mine = earlier.filter((m) => m.color === turn);
+      for (const m of mine) {
+        ownEarlier++;
+        const link = book.resolveLoose(m.notation);
+        if (link !== null) {
+          ownFit++;
+          assert.deepEqual([link.color, link.playable], [turn, true], m.notation);
+        }
+      }
+      book.past(mine.map((m) => m.notation));
+      for (const m of mine) assert.equal(book.resolveLoose(m.notation), null, `${m.notation} is history (seed ${seed}, ply ${k})`);
+      // every other move of the child still resolves to itself
+      const told = new Set(mine.map((m) => m.notation));
+      for (const move of moves) {
+        const notation = moveToNotation(board, move);
+        if (told.has(notation)) continue;
+        const link = book.resolveLoose(notation);
+        assert.ok(link, `${notation} is a move of the child`);
+        assert.deepEqual([link.code, link.color, link.playable], [moveCode(move), turn, true], notation);
+        ownNow++;
+      }
+    }
+  }
+  assert.ok(rivalTexts > 2000 && wouldFit > 500, `texts of the rival: ${rivalTexts}, of which ${wouldFit} fit a move of the child`);
+  assert.ok(ownEarlier > 500 && ownFit > 100 && ownNow > 1000, `earlier moves of the child: ${ownEarlier} (${ownFit} fit a move now); moves now: ${ownNow}`);
+
+  // The example of the finding: after 1. 炮二平五 马8进7 2. 马二进三 车9平8 3. 车一平二 卒7进1 the model says of round 1 that
+  // 【马8进7】 eyed the central pawn. The button moved the child's own horse (马八进七).
+  let board = createInitialBoard();
+  for (const code of ['7774', '0726', '9776', '0807', '9897', '3646']) board = applyMove(board, ref(code));
+  const book = createMoveBook({ board, turn: 'red' });
+  assert.ok(fromText('马8进7', board, 'red'), 'the text fits the child\'s horse on the mirrored file');
+  let segments = [];
+  const warnings = withWarnings(() => {
+    segments = parseCoachText('第1回合对方【马8进7】就盯上了中兵。对方下一步想走【炮8平9】。', book);
+  });
+  assert.deepEqual(segments.map((s) => s.type), ['text'], 'no button');
+  assert.equal(plainText(segments), '第1回合对方马8进7就盯上了中兵。对方下一步想走炮8平9。');
+  assert.equal(warnings.length, 2, 'both are reported as ungrounded');
+  // the child's own moves are untouched, in either spelling of the action and with full-width digits
+  assert.equal(book.resolveLoose('马八进七').code, '9172');
+  assert.equal(book.resolveLoose('傌八進七').code, '9172');
+  // ... and a sloppy spelling of a move the book offers still finds that move, while one of a move it does not offer does not
+  book.add('hint', toLine(board, 'red', [ref('9172')]));
+  assert.equal(book.resolveLoose('马8进7'), book.lookup('马八进七'));
+  assert.equal(book.resolveLoose('炮8平9'), null);
+
+  // past(): history is not resolved loosely; a notation that is registered is still found by lookup, which is asked first
+  // (the position of section 9.5: 马二进三 is a legal move of the child, and after the try 炮五进四 so is the rival's 马2进3)
+  const told = newBook();
+  assert.equal(told.resolveLoose('马二进三').code, '9776');
+  assert.equal(told.resolveLoose('马2进3', TRIAL).code, '0122');
+  told.past(['炮二平五', '【马二进三】', '马２进３', '', '好棋', 7]);
+  assert.equal(told.resolveLoose('马二进三'), null);
+  assert.equal(told.resolveLoose('马二进三', TRIAL), null);
+  assert.equal(told.resolveLoose('马2进3', TRIAL), null, 'nor as an answer of the rival');
+  assert.equal(told.resolveLoose('马八进七').code, '9172', 'what was not told still resolves');
+  assert.equal(told.size(), 0, 'history is not in the book');
+  assert.equal(told.lookup('马二进三'), null);
+  withWarnings(() => { segments = parseCoachText('第2回合我方【马二进三】。', told); });
+  assert.deepEqual(segments.map((s) => s.type), ['text']);
+  told.add('hint', betterLine());
+  assert.equal(told.lookup('马二进三').playable, true);
+  withWarnings(() => { segments = parseCoachText('可以走【马二进三】。', told); });
+  assert.deepEqual(segments.map((s) => s.type), ['text', 'move', 'text']);
+  assert.equal(segments[1].link, told.lookup('马二进三'));
 });
 
 test('lookup normalises glyph and digit variants', () => {

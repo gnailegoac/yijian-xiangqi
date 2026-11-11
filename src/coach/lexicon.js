@@ -1,7 +1,9 @@
 // src/coach/lexicon.js (C1) — Chinese term tables and clause builders (contract section 4.11).
 // Shared by the proxy renderer and the local narrator. Pure. Imports codes.js only.
 //
-// Voices: in `brief` voice the sides are 我方 / 对方, in `child` voice 你 / 对方.
+// Voices: in `brief` voice the sides are 我方 / 对方, in `child` voice 你 / 对方. The `rival` voice is the child voice for a
+// sentence whose subject is the rival (对方这步的用意：…): there his own pieces are 自己的, not 对方的 (CONTRACT-NOTES 138).
+// In the child voice a clause names 对方的 once: a rival piece named right after another one has no side word (item 147).
 
 /**
  * @import { Color } from '../core/types.js'
@@ -71,10 +73,37 @@ const CLAUSE = Object.freeze({
   waste: '这步没有实际作用，白让对方走一步',
 });
 /**
- * The cannon template without its screen clause. A Threat has no `on2` (section 3.6), yet a cannon aiming through a screen is a
- * threat kind (section 4.14.1), so threatClause meets `cannon_mount` without the screen.
+ * Clauses for an effect that leaves a piece out on purpose (CONTRACT-NOTES 133), so that the reader gets more than the bare
+ * term: a Threat has no `on2` (section 3.6); the brief names no forking piece when two pieces are attacked by different
+ * pieces, and in a first flaw no rival piece that does not play the reply (no guard of a greedy capture, no attacker of an
+ * ignored threat, no pinner). Tried in order after the full template: the first whose pieces are all in the effect is used.
+ * A clause says no more than its pieces show: without the second target of a fork, 只能救一个 is not claimed (the other may
+ * be the king), and of a pin without the piece behind only that the pinned piece is not free to move.
+ * @type {Readonly<Partial<Record<MotifCode, readonly string[]>>>}
  */
-const CANNON_NO_SCREEN = '{by}瞄着{on}';
+const PARTIAL = Object.freeze({
+  fork: ['{by}同时捉住{on}和另一个子', '{on}和{on2}同时被捉，只能救一个', '{by}同时捉住两个子'],
+  discovered: ['{by}一闪开，后面的子就打到了{on}'],
+  pin: ['{by}牵住了{on}，它不能随便动'],
+  cannon_mount: ['{by}瞄着{on}'],
+  hang: ['{on}没有保护，会被白吃'],
+  ignore_threat: ['没有理会对{on}的威胁'],
+  greedy: ['{on}有保护，{by}吃它不划算'],
+  walk_fork: ['{on}和{on2}会同时被捉'],
+  walk_pin: ['{on}会被牵住，动不了'],
+});
+/**
+ * Clauses for a second piece (`on2`) that is a king. A king is never lost and never "the one that is not saved": the piece
+ * that shields it from a pin cannot step away at all, and a fork that includes it is a check that also attacks the other
+ * piece. Tried before the full template, with and then without the acting piece. The first fork clause is also the one
+ * of a fork named `check_fork` whose second piece is not given (a Threat).
+ * @type {Readonly<Partial<Record<MotifCode, readonly string[]>>>}
+ */
+const KING_BEHIND = Object.freeze({
+  pin: ['{by}牵住了{on}，它挡着{on2}，不能走开'],
+  fork: ['{by}将军，同时捉住{on}', '将军的同时，{on}也被捉住'],
+  walk_fork: ['{by}一步就能将军，同时捉住{on}', '会被将军，同时{on}也被捉住'],
+});
 
 /** @param {Color} color @returns {Color} */
 const other = (color) => (color === 'red' ? 'black' : 'red');
@@ -99,21 +128,30 @@ function pieceList(pieces, owner) {
 // ---- helpers ----
 
 /**
+ * A piece without its side word: 7路马, 五路炮, 将.
+ * @param {WPiece} ref @param {Color} me @returns {string}
+ */
+function bareName(ref, me) {
+  const owner = ref.s === 'me' ? me : other(me);
+  const char = PIECE[owner][ref.t];
+  if (ref.t === 'K') return char;
+  const file = owner === 'red' ? (HANZI[ref.f - 1] ?? String(ref.f)) : String(ref.f);
+  return file + '路' + (ref.q ? RANK_WORD[ref.q] : '') + char;
+}
+
+/**
  * Side word + file numeral (汉字 for red, Arabic for black) + 路 + 前/中/后 when `q` + piece character; kings have no file.
- * `{s:'opp',t:'H',f:7}` with `me:'red'` -> brief 对方7路马, child 对方的7路马.
+ * `{s:'opp',t:'H',f:7}` with `me:'red'` -> brief 对方7路马, child 对方的7路马, rival 自己的7路马 (the child's pieces are 你的
+ * in the rival voice too).
  * @param {WPiece} ref
  * @param {Color} me
- * @param {'brief'|'child'} voice
+ * @param {'brief'|'child'|'rival'} voice
  * @returns {string}
  */
 export function pieceName(ref, me, voice) {
   const mine = ref.s === 'me';
-  const owner = mine ? me : other(me);
-  const side = voice === 'child' ? (mine ? '你的' : '对方的') : (mine ? '我方' : '对方');
-  const char = PIECE[owner][ref.t];
-  if (ref.t === 'K') return side + char;
-  const file = owner === 'red' ? (HANZI[ref.f - 1] ?? String(ref.f)) : String(ref.f);
-  return side + file + '路' + (ref.q ? RANK_WORD[ref.q] : '') + char;
+  const side = voice === 'brief' ? (mine ? '我方' : '对方') : mine ? '你的' : voice === 'rival' ? '自己的' : '对方的';
+  return side + bareName(ref, me);
 }
 
 /**
@@ -218,47 +256,88 @@ export function lineText(line, me) {
 }
 
 /**
+ * A clause template filled with the piece names of an effect; null when a piece the template names is absent.
+ * In the rival voice the clause continues a sentence about the rival: a piece of his that acts (`by`), or that follows
+ * 后面的, is named without a side word (7路马出动, 后面的5路炮), his other pieces are 自己的. Where the clause has a piece of
+ * the child as its own subject (你的四路马一步就能同时捉住…), 自己的 would point at that piece: his pieces are 他的 there.
+ * @param {string} template @param {Effect} effect @param {Color} me @param {'brief'|'child'|'rival'} voice @returns {string|null}
+ */
+function filled(template, effect, me, voice) {
+  let complete = true;
+  const first = /\{(by|on2|on)\}/.exec(template);
+  const childLeads = first !== null && effect[/** @type {'by'|'on'|'on2'} */ (first[1])]?.s === 'me';
+  /** The piece named just before the one being filled in. @type {WPiece|undefined} */
+  let previous;
+  const clause = template.replace(/\{(by|on2|on)\}/g, (_, key, at) => {
+    const ref = effect[/** @type {'by'|'on'|'on2'} */ (key)];
+    if (!ref) {
+      complete = false;
+      return '';
+    }
+    const before = previous;
+    previous = ref;
+    // 牵住了对方的5路马，它一动后面的对方的2路车就丢: the piece behind is of the side just named, so in the child's
+    // voices it is read without a second 对方的
+    if (voice !== 'brief' && ref.s === 'opp' && before?.s === 'opp' && template.slice(0, at).endsWith('后面的')) return bareName(ref, me);
+    // In the child's voice a clause says 对方的 once (CONTRACT-NOTES 147): a piece of the rival that is named right after
+    // another piece of his carries no second side word (你的四路马同时捉住对方的3路车和7路炮, 对方的5路卒有7路马保护).
+    if (voice === 'child' && ref.s === 'opp' && before?.s === 'opp') return bareName(ref, me);
+    if (voice === 'rival' && ref.s === 'opp') {
+      if (key === 'by') return bareName(ref, me);
+      if (childLeads) return '他的' + bareName(ref, me);
+    }
+    return pieceName(ref, me, voice);
+  });
+  return complete ? clause : null;
+}
+
+/**
  * The per-motif clause template of contract section 4.11 filled with piece names.
- * When a piece the template names is absent the clause falls back to the motif's term (MOTIF_TERM), except that a `cannon_mount`
- * without its screen reads {by}瞄着{on}.
+ * A second piece that is a king has its own wording (KING_BEHIND). When a piece the template names is absent, the clause is
+ * the first of the motif's templates for fewer pieces that can be filled (PARTIAL: a `cannon_mount` without its screen reads
+ * {by}瞄着{on}, a fork without a single forking piece {on}和{on2}同时被捉，只能救一个); when none can, the motif's term
+ * (MOTIF_TERM). A clause never prints a hole.
  * @param {Effect} effect
  * @param {Color} me
- * @param {'brief'|'child'} voice
+ * @param {'brief'|'child'|'rival'} voice  rival: for a sentence whose subject is the rival (see `filled`)
  * @returns {string}
  */
 export function effectClause(effect, me, voice) {
-  let template = entry(CLAUSE, effect.k);
-  if (template === undefined) return motifTerm(effect.k);
-  if (effect.k === 'cannon_mount' && !effect.on2) template = CANNON_NO_SCREEN;
-  let complete = true;
-  const clause = template.replace(/\{(by|on2|on)\}/g, (_, key) => {
-    const ref = effect[/** @type {'by'|'on'|'on2'} */ (key)];
-    if (!ref) complete = false;
-    return ref ? pieceName(ref, me, voice) : '';
-  });
-  return complete ? clause : motifTerm(effect.k);
+  const full = entry(CLAUSE, effect.k);
+  if (full === undefined) return motifTerm(effect.k);
+  const k = /** @type {MotifCode} */ (effect.k);
+  const kingBehind = effect.on2?.t === 'K' && effect.on?.t !== 'K' ? KING_BEHIND[k] ?? []
+    : k === 'fork' && effect.name === 'check_fork' && !effect.on2 ? KING_BEHIND.fork ?? [] : [];
+  for (const template of [...kingBehind, full, ...(PARTIAL[k] ?? [])]) {
+    const clause = filled(template, effect, me, voice);
+    if (clause !== null) return clause;
+  }
+  return motifTerm(effect.k);
 }
 
 /**
- * effectClause({k, by, on}, me, voice) of a threat.
+ * effectClause({k, by, on}, me, voice) of a threat. Its pattern name goes along: a fork named `check_fork` is told as a
+ * check that also attacks `on` (a Threat has no `on2` to show that the second target is the king).
  * @param {Threat} threat
  * @param {Color} me
- * @param {'brief'|'child'} voice
+ * @param {'brief'|'child'|'rival'} voice
  * @returns {string}
  */
 export function threatClause(threat, me, voice) {
-  return effectClause({ k: threat.k, by: threat.by, on: threat.on }, me, voice);
+  return effectClause({ k: threat.k, by: threat.by, on: threat.on, ...(threat.name ? { name: threat.name } : {}) }, me, voice);
 }
 
 /**
- * strength 长处：…; habit 下一盘的小目标：…; idea 可以学的一招：…; each followed by its example when `ex` exists.
+ * strength 长处：…; habit 下一盘的小目标——…; idea 可以学的一招：…; each followed by its example when `ex` exists.
+ * The goal follows a dash, as everywhere a goal is quoted (CONTRACT-NOTES 133): a goal may hold a colon of its own
+ * (对方走完，先问自己：他想干什么), and the model copies what it reads.
  * @param {WTakeaway} t
  * @param {Color} me
  * @returns {string}
  */
 export function takeawayClause(t, me) {
   const head = t.kind === 'strength' ? '长处：' + (entry(STRENGTH_WORD, t.code) ?? motifTerm(t.code))
-    : t.kind === 'habit' ? '下一盘的小目标：' + (entry(HABIT_FIX, t.code) ?? motifTerm(t.code))
+    : t.kind === 'habit' ? '下一盘的小目标——' + (entry(HABIT_FIX, t.code) ?? motifTerm(t.code))
     : '可以学的一招：' + (entry(PATTERN_NAME, t.code) ?? motifTerm(t.code));
   if (!t.ex) return head;
   return head + '，例如第' + t.ex.n + '回合【' + t.ex.move + '】' + (t.ex.better ? '，换成【' + t.ex.better + '】更好' : '');

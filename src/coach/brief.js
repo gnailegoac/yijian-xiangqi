@@ -27,7 +27,11 @@
 // - `held` also holds for a mistake that allows a forced mate whose distance is not known.
 // - `only` is set for the only move itself (the tried move is the best move), never for another move of that position, and
 //   only when it is a rescue ("the only move that avoids a serious loss"): the one move that wins material or mates is a
-//   find, not a rescue.
+//   find, not a rescue. Nor is a capture that wins material at once (CONTRACT-NOTES 147), whatever its line goes on to do.
+// - Praise needs something to praise (`isEarned`, CONTRACT-NOTES 147): the best move of a bad position earns none when its
+//   own line still leaves the child two points or more down, or when the child stays 500 cp or more behind after it and
+//   the line wins nothing. The local narrator applies the same rule to the packet (its row `try.grim`), with the band
+//   `lost` (600 cp) in the place of the 500 cp: a packet carries the band of an evaluation, not its centipawns.
 // - `mat.cp` counts every pawn as 100 (no bonus for a crossed pawn), so that "you are a pawn up" always agrees with the
 //   piece counts printed next to it.
 // - Flaws are sentences about the board, and a row is used only where its sentence is true (see `flawsOf`): `unguard` only
@@ -51,7 +55,18 @@
 // - The pass search adds a threat only when its first move is a threat in itself (a mate, a check, a capture, a fork, a
 //   discovered attack, a pin, an attack); a deeper plan is not listed. Its `by` is the piece that acts (the cannon that
 //   aims once a pawn has stepped aside), named where it stands now; an attack is told in preference to a pin or a
-//   discovered attack, whose clause would need the `on2` a Threat does not have.
+//   discovered attack, whose clause would need the `on2` a Threat does not have. Such a threat does not stand yet: it
+//   carries `prep: true` whenever its first move takes nothing (a threatened check included; a mate threat never, "he
+//   mates next" is true as the position is). A first move that threatens mate while its line wins material is told by
+//   what the line shows (an attack), never as `mate_threat` with another severity (CONTRACT-NOTES 131 b). A fork is told
+//   as a fork only when the move brings the double attack about: two pieces attacked by different pieces, or by a piece
+//   that stays put and attacks both already, are told as the attack on the first target (as the check the move gives,
+//   when no single piece forks and the line does not go on to take that target).
+// - `chance: 'taken'` only for a move judged good or better, by either clause of section 4.14.2 (CONTRACT-NOTES 131 a); the
+//   first move of the chance line with a worse verdict is `none`, never `missed`.
+// - `opp.quality` reports what the move gave up, whatever its kind (CONTRACT-NOTES 131 c): 150 cp or more is `slip` (the
+//   size of a chance), more than 50 is `soft` (no longer a steady move); `strong`, the kinds `chance` / `finisher` and a
+//   concession of more than 15 cp as section 4.14.1 and CONTRACT-NOTES 107 have them.
 // - A tool verdict's `cost` and `reply.net` are measured from the base position (section 3.6): they include what the
 //   moves that lead to the assessed position took.
 // - `chance.theme`: when the first move of the chance line shows no threat of its own, the theme is the capture the line
@@ -69,7 +84,8 @@
 //   while the child can still take back): the balance the best reply line predicted is not stated as a fact about a move
 //   that was answered differently, or whose predicted losses have not happened. The line itself stays in `mine.try.reply`.
 // - Pouch theme of `save_piece`: the way the piece is saved (escape, block, defend, or the capture of the attacker), not
-//   always `escape`: the piece to move is often not the piece in danger.
+//   always `escape`: the piece to move is often not the piece in danger. `escape` is given only when the piece that moves
+//   is the one that steps out of danger (the narrators rely on it); a rescue that no effect names is `defend`.
 
 /**
  * @import { Board, Color, Square, Piece, PieceRef, MoveRef, MoveInfo, Line, PositionFacts, MoveFacts, MaterialOutcome, Pattern,
@@ -123,6 +139,14 @@ const BETTER_GAIN = 60;
 const OPENING_PLIES = 8;
 /** `develop` is said of a move in the first 24 plies (section 4.14.3, row 16). */
 const DEVELOP_PLIES = 24;
+/** A rival move that gave up no more than this is as good as his best (the `best` threshold of section 4.6.1). */
+const BEST_LOSS = 15;
+/** A rival move that gave up more than this is no longer a steady move (the `ok` threshold of section 4.6.1, k = 1): it is soft. */
+const STEADY_LOSS = 50;
+/** A rival move that gave up this much or more left a hole: the size from which the teacher calls a gift a chance (section 4.7.5). */
+const SLIP_LOSS = 150;
+/** A second-best move that leaves the child below this is no advantage any more (the band `better` of section 3.6 starts here). */
+const SECOND_BEST_CP = 150;
 
 /** @param {number} x @param {number} lo @param {number} hi @returns {number} an integer in [lo, hi]; never -0 */
 function clampInt(x, lo, hi) {
@@ -1281,6 +1305,28 @@ function chanceOf(report) {
 }
 
 /**
+ * What the line of a quiet rival move shows it is after, as an attack that the move sets up: the capture the rival makes
+ * with his next move in the line, of a piece of the child that stands on that square now, by a piece that attacks it once
+ * the first move is on the board and does not attack it yet. Pieces are named where they stand after that move. Null when
+ * the line shows no such capture: the material falls later, or only through the answer the child is forced into, or the
+ * piece can be taken already (that capture is a threat of the position as it is, listed with the hanging pieces).
+ * @param {Line} line the rival's line, its first move taking nothing @param {Board} board the position now @param {Color} me
+ * @returns {Effect|null}
+ */
+function attackShownBy(line, board, me) {
+  const [lead, , next] = line.moves;
+  if (!lead || !next || next.captured === null) return null;
+  if (!isSquare(lead.from) || !isSquare(lead.to) || !isSquare(next.from) || !isSquare(next.to) || !board[lead.from.row][lead.from.col]) return null;
+  const after = applyMove(board, lead);
+  const victim = board[next.to.row][next.to.col];
+  const taker = after[next.from.row][next.from.col];
+  if (!victim || victim.color !== me || victim.type !== next.captured || after[next.to.row][next.to.col] !== victim) return null;
+  if (!taker || taker.color === me || !attacksSquare(after, next.from, next.to)) return null;
+  if (attacksSquare(board, sameSquare(next.from, lead.to) ? lead.from : next.from, next.to)) return null;
+  return effect(taker.type === 'cannon' ? 'cannon_mount' : 'attack', wpiece(pieceRef(after, next.from), me), wpiece(pieceRef(after, next.to), me));
+}
+
+/**
  * The threats of the position (section 4.14.1): the rival's forced mate, the child's pieces that can be taken with profit,
  * and what the pass search found beyond those; most severe first, at most LIMITS.THREATS. Each comes with the move to register.
  * @param {TurnReport} report @returns {{threat:Threat, move:MoveInfo}[]}
@@ -1328,32 +1374,68 @@ function threatsOf(report) {
   if (t && lead && by) {
     const net = netOf(t.outcome, false);
     const gain = Math.max(0, -net.cp);
+    // prep (CONTRACT-NOTES 131 b): a first move that takes nothing does not carry the threat out yet. What `k`, `by` and
+    // `on` describe (the check it gives, the attack it sets up) stands only once that move is played, and the narrators
+    // must not tell it as standing. A mate threat is the exception: "he mates next" is true of the position as it is.
+    /** @type {{prep?:true}} */
+    const prep = lead.captured === null ? { prep: true } : {};
     if (t.kind === 'mate') {
       add({ k: 'mate_threat', by, move: lead.notation, net: emptyNet(), sev: 'mate' }, lead, Infinity);
     } else if (t.kind === 'check') {
       // a check that wins less than a point (the pass search calls a line that wins more `wins-material`): the threat is
       // the check, and what either side takes in the line that follows is no part of it (对方下一步想走…，那样你白吃一个象
       // would be an odd intent)
-      add({ k: 'check', by, move: lead.notation, net: emptyNet(), sev: sevOf(gain) }, lead, gain);
+      add({ k: 'check', by, move: lead.notation, net: emptyNet(), sev: sevOf(gain), ...prep }, lead, gain);
     } else if (lead.captured !== null) {
       const on = w(refAt(board, lead.to));
       add({ k: by.t === 'C' ? 'cannon_mount' : 'attack', by, ...(on ? { on } : {}), move: lead.notation, net, sev: sevOf(gain) }, lead, gain);
     } else {
       // the first move of a line that wins material without taking at once: its leading effect, when that is a threat
       // (a fork, a check, an attack ...); a deeper plan is not a direct threat and is not listed. A threat carries no `on2`,
-      // so a pin or a discovered attack reads as its bare term: when the move also attacks a piece of the child outright,
-      // that attack is the threat that is told.
-      const effects = effectsOf(t.facts, { me, ply: null });
-      const told = has(SPOKEN_THREATS, effects[0].k) ? effects[0]
+      // so a pin or a discovered attack is told without its second piece: when the move also attacks a piece of the child
+      // outright, that attack is the threat that is told.
+      // A move that threatens mate while its line wins material instead (the mate is parried, at a price) is no mate
+      // threat of the position: its severity is that price. It is told by what the line shows: the attack the move also
+      // makes, else the capture the line goes on to make when that attack stands as soon as the move is played.
+      const effects = effectsOf(t.facts, { me, ply: null }).filter((e) => e.k !== 'mate_threat');
+      /** @type {Effect|null} */
+      let told = effects.length === 0 ? null : has(SPOKEN_THREATS, effects[0].k) ? effects[0]
         : effects.find((e) => (e.k === 'attack' || e.k === 'cannon_mount') && e.on?.s === 'me') ?? effects[0];
-      if (has(THREAT_MOTIFS, told.k)) {
+      if (t.facts.mateThreat && !(told && has(THREAT_MOTIFS, told.k))) told = attackShownBy(t.line, board, me);
+      const after = boardOf(t.facts.fenAfter);
+      // A fork that no single piece makes (two pieces attacked by different pieces) has no acting piece to name: it is told
+      // as the attack on its first target, by the piece that makes that attack. When the move gives check and the line does
+      // not go on to take that target, the check is the threat (a check that leaves an advisor en prise to another piece
+      // and wins two rooks elsewhere: 走完就是将军, not "then that piece can take your advisor").
+      // So is a fork by a piece that stays where it is and attacks both targets already: the move does not bring the double
+      // attack about, it makes the captures pay (it takes a guard away or adds an attacker), and 走完…就同时捉住… would
+      // tell an attack that is on the board as one that is still to come.
+      if (told && told.k === 'fork') {
+        const targets = t.facts.fork?.targets ?? [];
+        const forker = told.by && told.name !== 'check_fork' && after ? squareOfPiece(after, told.by, me) : null;
+        const stands = forker !== null && !sameSquare(forker, lead.to) && targets.length >= 2
+          && targets.slice(0, 2).every((target) => attacksSquare(board, forker, target.at));
+        if (!told.by || stands) {
+          const first = targets[0] ? t.facts.threats.find((x) => sameSquare(x.target.at, targets[0].at)) : undefined;
+          const taken = first !== undefined
+            && t.line.moves.some((m, k) => k >= 2 && k % 2 === 0 && m.captured !== null && sameSquare(m.to, first.target.at));
+          const check = told.by || taken ? undefined : effects.find((e) => e.k === 'check');
+          const moved = after ? refAt(after, lead.to) : null;
+          told = check ?? (!first ? null
+            : first.discovered ? effect('discovered', w(moved), w(first.target), w(first.by))
+              : first.viaScreen ? effect('cannon_mount', w(first.by), w(first.target), w(first.viaScreen)) : effect('attack', w(first.by), w(first.target)));
+        }
+      }
+      if (told && has(THREAT_MOTIFS, told.k)) {
         const on = told.on && told.on.s === 'me' ? told.on : undefined;
         // the piece that acts is not always the piece that moves (a pawn steps aside and a cannon aims): it is named where
         // it stands now
-        const after = boardOf(t.facts.fenAfter);
         const at = told.by && told.by.s === 'opp' && after ? squareOfPiece(after, told.by, me) : null;
         const actor = at && !sameSquare(at, lead.to) && board[at.row][at.col]?.color === rival ? w(refAt(board, at)) : undefined;
-        add({ k: told.k, by: actor ?? by, ...(on ? { on } : {}), move: lead.notation, net, sev: sevOf(gain) }, lead, gain);
+        // a fork that is a check as well keeps its name: without an `on2` nothing else tells that the other target is the king
+        /** @type {{name?:PatternCode}} */
+        const name = told.k === 'fork' && told.name === 'check_fork' ? { name: 'check_fork' } : {};
+        add({ k: told.k, by: actor ?? by, ...(on ? { on } : {}), move: lead.notation, net, sev: sevOf(gain), ...name, ...prep }, lead, gain);
       }
     }
   }
@@ -1414,13 +1496,18 @@ function oppOf(report) {
   const lines = [{ start: mf.fenBefore, moves: [move] }];
   const before = boardOf(mf.fenBefore), after = boardOf(mf.fenAfter);
 
+  // quality: what the move gave up, whatever its kind (CONTRACT-NOTES 131 c). A chance and a finisher are holes by their
+  // kind; so is any move that gave up as much as a chance does (since CONTRACT-NOTES 129 a move of kind `honest` can give up
+  // 500 cp, and an overlook passes up a piece). A move that gave up more than a steady move may is soft, as a concession
+  // is from the first centipawns it gives on purpose (CONTRACT-NOTES 107). What lies between the best move and a steady
+  // one stays `normal` (the 起马局 of section 9.5). Without a teaching choice (after an undo or a reload) nothing is claimed.
   /** @type {OppMove['quality']} */
   let quality = 'normal';
   const loss = last.quality?.loss ?? choice?.loss ?? 0;
   if (choice) {
-    if (choice.kind === 'chance' || choice.kind === 'finisher') quality = 'slip';
-    else if (choice.kind === 'concession' && loss > 15) quality = 'soft';                 // CONTRACT-NOTES 107
-    else if ((choice.kind === 'honest' || choice.kind === 'variety' || choice.kind === 'concession') && loss <= 15) quality = 'strong';
+    if (choice.kind === 'chance' || choice.kind === 'finisher' || loss >= SLIP_LOSS) quality = 'slip';
+    else if (loss > STEADY_LOSS || (choice.kind === 'concession' && loss > BEST_LOSS)) quality = 'soft';
+    else if ((choice.kind === 'honest' || choice.kind === 'variety' || choice.kind === 'concession') && loss <= BEST_LOSS) quality = 'strong';
   }
 
   // name: the rival's opening when this move changed it, else the first pattern the move played
@@ -1470,7 +1557,8 @@ function oppOf(report) {
 /**
  * The base brief of a thread. Registers in `book` the rival's move (and the capture he overlooked), every threat move, and the
  * child's previous move with the reply line of its packet. A moment of the memory is registered when it is one of those two
- * last moves: the memory keeps notations only, so the squares of an older moment are not known here.
+ * last moves: the memory keeps notations only, so the squares of an older moment are not known here. Every moment, and a
+ * previous move that could not be registered, is told to the book as history (`book.past`): it shows as plain text.
  * @param {TurnReport} report
  * @param {GameMemory} memory
  * @param {MoveBook} book
@@ -1524,14 +1612,22 @@ export function buildTurnBrief(report, memory, book) {
   const chance = playing && report.announceChance === true ? chanceOf(report) : null;
 
   // The book: what stood before first, so that a notation that is also a move of the present position resolves to that move.
+  const moments = snapshot.moments.slice(-LIMITS.MOMENTS);
   if (book) {
+    let registered = false;
     if (prev && prev.move && mine && mine.move === prev.move.notation) {
       const start = prev.assessed?.facts.fenBefore ?? '';
       const reply = prev.assessed && mine.try?.reply ? prev.assessed.assessment.line.moves.slice(1, 1 + mine.try.reply.moves.length) : [];
       book.add('mine', { start, moves: [prev.move, ...reply], end: 'quiet' });
+      registered = true;
     }
     for (const line of rivalMove?.lines ?? []) book.add('opp', { start: line.start, moves: line.moves, end: 'quiet' });
     for (const { move } of threats) book.add('threat', { start: { board, turn: rival }, moves: [move] });
+    // The moments the brief sends, and a previous move that could not be registered, are notations of earlier positions:
+    // the memory keeps no squares for them. They are told to the book as history, so that a 【notation】 copied from
+    // 本局回顾 is never drawn as whatever move of the present position fits the same text (CONTRACT-NOTES 150). A moment
+    // that was registered above still resolves to its own move: the book looks a registered notation up first.
+    if (typeof book.past === 'function') book.past([...moments.map((moment) => moment.move), ...(mine && !registered ? [mine.move] : [])]);
   }
 
   return {
@@ -1544,7 +1640,7 @@ export function buildTurnBrief(report, memory, book) {
     eval: evalOf(report.evalCp, report.mate),
     mat: materialOf(board, me),
     level: clampInt(report.level, 1, 9),
-    moments: snapshot.moments.slice(-LIMITS.MOMENTS),
+    moments,
     taught: snapshot.taught.slice(-LIMITS.TAUGHT),
     mine,
     opp: rivalMove ? rivalMove.opp : null,
@@ -1663,18 +1759,32 @@ export function buildTryPacket(assessed, ctx, book) {
   /** @type {TryPacket['toward']} */
   const toward = better[0] && better[0].move === a.best.notation ? { area: areaOf(a.best.to, me), theme: better[0].does[0].k } : null;
 
-  // chance: the rival's pending chance, taken or missed
+  // chance: the rival's pending chance, taken or missed. A taken chance is a good move (CONTRACT-NOTES 131 a): the first
+  // move of the chance line, or a move within 60 cp of the best, counts as taken only when it is judged good or better
+  // (a 缓着 is not praised for 抓住了对方的破绽 and leaves no 'great' moment). The chance move itself is never called a
+  // missed chance, whatever its verdict.
   /** @type {TryPacket['chance']} */
   let chance = 'none';
   if (report.lastOpp?.choice?.chance) {
     const first = pendingChance(report)?.first;
-    if ((first && sameMove(first, a.move)) || a.loss <= 60) chance = 'taken';
-    else if (a.loss >= 150) chance = 'missed';
+    const itsMove = first !== undefined && sameMove(first, a.move);
+    const fine = v.cat === 'brilliant' || v.cat === 'best' || v.cat === 'good';
+    if (fine && (itsMove || a.loss <= 60)) chance = 'taken';
+    else if (!itsMove && a.loss >= 150) chance = 'missed';
   }
 
-  // only: the tried move is the one move that avoids a serious loss (the only move that wins something is a find, not a rescue)
-  const only = a.flags.onlyMove === true && (a.isBest || v.cat === 'best' || v.cat === 'brilliant')
-    && a.outcome.net < 1 && a.flags.givesMate === null;
+  // only: the tried move is the one move that avoids a serious loss (the only move that wins something is a find, not a rescue).
+  // A capture that wins material at once is told as what it is, not as the only way out, whatever its line goes on to
+  // lose (CONTRACT-NOTES 147; item 106 keeps 妙手 away from such a move by the same test).
+  // And it is a rescue only when the best other move is really worse off (CONTRACT-NOTES 150): `onlyMove` says that it
+  // falls 150 cp or more short, which far ahead still leaves a winning move (只有【M】能解围 was said at +1247 with the
+  // second move at +1097). The second move must leave the child without an advantage (below +150), or in another band
+  // of the evaluation than the tried move does.
+  const second = a.alternatives[0];
+  const secondCp = second ? a.moveCp - second.loss : null;
+  const rescue = secondCp === null || secondCp < SECOND_BEST_CP || evalOf(secondCp, null).b !== evalOf(a.moveCp, null).b;
+  const only = a.flags.onlyMove === true && (a.isBest || v.cat === 'best' || v.cat === 'brilliant') && rescue
+    && a.outcome.net < 1 && a.flags.givesMate === null && !(mf.capture !== null && mf.capture.exchange === 'wins');
 
   /** @type {TryPacket['vsPrev']} */
   let vsPrev;
@@ -1824,10 +1934,12 @@ export function buildHintPacket(level, hint, ctx, book) {
     const lead = does.find((e) => e.k === 'fork' || e.k === 'discovered' || e.k === 'pin');
     theme = lead ? lead.k : mf.check?.discovered ? 'discovered' : does[0].k;
   } else if (hint.theme === 'save_piece') {
-    // how the piece is saved: it steps away, the move stands in the way, guards it, or takes the attacker
+    // how the piece is saved: it steps away, the move stands in the way, guards it, or takes the attacker. `escape` is kept
+    // for the piece that steps away itself: the narrators say of that theme that the piece to move is the one in danger.
+    // A piece that is saved in a way no effect names (the move takes the cannon's screen away, say) is protected: `defend`.
     const lead = does.find((e) => e.k === 'escape' || e.k === 'block' || e.k === 'defend')
       ?? does.find((e) => e.k === 'capture_free' || e.k === 'capture' || e.k === 'trade');
-    if (lead) theme = lead.k;
+    theme = lead ? lead.k : 'defend';
   }
   if (level === 1) return { focus, theme };
   if (level === 2) return { piece: wpiece(hint.piece, me), area: areaOf(hint.move.to, me), theme };
@@ -1865,6 +1977,72 @@ const MOTIF_OF_PATTERN = {
 /** @param {number} ply plies played before the move @returns {number} its move number */
 const moveNumber = (ply) => clampInt(Math.floor(ply / 2) + 1, 1, 301);
 
+/** A move made when the side to move had at most this many legal moves is forced (CONTRACT-NOTES 138). */
+const FORCED_MOVES = 2;
+/** scoreToCp of a position in which the side to move is mated by force (section 3, conventions). */
+const MATED_CP = -2000;
+/** A found test counts for the move that was played while that move is within this many centipawns of the best (teacher.js). */
+const FOUND_LOSS = 60;
+/** A move whose own main line leaves the mover this many points of material down, or more, earns no praise (CONTRACT-NOTES 147). */
+const GRIM_NET = -2;
+/** A move after which the mover stays this far behind, in centipawns, or further, earns praise only for what it wins (CONTRACT-NOTES 147). */
+const BEHIND_CP = -500;
+/** The first moves of a game are book moves: one of them is the proud move only when it won something (CONTRACT-NOTES 148). */
+const OPENING_MOVES = 5;
+
+/** @param {Cat} cat @returns {boolean} judged good or better */
+const isFine = (cat) => cat === 'brilliant' || cat === 'best' || cat === 'good';
+
+/**
+ * Whether a move of the child may be the proud move of the game (CONTRACT-NOTES 138): it was judged good or better, and it
+ * was not forced. A legal count of 0 means "not known" (the move was confirmed before any table), which is not forced.
+ * A move made when the mate could no longer be avoided is not proud either: there every move is "the best", and a lost
+ * game would end on the move just before the mate.
+ * Nor is a move that won nothing, in two cases (CONTRACT-NOTES 148): the best there was in a position that stays bad
+ * (the rule of `isEarned` as far as a sample can tell: the child was 500 cp or more behind; such a move is 最顽强, not
+ * 最漂亮), and a move of the first five rounds (a book move: 第1回合的炮二平五最漂亮 points at nothing). "Won something"
+ * is: it took a piece, found a test (500 cp or more behind: a test that wins, not one that saves), played a named pattern,
+ * is a 妙手, or belongs to a forced mate of the child's.
+ * @param {MoveSample} sample @returns {boolean}
+ */
+function canBeProud(sample) {
+  const forced = sample.legalCount >= 1 && sample.legalCount <= FORCED_MOVES;
+  const mated = sample.bestCp <= MATED_CP;
+  const behind = sample.bestCp <= BEHIND_CP;
+  // A found test wins something. Far behind only a test that wins does: a found `save` there is the most stubborn move,
+  // not the prettiest (第16回合的马二进四最漂亮 of a move a rook down whose horse was taken at once; CONTRACT-NOTES 152).
+  const test = sample.test ?? null;
+  const foundTest = test !== null && test.found && (!behind || test.kind === 'win');
+  const wonSomething = (sample.captured ?? null) !== null || foundTest
+    || sample.patterns.length > 0 || sample.final.cat === 'brilliant' || sample.bestCp >= -MATED_CP;
+  const hollow = !wonSomething && (behind || moveNumber(sample.ply) <= OPENING_MOVES);
+  return !forced && !mated && !hollow && isFine(sample.final.cat);
+}
+
+/**
+ * The best moment among `samples` by the rule of section 4.7.8, item 1, as teacher.js applies it: a found test in the
+ * highest tier (the latest of them), else the latest 妙手, else a 好棋 (one confirmed at the first try before the others,
+ * then the latest), else the first move that played a named pattern. Used when the highlight the brain chose may not be
+ * the proud move: the same rule then runs over the moves that may.
+ * @param {MoveSample[]} samples @returns {{sample:MoveSample, byPattern:boolean}|null}
+ */
+function bestMomentOf(samples) {
+  /** @type {MoveSample|null} */
+  let pick = null;
+  for (const s of samples) {
+    if (s.test && s.test.found && s.final.loss <= FOUND_LOSS && (pick === null || !pick.test || s.test.tier >= pick.test.tier)) pick = s;
+  }
+  if (pick !== null) return { sample: pick, byPattern: false };
+  for (const s of samples) if (s.final.cat === 'brilliant') pick = s;
+  if (pick !== null) return { sample: pick, byPattern: false };
+  for (const s of samples) {
+    if (s.final.cat === 'best' && (pick === null || s.tries === 1 || pick.tries !== 1)) pick = s;
+  }
+  if (pick !== null) return { sample: pick, byPattern: false };
+  const first = samples.find((s) => s.patterns.length > 0);
+  return first ? { sample: first, byPattern: true } : null;
+}
+
 /**
  * The game-over packet; owns the mapping from the brain's takeaways.
  * @param {{result:'win'|'loss'|'draw', reason:EndReason, finish:FinishResult, game:GameSkill, rankBefore:number, rankAfter:number,
@@ -1885,19 +2063,29 @@ export function buildOverPacket(input, book) {
 
   // stats: only good things
   const stats = {
-    good: samples.filter((s) => s.final.cat === 'brilliant' || s.final.cat === 'best' || s.final.cat === 'good').length,
+    good: samples.filter((s) => isFine(s.final.cat)).length,
     taken: foundTests('win'),
     captures: samples.filter((s) => s.captured !== null && s.captured !== undefined).length,
     brilliant: samples.filter((s) => s.final.cat === 'brilliant').length,
   };
 
-  // proud: the highlight
+  // proud: the highlight. The proud move was judged good or better and was not forced (CONTRACT-NOTES 138): when the
+  // highlight the brain chose is not such a move, the same rule picks among the moves that are (those the child found
+  // first, then all); a game without one has no proud move.
   /** @type {Moment|null} */
   let proud = null;
   /** @type {number|null} */
   let proudPly = null;
-  const highlight = takeaways.find((t) => t.kind === 'highlight');
-  if (highlight && highlight.move && typeof highlight.ply === 'number') {
+  const chosen = takeaways.find((t) => t.kind === 'highlight');
+  /** @type {{ply:number, move:MoveInfo, pattern?:PatternCode}|null} */
+  let highlight = chosen && chosen.move && typeof chosen.ply === 'number' ? { ply: chosen.ply, move: chosen.move, pattern: chosen.pattern } : null;
+  const chosenSample = highlight ? sampleAt(highlight.ply) : undefined;
+  if (highlight && chosenSample && !canBeProud(chosenSample)) {
+    const candidates = samples.filter(canBeProud);
+    const moment = bestMomentOf(candidates.filter((c) => c.self === true)) ?? bestMomentOf(candidates);
+    highlight = moment ? { ply: moment.sample.ply, move: moment.sample.final.move, pattern: moment.byPattern ? moment.sample.patterns[0] : undefined } : null;
+  }
+  if (highlight) {
     proudPly = highlight.ply;
     proud = { n: moveNumber(highlight.ply), s: 'me', move: highlight.move.notation, tag: 'great' };
     // its motif, from what the game recorded about the move: a mate, the pattern it played, a capture, a check
@@ -2001,7 +2189,15 @@ export function buildRecap(events) {
 }
 
 /**
- * Praise is earned by difficulty or consequence, never by centipawns alone.
+ * Praise is earned by difficulty or consequence, never by centipawns alone. A forced move earns none (CONTRACT-NOTES 138):
+ * with at most two legal moves there was nothing to find.
+ * And praise needs something to praise (CONTRACT-NOTES 147). The best move of a bad position earns none when its own main
+ * line still leaves the child two points of material or more down, or when the child stays 500 cp or more behind after it
+ * and the line wins nothing: the local narrator then says 是眼下最顽强的一步 (its row `try.grim`), not 漂亮. A move that
+ * mates or is a sound sacrifice keeps its praise; so does, however far behind the child is, a move that wins material back
+ * or is a tactic (TACTIC_MOTIFS).
+ * A move after which the child is mated by force earns none, whatever tactic it shows and whatever it takes (CONTRACT-NOTES
+ * 150): where every move is mated all moves are `best`, and a fork one move before the mate is nothing to cheer.
  * @param {Assessed} assessed
  * @param {{found:boolean, avoided:HabitCode|null}} info
  * @returns {boolean}
@@ -2009,11 +2205,19 @@ export function buildRecap(events) {
 export function isEarned(assessed, info) {
   const a = assessed.assessment;
   if (a.cat !== 'brilliant' && a.cat !== 'best') return false;
-  if (info?.found === true || a.flags.onlyMove === true || a.revealBest >= 3 || (info?.avoided ?? null) !== null) return true;
+  if (a.flags.allowsMate === true) return false;
+  const before = boardOf(assessed.facts.fenBefore);
+  if (before && getLegalMoves(before, a.move.color).length <= FORCED_MOVES) return false;
   // the leading effect of the move: the tactic motifs all sit in the rows that need neither the ply nor the board
   const mf = assessed.facts;
   const lead = effectsOf(mf, { me: mf.move.color, ply: null, givesMate: a.flags.givesMate, sacrifice: a.flags.sacrifice, patterns: a.patterns })[0];
-  return has(TACTIC_MOTIFS, lead.k);
+  const tactic = has(TACTIC_MOTIFS, lead.k);
+  if (a.flags.givesMate === null && a.flags.sacrifice !== true) {
+    if (a.outcome.net <= GRIM_NET) return false;
+    if (a.moveCp <= BEHIND_CP && a.outcome.net <= 0 && !tactic) return false;
+  }
+  if (info?.found === true || a.flags.onlyMove === true || a.revealBest >= 3 || (info?.avoided ?? null) !== null) return true;
+  return tactic;
 }
 
 /**

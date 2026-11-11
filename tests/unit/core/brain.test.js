@@ -1249,6 +1249,102 @@ test('opponent: a single legal move is played as it is; a move that mates ends i
 });
 
 /**
+ * How deep the rival's table is searched for a level on a plan row (CONTRACT-NOTES 143 a): he thinks as deep as his
+ * level, and never deeper than the device's row allows. Written out here from the owner's table, not taken from brain.js:
+ * depth 5 with every move exact to depth 3 below level 5, 6 and 4 below level 7, 7 and 4 below level 9 (the owner's
+ * starting value there was 5; it moved by one), the plan row at level 9.
+ */
+function rivalDepths(plan, level) {
+  const [d, a] = level < 5 ? [5, 3] : level < 7 ? [6, 4] : level < 9 ? [7, 4] : [plan.opponentDepth, plan.allDepth];
+  return { maxDepth: Math.min(plan.opponentDepth, d), allDepth: Math.min(plan.allDepth, a) };
+}
+
+test('opponent: the table of his turn is as deep as his level and never deeper than the plan row: levels 1, 4.9, 5, 6.9, 7, 8.9 and 9 on each row', async t => {
+  // [level, maxDepth, allDepth] of the request as plain numbers: min(plan.opponentDepth, d) and min(plan.allDepth, a)
+  const EXPECTED = {
+    fast: [[1, 5, 3], [4.9, 5, 3], [5, 6, 4], [6.9, 6, 4], [7, 7, 4], [8.9, 7, 4], [9, 8, 5]],
+    mid: [[1, 5, 3], [4.9, 5, 3], [5, 6, 4], [6.9, 6, 4], [7, 7, 4], [8.9, 7, 4], [9, 7, 4]],
+    slow: [[1, 5, 3], [4.9, 5, 3], [5, 6, 3], [6.9, 6, 3], [7, 6, 3], [8.9, 6, 3], [9, 6, 3]],
+  };
+  // The quiet ending, the rival (black) to move: every search of it ends by its depth limit long before thinkMs is over.
+  // The job's request cannot be read from outside, but its search can be recognised. On this clock a search reads the
+  // time a fixed number of times; a plain searcher that is asked for the expected request (the twin) tells that number,
+  // and the job must read the clock exactly as often for its table, plus once for the verification deadline. On his
+  // first move the teacher picks among the lines that are exact at the table's depth, so the chosen line shows that
+  // depth, and the twin's table handed to the teacher must give the very same choice.
+  const fen = boardToFen(fenToBoard(ENDING).board, 'black');
+  // A wide middlegame, for what the small ending cannot tell apart: there two tables that differ only in how deep every
+  // move is exact can take the same number of reads, here they never do (some of these searches are ended by thinkMs).
+  const wide = REFERENCE_POSITIONS.middlegameA;
+  const profile = createSkillProfile(2);
+  const seen = [];
+  for (const speedClass of ['fast', 'mid', 'slow']) {
+    const plan = PLAN[speedClass];
+    /** Clock reads and table of a plain search with the given depths and the row's thinking time. */
+    const twinOf = (maxDepth, allDepth, position = fen) => {
+      const before = clock.reads;
+      const table = createSearcher().analyzeSync({ fen: position, history: [], allDepth, multiPV: 6, maxDepth, timeMs: plan.thinkMs });
+      return { table, reads: clock.reads - before };
+    };
+    // one level of each row of the owner's table in the middlegame: 1, 5, 7 and 9
+    for (const [level, maxDepth, allDepth] of EXPECTED[speedClass].filter(([whole]) => Number.isInteger(whole))) {
+      const what = `${speedClass}, level ${level}, middlegame`;
+      const twin = twinOf(maxDepth, allDepth, wide);
+      for (const other of [3, 4, 5]) {
+        if (other !== allDepth && other <= plan.allDepth) assert.notEqual(twinOf(maxDepth, other, wide).reads, twin.reads, `${what}: allDepth ${other} instead of ${allDepth} shows in the reads`);
+      }
+      const ctx = { ...contextOf(profile, createGameSkill(7), 1, null), level };
+      const payload = { fen: wide, history: [], ply: 1, ctx, tensionPrev: 0.1, evalTwoPliesAgo: null };
+      const brain = brainOf(speedClass);
+      const before = clock.reads;
+      const turn = await brain.opponent(payload);
+      assert.equal(clock.reads - before, twin.reads + 1, `${what}: the job searched what the twin searched (allDepth ${allDepth}, maxDepth ${maxDepth})`);
+      checkOpponentTurn(turn, payload);
+      assert.equal(turn.choice.line.depth, twin.table.depth, what);
+      assertSameChoice(turn.choice, await chooseTeachingMove(twin.table, ctx, async () => assert.fail('no verification on his first move')), what);
+    }
+    const uncapped = twinOf(plan.opponentDepth, plan.allDepth);
+    const readsOf = [];
+    for (const [level, maxDepth, allDepth] of EXPECTED[speedClass]) {
+      const what = `${speedClass}, level ${level}`;
+      assert.deepEqual(rivalDepths(plan, level), { maxDepth, allDepth }, `${what}: the helper of this file`);
+      const twin = twinOf(maxDepth, allDepth);
+      assert.deepEqual([twin.table.depth, twin.table.allDepth, twin.table.stopped], [maxDepth, allDepth, 'depth'], `${what}: the premise, the search ends by its depths`);
+      // the premise of the fingerprint: a request with the row's own depth in either place takes another number of reads
+      if (maxDepth !== plan.opponentDepth) assert.notEqual(twinOf(plan.opponentDepth, allDepth).reads, twin.reads, `${what}: maxDepth shows in the reads`);
+      if (allDepth !== plan.allDepth) assert.notEqual(twinOf(maxDepth, plan.allDepth).reads, twin.reads, `${what}: allDepth shows in the reads`);
+      if (maxDepth !== plan.opponentDepth || allDepth !== plan.allDepth) assert.notEqual(uncapped.reads, twin.reads, `${what}: the plan row's request shows in the reads`);
+
+      const ctx = { ...contextOf(profile, createGameSkill(7), 1, null), level };
+      const payload = { fen, history: [], ply: 1, ctx, tensionPrev: 0.1, evalTwoPliesAgo: null };
+      const brain = brainOf(speedClass);
+      const before = clock.reads;
+      const turn = await brain.opponent(payload);
+      const reads = clock.reads - before;
+      checkOpponentTurn(turn, payload);
+      assert.equal(reads, twin.reads + 1, `${what}: the job searched what the twin searched (allDepth ${allDepth}, maxDepth ${maxDepth}, thinkMs ${plan.thinkMs})`);
+      assert.equal(turn.choice.kind, 'variety');
+      assert.equal(turn.choice.line.depth, maxDepth, `${what}: the depth of his table`);
+      assertSameChoice(turn.choice, await chooseTeachingMove(twin.table, ctx, async () => assert.fail('no verification on his first move')), what);
+      readsOf.push(reads);
+    }
+    // levels of one row of the owner's table send one and the same search, a higher row a larger one
+    for (let i = 1; i < readsOf.length; i++) {
+      const [low, d0, a0] = EXPECTED[speedClass][i - 1], [high, d1, a1] = EXPECTED[speedClass][i];
+      if (d0 === d1 && a0 === a1) assert.equal(readsOf[i], readsOf[i - 1], `${speedClass}: levels ${low} and ${high} search the same`);
+      else assert.ok(readsOf[i] > readsOf[i - 1], `${speedClass}: level ${high} searches more than level ${low}`);
+    }
+    seen.push(`${speedClass}: ${readsOf.join(' ')}`);
+  }
+  t.diagnostic(`clock reads of the opponent job at levels 1, 4.9, 5, 6.9, 7, 8.9, 9: ${seen.join('; ')}`);
+  // A level that is no number counts as the lowest level, as the teacher reads it.
+  const odd = { fen, history: [], ply: 1, ctx: { ...contextOf(profile, createGameSkill(7), 1, null), level: NaN }, tensionPrev: 0.1, evalTwoPliesAgo: null };
+  assert.equal((await brainOf('fast').opponent(odd)).choice.line.depth, 5);
+  // survey and assess keep the plan row: the two tests above that compare them with their twins run with a child of
+  // level 3 on every row, and in the quiet ending their tables reach surveyDepth / allDepth and assessDepth of the row.
+});
+
+/**
  * Rival decisions (black to move) taken from seeded bot games against a child that moves at random, with the teaching
  * context the game had reached. In each of them the child has just left something to be taken, the child is behind and
  * the rival is weak: the kind of position in which the teacher looks for a move to overlook or to give, and has it verified.
@@ -1347,12 +1443,12 @@ test('opponent: the teacher gets the table and the verify lines of the search un
     const { fen, history, ply, ctx } = scenario;
     const payload = { fen, history, ply, ctx, tensionPrev: 0.2, evalTwoPliesAgo: null };
 
-    // The twin: a plain searcher that is asked what the job asks (4.8.2 step 1), and the real teacher on its table with
+    // The twin: a plain searcher that is asked what the job asks (4.8.2 step 1, as deep as the rival's level), and the real teacher on its table with
     // a verify that is the single-move search of 4.8.1 with no deadline. On this clock the job's own searches are the
     // same searches, read for read, so the job must come to the same choice with the same root line.
     const twin = createSearcher();
     const before = clock.reads;
-    const table = twin.analyzeSync({ fen, history, allDepth: plan.allDepth, multiPV: 6, maxDepth: plan.opponentDepth, timeMs: plan.thinkMs });
+    const table = twin.analyzeSync({ fen, history, ...rivalDepths(plan, ctx.level), multiPV: 6, timeMs: plan.thinkMs });
     const tableReads = clock.reads - before;
     const asked = [];
     const unlimited = await chooseTeachingMove(table, ctx, async move => {
@@ -1420,7 +1516,7 @@ test('opponent: a cancel or a newer job that arrives inside a verification searc
     const payload = { fen, history, ply, ctx, tensionPrev: 0.2, evalTwoPliesAgo: null };
     tried++;
     let tableYields = 0;
-    await createSearcher().analyze({ fen, history, allDepth: plan.allDepth, multiPV: 6, maxDepth: plan.opponentDepth, timeMs: plan.thinkMs }, {
+    await createSearcher().analyze({ fen, history, ...rivalDepths(plan, ctx.level), multiPV: 6, timeMs: plan.thinkMs }, {
       cancelled: false, yield: async () => { tableYields++; },
     });
     let total = 0;

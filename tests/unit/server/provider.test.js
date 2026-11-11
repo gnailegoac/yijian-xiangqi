@@ -657,7 +657,9 @@ test('only the proxy config reaches the SDK: OPENAI_* variables of the machine a
   // The proxy is configured by COACH_* variables alone (section 7.9), sends no identifier to the gateway and logs no
   // request content (section 7.13), so a machine on which such variables happen to be set must not change either.
   const machine = { OPENAI_ORG_ID: 'org-of-the-machine', OPENAI_PROJECT_ID: 'proj_of_the_machine', OPENAI_LOG: 'debug',
-    OPENAI_API_KEY: 'sk-of-the-machine', OPENAI_BASE_URL: 'http://127.0.0.1:9/v1' };
+    OPENAI_API_KEY: 'sk-of-the-machine', OPENAI_BASE_URL: 'http://127.0.0.1:9/v1',
+    // an Authorization line of this variable replaced the coach's key (the SDK applies it after its own header)
+    OPENAI_CUSTOM_HEADERS: 'Authorization: Bearer sk-custom-of-the-machine' };
   const saved = Object.keys(machine).map((name) => [name, process.env[name]]);
   Object.assign(process.env, machine);
   const written = [];

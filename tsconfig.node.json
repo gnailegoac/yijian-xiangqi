@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["server/**/*.js", "scripts/**/*.js", "tests/helpers/**/*.js"]
+  "include": ["server/**/*.js", "scripts/**/*.js", "tests/helpers/**/*.js", "tests/e2e/**/*.js", "playwright.config.js"]
 }

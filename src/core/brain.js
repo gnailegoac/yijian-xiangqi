@@ -40,6 +40,14 @@
  *   position (a capture starts a new history); the answers are the lines exact at the final depth, at most three.
  *   When a mate is proven as above and the first answer of that search does not end in mate, the mating answer
  *   comes first, so that the assessment and the replies tell the same story.
+ * - opponent: the rival thinks as deep as his level, not as deep as the device allows (CONTRACT-NOTES 143 a; this departs
+ *   from step 1 of section 4.8.2). His table is searched to min(plan.opponentDepth, d) with every move exact to
+ *   min(plan.allDepth, a), d and a by the level of the payload's context (RIVAL_DEPTHS: 5 and 3 below level 5, 6 and 4
+ *   below level 7, 7 and 4 below level 9, the plan row at level 9). The low levels were tuned on a table of depth 5
+ *   with every move exact to depth 3; a deeper table sees the child's distant mates and tactics and rejects the soft
+ *   moves that would allow them, so the same rival was harder on a faster device. thinkMs and verifyMs stay: a search
+ *   that reaches its depth early ends early. The verify searches follow the table's depth, as before. survey, assess
+ *   and analyze keep the plan row.
  * - opponent: all verify calls of one selection share one deadline, verifyMs after the selection starts. A call
  *   made after the deadline returns null without searching; any other call returns the single-move RootLine of the
  *   search unchanged, with the time left as its `timeMs` (so the search's hard deadline is the shared one) and
@@ -75,6 +83,19 @@ const REPLY_COUNT = 3, REPLIES_MS = 150;
 const PV_LENGTH = 8;
 /** mateIn() of a repetition-ban score is 50 or more: such a score is a verdict, not a mate (CONTRACT-NOTES item 88). */
 const REPETITION_MATE = 50;
+/**
+ * How deep the rival's table is searched at most, by his level (CONTRACT-NOTES 143 a): below `below`, the table goes to
+ * `maxDepth` with every move exact to `allDepth`; the plan row caps both. From the last row's level on (level 9) the plan
+ * row alone decides. The first row is the instrument the low levels were tuned on. In the third row every move is exact
+ * to depth 4, not 5 as the owner's starting table had it: with 5, on a fast device, a fifth of the simulated games of
+ * a level-6.5 child went on for a hundred moves (in a long game he found a move to crack with less often); with 4 the
+ * fast and the mid device send the same request up to level 9.
+ */
+const RIVAL_DEPTHS = Object.freeze([
+  Object.freeze({ below: 5, maxDepth: 5, allDepth: 3 }),
+  Object.freeze({ below: 7, maxDepth: 6, allDepth: 4 }),
+  Object.freeze({ below: 9, maxDepth: 7, allDepth: 4 }),
+]);
 
 const now = () => performance.now();
 
@@ -365,8 +386,12 @@ export function createBrain(opts) {
     const { board, turn } = fenToBoard(fen);
     const child = opposite(turn);
 
-    // 1. The rival's table.
-    const table = await job.search({ fen, history, allDepth: plan.allDepth, multiPV: TABLE_MULTI_PV, maxDepth: plan.opponentDepth, timeMs: plan.thinkMs });
+    // 1. The rival's table, as deep as his level thinks and no deeper than the plan row (a level that is no number counts as the lowest).
+    const level = p.ctx.level;
+    const depths = RIVAL_DEPTHS.find(row => !(level >= row.below));
+    const maxDepth = depths === undefined ? plan.opponentDepth : Math.min(plan.opponentDepth, depths.maxDepth);
+    const allDepth = depths === undefined ? plan.allDepth : Math.min(plan.allDepth, depths.allDepth);
+    const table = await job.search({ fen, history, allDepth, multiPV: TABLE_MULTI_PV, maxDepth, timeMs: plan.thinkMs });
     await job.pause();
 
     // 2. The teaching choice. All verify calls share one deadline.

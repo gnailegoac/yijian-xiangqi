@@ -3,7 +3,9 @@
 // Package X7. Styles: styles/hud.css. Strings: ./texts.js.
 //
 // Events, dispatched on #app (bubbling CustomEvents):
-//   hud:action  {action}        'undo'            #undo-button, in every phase. It reads 悔棋 in every phase, also at game
+//   hud:action  {action, card?} card: true when a button of the game-over card sent it (the stage then holds what lies
+//                               under the card while it leaves; CONTRACT-NOTES 150)
+//                               'undo'            #undo-button, in every phase. It reads 悔棋 in every phase, also at game
 //                                                 over, where it still takes the last move back (§5.5; CONTRACT-NOTES
 //                                                 116). 回看 is the name of the conversation history only (chat-panel.js)
 //                               'hint'            #hint-button
@@ -41,6 +43,10 @@
 //     inert for that long, a tap on the dimmed area around a menu, sheet or dialog is ignored for that long after
 //     it opened, and an overlay that is fading out still takes the taps. A scripted click on #hint-button or
 //     #newgame-button right after a phase change therefore waits a moment (the element cannot be hit while inert).
+//     The buttons of the game-over card are held the same way when the card comes up, and longer while a burst of
+//     taps goes on (showOver). While a game is over and its card is still to come, the stage calls holdNewGame(true):
+//     再来一局 of the action bar and 新对局 of the menu are disabled until the card is up (or will not come), and
+//     新对局 of the menu then stays disabled for as long as the card's own buttons are held.
 //   - Trophies: six discs and +n (§12.3). A phone narrower than 416 px shows the newest four, or the newest three
 //     and the counter, because the plate's thinking dots need the room beside it; while 司马懿 speaks a line there,
 //     the round and the trophies are hidden for those 2.4 s (hud.css reads the plate's .rival[data-say]).
@@ -103,6 +109,10 @@ const LAYER_RANK = { start: 1, menu: 2, sheet: 2, dialog: 3, blocking: 4 };
 /** Children double-tap. A control that has just appeared under the finger does not take the second tap: 再来一局
  *  and the pouches that replace another button in the action slot, and the "tap outside" of a fresh overlay. */
 const TAP_GUARD_MS = 350;
+/** The buttons of the game-over card when it comes up: a tap that arrives while they are held holds them this much
+ *  longer, but never past CARD_BURST_MAX_MS after the card came up (the stage holds what lies around the card alike). */
+const TAP_BURST_MS = 500;
+const CARD_BURST_MAX_MS = 4000;
 const IMPORT_MAX_BYTES = 4 * 1024 * 1024;      // a backup is a few kilobytes; anything huge is not one
 
 /** What the settings sheet shows before the stage has handed over real data (the defaults of §3.9). @type {Settings} */
@@ -268,7 +278,7 @@ function tabbable(rootEl) {
 /**
  * @param {{ topbar:HTMLElement, underbar:HTMLElement, actions:HTMLElement, overlays:HTMLElement }} hosts
  * @param {{ audio:AudioEngine, rival:ReturnType<typeof createRivalView>, support:{tts:boolean, haptics:boolean} }} deps
- * @returns {Hud}
+ * @returns {Hud & {holdNewGame:(held:boolean) => void}}   holdNewGame is not in the frozen typedef of src/ui/types.js
  */
 export function createHud(hosts, deps) {
   const doc = hosts.topbar.ownerDocument;
@@ -421,6 +431,10 @@ export function createHud(hosts, deps) {
     hosts.actions.append(slot.el);
   }
   /** @type {SlotName|null} */ let activeSlot = null;
+  /** A game is over and its card is still to come (holdNewGame): nothing starts a new game yet. */
+  let newGameHeld = false;
+  /** The game-over card whose buttons are still held (showOver): 新对局 of the menu is held with them. @type {object|null} */
+  let cardGuard = null;
 
   hintBtn.addEventListener('click', () => act('hint'));
   retractBtn.addEventListener('click', () => act('retract'));
@@ -628,6 +642,7 @@ export function createHud(hosts, deps) {
       item.setAttribute('role', 'menuitem');
       item.dataset.menu = id;
       if (id === 'resign') item.disabled = phase === 'boot' || phase === 'over';      // nothing to resign from
+      if (id === 'new-game') item.disabled = newGameHeld || cardGuard !== null;       // a game has just ended: its card comes first
       item.addEventListener('click', () => { closeMenu(false); run(); });
       panel.append(item);
     }
@@ -637,6 +652,12 @@ export function createHud(hosts, deps) {
     menu = openLayer({ type: 'menu', panel, menu: true, closeMs: 140, dismiss: () => closeMenu(true) });
     menuBtn.setAttribute('aria-expanded', 'true');
     audio.play('ui.open');
+  }
+
+  /** 新对局 of an open menu follows what holds a new game back: the wait for the card, and the card's own tap guard. */
+  function syncMenuNewGame() {
+    const item = menu ? menu.panel.querySelector('.hud-menu__item[data-menu="new-game"]') : null;
+    if (item instanceof HTMLButtonElement) item.disabled = newGameHeld || cardGuard !== null;
   }
 
   /** @param {boolean} sound */
@@ -1110,18 +1131,55 @@ export function createHud(hosts, deps) {
     void root.offsetWidth;
     root.classList.add('is-open');
 
+    // The card comes up seconds after the last move, perhaps under a finger that is still tapping where 确定落子 was (in
+    // the upright layout its buttons lie over the action bar). Its buttons take no tap until the card is in place and
+    // TAP_GUARD_MS more have passed; a tap that arrives meanwhile holds them TAP_BURST_MS longer, but never past
+    // CARD_BURST_MAX_MS after the card came up: a child who keeps tapping 再来一局 is not kept out.
+    // 新对局 of a menu that the same finger has opened meanwhile is held with them: it was not available while the card
+    // was awaited (holdNewGame), and a tap of that burst must not start a new game the moment the card shows.
+    const shownAt = Date.now();
+    let freeAt = shownAt;
+    /** @type {ReturnType<typeof setTimeout>|null} */ let guard = null;
+    const held = {};
+    const release = () => {
+      if (guard !== null) clearTimeout(guard);
+      guard = null;
+      buttons.inert = false;
+      doc.removeEventListener('pointerdown', burst, true);
+      if (cardGuard === held) {
+        cardGuard = null;
+        syncMenuNewGame();
+      }
+    };
+    /** The buttons stay held until `until` (a later moment that was asked for before stands). @param {number} until */
+    const hold = (until) => {
+      freeAt = Math.max(freeAt, until);
+      if (guard !== null) clearTimeout(guard);
+      guard = setTimeout(release, Math.max(0, freeAt - Date.now()));
+    };
+    function burst() {
+      if (guard !== null) hold(Math.min(Date.now() + TAP_BURST_MS, shownAt + CARD_BURST_MAX_MS));
+    }
+    buttons.inert = true;
+    cardGuard = held;
+    syncMenuNewGame();
+    doc.addEventListener('pointerdown', burst, true);
+    hold(shownAt + (motionFull() ? 300 : 0) + TAP_GUARD_MS);
+
     let closed = false;
     const close = () => {
       if (closed) return;
       closed = true;
+      release();
       if (over?.root === root) over = null;
       root.classList.remove('is-open');
       root.classList.add('is-closing');
       freeze(card);
       afterMotion(300, () => root.remove());
     };
-    again.addEventListener('click', () => { close(); act('new-game'); });
-    review.addEventListener('click', () => { close(); act('review'); });
+    // `card: true` tells the stage that the action came from the card: what lies under the card is held while it leaves
+    again.addEventListener('click', () => { close(); emit('hud:action', { action: 'new-game', card: true }); });
+    review.addEventListener('click', () => { close(); emit('hud:action', { action: 'review', card: true }); });
     card.addEventListener('keydown', (event) => { if (event.key === 'Escape') { event.stopPropagation(); close(); } });
     over = { root, close };
     return { takeaway, close };
@@ -1169,8 +1227,19 @@ export function createHud(hosts, deps) {
   // Controller
   // =====================================================================================================================
 
-  /** @type {Hud} */
+  /** @type {Hud & {holdNewGame:(held:boolean) => void}} */
   const hud = {
+    /**
+     * A game has just ended and its card is still to come (the stage says when, and when no longer): 再来一局 of the
+     * action bar and 新对局 of the menu are shown as not available yet, so that a finger that keeps tapping where
+     * 确定落子 was starts no new game before the card has been seen. The card brings its own 再来一局.
+     */
+    holdNewGame(held) {
+      newGameHeld = held;
+      newGameBtn.disabled = held;
+      syncMenuNewGame();
+    },
+
     setPhase(p) {
       const opened = p.hintLevel > hintLevel;
       phase = p.phase;

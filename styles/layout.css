@@ -322,6 +322,24 @@ html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: non
   box-shadow: 0 12px 32px #0006;
 }
 
+/* ---- when the game does not come up ------------------------------------------------------------------------------------ *
+ * One line with a reload button over the shell (the inline script of index.html; src/app.js before its stage exists).
+ * The whole line is the button; it takes the theme's primary colours, so it reads in all three skeletons. */
+
+.boot-fail {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: var(--z-toast);
+  width: max-content; max-width: calc(100vw - 32px);
+}
+.boot-fail__reload {
+  -webkit-appearance: none; appearance: none; display: block; width: 100%; min-height: 56px; margin: 0; padding: 12px 20px;
+  border: 0; border-radius: var(--r-card);
+  background: var(--accent); color: var(--accent-ink);
+  font: 700 20px/32px var(--font-kai); text-align: center; text-wrap: balance;
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--accent) 55%, #000), 0 12px 32px #0006;
+  cursor: pointer; touch-action: manipulation;
+}
+.boot-fail__reload:active { transform: translateY(2px); }
+
 /* ---- placeholders ------------------------------------------------------------------------------------------------------ *
  * What an empty region shows until its module has filled it: the shell while the game loads. Every rule is tied
  * to :empty, so it stops applying the moment a module adds its first node. Nothing here moves. */

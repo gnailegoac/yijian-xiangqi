@@ -70,16 +70,25 @@ test('every motif has a term and a clause template', () => {
     // a clause template, filled in both voices
     for (const voice of ['brief', 'child']) {
       const n = names[voice];
-      const expected = TEMPLATES[code].replaceAll('{by}', n.by).replaceAll('{on2}', n.on2).replaceAll('{on}', n.on);
+      let expected = TEMPLATES[code].replaceAll('{by}', n.by).replaceAll('{on2}', n.on2).replaceAll('{on}', n.on);
+      // in the child voice a clause says 对方的 once (CONTRACT-NOTES 138 and 147): of the two rival pieces of this effect
+      // (`on` and `on2`) the one that is named second, right after the other, has no side word
+      if (voice === 'child' && TEMPLATES[code].includes('{on}') && TEMPLATES[code].includes('{on2}')) {
+        const second = TEMPLATES[code].indexOf('{on2}') > TEMPLATES[code].indexOf('{on}') ? n.on2 : n.on;
+        expected = expected.replace(second, second.replace('对方的', ''));
+      }
       assert.equal(effectClause({ k: code, by, on, on2 }, 'red', voice), expected, `${code} / ${voice}`);
       assert.doesNotMatch(expected, /[{}]/);
+      // 对方的 once in the child's voice; the model's line (brief voice) keeps every side word
+      if (voice === 'child') assert.ok((expected.match(/对方的/g) ?? []).length <= 1, `${code}: ${expected}`);
     }
     // a clause is a clause: no sentence end, no bracket
     assert.doesNotMatch(effectClause({ k: code, by, on, on2 }, 'red', 'child'), /[。！？【】]/);
   }
 
   // two spot checks written out in full
-  assert.equal(effectClause({ k: 'fork', by, on, on2 }, 'red', 'child'), '你的八路马同时捉住对方的7路马和对方的5路炮，只能救一个');
+  assert.equal(effectClause({ k: 'fork', by, on, on2 }, 'red', 'child'), '你的八路马同时捉住对方的7路马和5路炮，只能救一个');
+  assert.equal(effectClause({ k: 'fork', by, on, on2 }, 'red', 'brief'), '我方八路马同时捉住对方7路马和对方5路炮，只能救一个');
   assert.equal(effectClause({ k: 'greedy', by: { s: 'me', t: 'C', f: 5 }, on: { s: 'opp', t: 'P', f: 5 }, on2: { s: 'opp', t: 'H', f: 7 } }, 'red', 'brief'),
     '对方5路卒有对方7路马保护，我方五路炮吃了它会被吃回');
 
@@ -104,9 +113,86 @@ test('every motif has a term and a clause template', () => {
     net: { gain: [], lose: ['P'], cp: -100 }, sev: 'pawn' }, 'red', 'child'), '对方的5路炮瞄着你的五路兵');
 
   // a clause whose piece is missing never prints a hole: it falls back to the motif's term
-  assert.equal(effectClause({ k: 'fork', on, on2 }, 'red', 'brief'), '捉双');
   assert.equal(effectClause({ k: 'capture' }, 'red', 'child'), '吃子');
-  assert.equal(effectClause({ k: 'pin', by, on }, 'red', 'child'), '牵制');
+  assert.equal(effectClause({ k: 'fork' }, 'red', 'brief'), '捉双');
+  assert.equal(effectClause({ k: 'pin', by }, 'red', 'child'), '牵制');
+  for (const code of MOTIF_CODES) {
+    for (const effect of [{ k: code }, { k: code, by }, { k: code, on }, { k: code, on2 }, { k: code, by, on }, { k: code, by, on2 }, { k: code, on, on2 }]) {
+      for (const voice of ['brief', 'child']) {
+        const clause = effectClause(effect, 'red', voice);
+        assert.ok(clause.length >= 2, `${code}: never empty`);
+        assert.doesNotMatch(clause, /[{}。！？【】]|undefined|null/, `${code}: ${clause}`);
+      }
+    }
+  }
+});
+
+test('clauses for an effect that leaves a piece out on purpose, and for a king as the second piece (CONTRACT-NOTES 133)', () => {
+  const by = { s: 'opp', t: 'H', f: 3 };
+  const on = { s: 'me', t: 'R', f: 6 };
+  const on2 = { s: 'me', t: 'C', f: 5 };
+  const king = { s: 'me', t: 'K', f: 5 };
+  const child = (effect) => effectClause(effect, 'red', 'child');
+  const brief = (effect) => effectClause(effect, 'red', 'brief');
+
+  // A Threat has no on2 (section 3.6): a fork, a discovered attack and a pin are told without their second piece. Without
+  // it nothing is claimed about it: not 只能救一个 (the other target may be the king), not 后面的…就丢.
+  assert.equal(child({ k: 'fork', by, on }), '对方的3路马同时捉住你的六路车和另一个子');
+  assert.equal(brief({ k: 'fork', by, on }), '对方3路马同时捉住我方六路车和另一个子');
+  assert.equal(child({ k: 'fork', by }), '对方的3路马同时捉住两个子');
+  assert.equal(child({ k: 'discovered', by, on }), '对方的3路马一闪开，后面的子就打到了你的六路车');
+  assert.equal(child({ k: 'pin', by, on }), '对方的3路马牵住了你的六路车，它不能随便动');
+  assert.equal(child({ k: 'cannon_mount', by: { s: 'opp', t: 'C', f: 5 }, on }), '对方的5路炮瞄着你的六路车');
+  const net = { gain: [], lose: ['R'], cp: -900 };
+  assert.equal(threatClause({ k: 'fork', by, on, move: '马3进4', net, sev: 'rook', prep: true }, 'red', 'child'), '对方的3路马同时捉住你的六路车和另一个子');
+  assert.equal(threatClause({ k: 'pin', by, on, move: '马3进4', net, sev: 'rook', prep: true }, 'red', 'brief'), '对方3路马牵住了我方六路车，它不能随便动');
+
+  // No single piece does the damage: two pieces attacked by different pieces (the example of the task notes).
+  assert.equal(child({ k: 'fork', on, on2 }), '你的六路车和你的五路炮同时被捉，只能救一个');
+  assert.equal(brief({ k: 'fork', on, on2 }), '我方六路车和我方五路炮同时被捉，只能救一个');
+  assert.equal(child({ k: 'walk_fork', on, on2 }), '你的六路车和你的五路炮会同时被捉');
+
+  // The first flaw names no rival piece that does not play the reply: no attacker, no guard, no pinner.
+  assert.equal(child({ k: 'hang', on }), '你的六路车没有保护，会被白吃');
+  assert.equal(child({ k: 'ignore_threat', on }), '没有理会对你的六路车的威胁');
+  assert.equal(child({ k: 'walk_pin', on }), '你的六路车会被牵住，动不了');
+  const greedy = { k: 'greedy', by: { s: 'me', t: 'C', f: 5 }, on: { s: 'opp', t: 'P', f: 5 } };
+  assert.equal(child(greedy), '对方的5路卒有保护，你的五路炮吃它不划算');
+  assert.equal(brief(greedy), '对方5路卒有保护，我方五路炮吃它不划算');
+  // with all its pieces every clause is the template of section 4.11
+  // (in the child's voice with 对方的 once, CONTRACT-NOTES 147; the model's line keeps both side words)
+  assert.equal(child({ ...greedy, on2: { s: 'opp', t: 'H', f: 7 } }), '对方的5路卒有7路马保护，你的五路炮吃了它会被吃回');
+  assert.equal(brief({ ...greedy, on2: { s: 'opp', t: 'H', f: 7 } }), '对方5路卒有对方7路马保护，我方五路炮吃了它会被吃回');
+  assert.equal(child({ k: 'hang', on, by }), '你的六路车没有保护，会被对方的3路马白吃');
+
+  // A king as the second piece. A piece that shields its king cannot step away: 它一动后面的…将就丢 was false.
+  const pin = { k: 'pin', by: { s: 'me', t: 'C', f: 8 }, on: { s: 'opp', t: 'E', f: 3 }, on2: { s: 'opp', t: 'K', f: 5 } };
+  assert.equal(child(pin), '你的八路炮牵住了对方的3路象，它挡着将，不能走开');
+  assert.equal(brief(pin), '我方八路炮牵住了对方3路象，它挡着对方将，不能走开');
+  // the piece behind is of the side just named: the child reads it without a second 对方的 (CONTRACT-NOTES 138); the model's
+  // line keeps both side words
+  assert.equal(child({ ...pin, on2: { s: 'opp', t: 'R', f: 3 } }), '你的八路炮牵住了对方的3路象，它一动后面的3路车就丢');
+  assert.equal(brief({ ...pin, on2: { s: 'opp', t: 'R', f: 3 } }), '我方八路炮牵住了对方3路象，它一动后面的对方3路车就丢');
+  assert.equal(child({ k: 'pin', by: { s: 'opp', t: 'C', f: 2 }, on: { s: 'me', t: 'H', f: 8 }, on2: { s: 'me', t: 'R', f: 9 } }), '对方的2路炮牵住了你的八路马，它一动后面的你的九路车就丢');
+  assert.equal(child({ k: 'discovered', by: { s: 'opp', t: 'H', f: 5 }, on: { s: 'me', t: 'K', f: 5 }, on2: { s: 'opp', t: 'C', f: 5 } }), '对方的5路马一闪开，后面的5路炮就打到了你的帅');
+  // A fork that includes the king is a check that also attacks the other piece: nobody chooses to save the other one.
+  assert.equal(child({ k: 'fork', by, on, on2: king }), '对方的3路马将军，同时捉住你的六路车');
+  assert.equal(child({ k: 'fork', on, on2: king }), '将军的同时，你的六路车也被捉住');
+  assert.equal(child({ k: 'walk_fork', by, on, on2: king }), '对方的3路马一步就能将军，同时捉住你的六路车');
+  assert.equal(child({ k: 'walk_fork', on, on2: king }), '会被将军，同时你的六路车也被捉住');
+  for (const text of [child(pin), child({ k: 'fork', by, on, on2: king }), child({ k: 'fork', on, on2: king }), child({ k: 'walk_fork', by, on, on2: king })]) {
+    assert.doesNotMatch(text, /就丢|只能救一个|捉住.*[帅将]$/, text);
+  }
+  // A Threat has no on2 to show that the second target of a fork is the king: the fork's name says it (check_fork), and
+  // the clause is the same check that also attacks the piece. Any other name leaves a clause as it is.
+  assert.equal(threatClause({ k: 'fork', by, on, move: '马3进4', net, sev: 'rook', name: 'check_fork', prep: true }, 'red', 'child'), '对方的3路马将军，同时捉住你的六路车');
+  assert.equal(threatClause({ k: 'fork', by, on, move: '马3进4', net, sev: 'rook', name: 'check_fork', prep: true }, 'red', 'brief'), '对方3路马将军，同时捉住我方六路车');
+  assert.equal(threatClause({ k: 'fork', by, on, move: '马3进4', net, sev: 'rook', name: 'fork_two', prep: true }, 'red', 'child'), '对方的3路马同时捉住你的六路车和另一个子');
+  assert.equal(child({ k: 'fork', by, on, on2, name: 'check_fork' }), '对方的3路马同时捉住你的六路车和你的五路炮，只能救一个');
+  assert.equal(threatClause({ k: 'mate_threat', by, move: '马3进4', net, sev: 'mate', name: 'trough_horse' }, 'red', 'child'), '对方的3路马下一步就要将死，必须先解围');
+  // other clauses with a king are the templates as printed (a king can be checked, squeezed, named)
+  assert.equal(child({ k: 'restrict_king', on: king }), '封住了你的帅的一条退路');
+  assert.equal(child({ k: 'cannon_mount', by: { s: 'opp', t: 'C', f: 5 }, on, on2: king }), '对方的5路炮借你的帅当炮架，瞄着你的六路车');
 });
 
 test('every pattern, habit and strength code has its word', () => {
@@ -118,7 +204,9 @@ test('every pattern, habit and strength code has its word', () => {
   for (const code of HABIT_CODES) {
     assert.ok(HABIT_WORD[code].length > 0 && HABIT_FIX[code].length > 0, code);
     assert.ok(motifTerm(code).length >= 2, code);
-    assert.equal(takeawayClause({ kind: 'habit', code }, 'red'), '下一盘的小目标：' + HABIT_FIX[code]);
+    // the goal follows a dash (CONTRACT-NOTES 133): never two colons in one sentence, whatever the goal holds
+    assert.equal(takeawayClause({ kind: 'habit', code }, 'red'), '下一盘的小目标——' + HABIT_FIX[code]);
+    assert.ok((takeawayClause({ kind: 'habit', code }, 'red').match(/：/g) ?? []).length <= 1, code);
   }
   for (const code of STRENGTH_CODES) {
     assert.equal(motifTerm(code), STRENGTH_WORD[code], code);
@@ -138,7 +226,7 @@ test('every pattern, habit and strength code has its word', () => {
 
   // the takeaway of section 9.8, with its example
   assert.equal(takeawayClause({ kind: 'habit', code: 'greedy', n: 2, ex: { n: 2, move: '炮五进四', better: '马二进三' } }, 'red'),
-    '下一盘的小目标：吃子之前，先看它有没有保镖，例如第2回合【炮五进四】，换成【马二进三】更好');
+    '下一盘的小目标——吃子之前，先看它有没有保镖，例如第2回合【炮五进四】，换成【马二进三】更好');
   assert.equal(takeawayClause({ kind: 'strength', code: 'S_tactics', ex: { n: 18, move: '马三进四' } }, 'red'),
     '长处：抓战术机会很准，例如第18回合【马三进四】');
   assert.equal(takeawayClause({ kind: 'idea', code: 'horse_cannon', ex: { n: 30, move: '炮8进7', better: '马7进6' } }, 'black'),
@@ -292,6 +380,95 @@ test('lineText lists every ply in order', () => {
       assert.ok(text.endsWith('，结果：双方都没有丢子'));
       // every bracket holds exactly one notation, unchanged
       for (const m of plies) assert.match(m[2], NOTATION_RE);
+    }
+  }
+});
+
+test('the rival voice: in a sentence about the rival his own pieces are 自己的, and his piece that acts has no side word (CONTRACT-NOTES 138)', () => {
+  const P = (s, t, f, q) => (q ? { s, t, f, q } : { s, t, f });
+  // pieceName: the child's pieces are 你的 as in the child voice; the rival's are 自己的
+  assert.equal(pieceName(P('opp', 'P', 5), 'red', 'rival'), '自己的5路卒');
+  assert.equal(pieceName(P('opp', 'P', 5), 'black', 'rival'), '自己的五路兵');
+  assert.equal(pieceName(P('opp', 'K', 5), 'red', 'rival'), '自己的将');
+  assert.equal(pieceName(P('opp', 'C', 2, 'front'), 'red', 'rival'), '自己的2路前炮');
+  assert.equal(pieceName(P('me', 'H', 3), 'red', 'rival'), '你的三路马');
+  assert.equal(pieceName(P('me', 'H', 3), 'red', 'rival'), pieceName(P('me', 'H', 3), 'red', 'child'));
+  // the two other voices are what they were
+  assert.deepEqual([pieceName(P('opp', 'H', 7), 'red', 'brief'), pieceName(P('opp', 'H', 7), 'red', 'child')], ['对方7路马', '对方的7路马']);
+
+  const clause = (effect, me = 'red') => effectClause(effect, me, 'rival');
+  // 对方这步的用意：给自己的5路卒补上保护。 (the child voice reads 给对方的5路卒补上保护)
+  assert.equal(clause({ k: 'defend', on: P('opp', 'P', 5) }), '给自己的5路卒补上保护');
+  assert.equal(effectClause({ k: 'defend', on: P('opp', 'P', 5) }, 'red', 'child'), '给对方的5路卒补上保护');
+  assert.equal(clause({ k: 'open_rook', on: P('opp', 'R', 8) }), '给自己的8路车亮出了通道');
+  // the piece that acts continues the sentence without a side word; the child's pieces keep 你的
+  assert.equal(clause({ k: 'develop', by: P('opp', 'H', 7) }), '7路马出动');
+  assert.equal(clause({ k: 'attack', by: P('opp', 'R', 8), on: P('me', 'H', 3) }), '8路车捉你的三路马');
+  assert.equal(clause({ k: 'cannon_mount', by: P('opp', 'C', 5), on: P('me', 'P', 5), on2: P('opp', 'P', 5) }), '5路炮借自己的5路卒当炮架，瞄着你的五路兵');
+  assert.equal(clause({ k: 'cannon_mount', by: P('opp', 'C', 5), on: P('me', 'P', 5), on2: P('me', 'C', 5) }), '5路炮借你的五路炮当炮架，瞄着你的五路兵');
+  assert.equal(clause({ k: 'unguard', by: P('opp', 'H', 7), on: P('opp', 'C', 3) }), '7路马一走，自己的3路炮就没人保护了');
+  assert.equal(clause({ k: 'block', by: P('opp', 'E', 5), on: P('opp', 'R', 5) }), '5路象垫在中间，挡住了对自己的5路车的攻击');
+  assert.equal(clause({ k: 'restrict_king', on: P('me', 'K', 5) }), '封住了你的帅的一条退路');
+  // a piece of his that follows 后面的 has no side word either
+  assert.equal(clause({ k: 'discovered', by: P('opp', 'H', 5), on: P('me', 'K', 5), on2: P('opp', 'C', 5) }), '5路马一闪开，后面的5路炮就打到了你的帅');
+  assert.equal(clause({ k: 'pin', by: P('opp', 'C', 2), on: P('me', 'H', 8), on2: P('me', 'R', 9) }), '2路炮牵住了你的八路马，它一动后面的你的九路车就丢');
+  // a flaw of a rival move: his piece that is lost is 自己的, the child's piece that takes it 你的
+  assert.equal(clause({ k: 'hang', on: P('opp', 'H', 7), by: P('me', 'R', 3) }), '自己的7路马没有保护，会被你的三路车白吃');
+  // ... but where a piece of the child is the subject of the clause, 自己的 would point at that piece: his pieces are 他的
+  assert.equal(clause({ k: 'walk_fork', by: P('me', 'H', 4), on: P('opp', 'R', 3), on2: P('opp', 'C', 7) }), '你的四路马一步就能同时捉住他的3路车和他的7路炮');
+  assert.equal(clause({ k: 'ignore_threat', by: P('me', 'R', 3), on: P('opp', 'H', 7) }), '没有理会你的三路车对他的7路马的威胁');
+  // a black child: the rival is red, his files are written in 汉字
+  assert.equal(clause({ k: 'defend', on: P('opp', 'P', 5) }, 'black'), '给自己的五路兵补上保护');
+  assert.equal(clause({ k: 'attack', by: P('opp', 'R', 8), on: P('me', 'H', 3) }, 'black'), '八路车捉你的3路马');
+  // the shorter templates and the term when a piece is missing, as in the other voices
+  assert.equal(clause({ k: 'cannon_mount', by: P('opp', 'C', 5), on: P('me', 'P', 5) }), '5路炮瞄着你的五路兵');
+  assert.equal(clause({ k: 'defend' }), MOTIF_TERM.defend);
+  assert.equal(threatClause({ k: 'attack', by: P('opp', 'R', 8), on: P('me', 'H', 3), move: '车9平8', net: { gain: [], lose: ['H'], cp: -400 }, sev: 'piece' }, 'red', 'rival'), '8路车捉你的三路马');
+  // no clause of the rival voice says 对方的: the sentence it continues has said 对方 already
+  for (const k of MOTIF_CODES) {
+    for (const me of ['red', 'black']) {
+      const text = clause({ k, by: P('opp', 'H', 8), on: P('opp', 'C', 7), on2: P('opp', 'R', 3) }, me);
+      assert.doesNotMatch(text, /对方的/, `${k}: ${text}`);
+      assert.doesNotMatch(text, /[{}]|undefined/, `${k}: ${text}`);
+    }
+  }
+});
+
+test('the child voice says 对方的 once in a clause: a rival piece named right after another has no side word (CONTRACT-NOTES 147)', () => {
+  const P = (s, t, f, q) => (q ? { s, t, f, q } : { s, t, f });
+  const child = (effect, me = 'red') => effectClause(effect, me, 'child');
+  const brief = (effect, me = 'red') => effectClause(effect, me, 'brief');
+  // the three clauses the polish package listed (fork, greedy, cannon), about the child's own move
+  const fork = { k: 'fork', by: P('me', 'H', 3), on: P('opp', 'R', 7), on2: P('opp', 'C', 3) };
+  assert.equal(child(fork), '你的三路马同时捉住对方的7路车和3路炮，只能救一个');
+  const greedy = { k: 'greedy', by: P('me', 'C', 5), on: P('opp', 'P', 5), on2: P('opp', 'H', 7) };
+  assert.equal(child(greedy), '对方的5路卒有7路马保护，你的五路炮吃了它会被吃回');
+  const cannon = { k: 'cannon_mount', by: P('me', 'C', 5), on: P('opp', 'A', 4), on2: P('opp', 'P', 5) };
+  assert.equal(child(cannon), '你的五路炮借对方的5路卒当炮架，瞄着4路士');
+  // a fork without a single forking piece, and a pin on the piece that shields the king
+  assert.equal(child({ k: 'fork', on: P('opp', 'R', 7), on2: P('opp', 'C', 3) }), '对方的7路车和3路炮同时被捉，只能救一个');
+  assert.equal(child({ k: 'pin', by: P('me', 'R', 2), on: P('opp', 'H', 5), on2: P('opp', 'K', 5) }), '你的二路车牵住了对方的5路马，它挡着将，不能走开');
+  // the same when the rival's piece acts (his cannon behind his own pawn): the second piece of his is bare
+  assert.equal(child({ k: 'cannon_mount', by: P('opp', 'C', 5), on: P('me', 'P', 5), on2: P('opp', 'P', 5) }), '对方的5路炮借5路卒当炮架，瞄着你的五路兵');
+  // 前 / 后 and a black child (the rival's files are then written in 汉字): only the side word goes
+  assert.equal(child({ ...fork, on2: P('opp', 'C', 3, 'front') }), '你的三路马同时捉住对方的7路车和3路前炮，只能救一个');
+  assert.equal(child(fork, 'black'), '你的3路马同时捉住对方的七路车和三路炮，只能救一个');
+  // a piece of the child between two of the rival's, or a single rival piece, keeps every side word
+  assert.equal(child({ k: 'cannon_mount', by: P('me', 'C', 5), on: P('opp', 'P', 5), on2: P('me', 'P', 5) }), '你的五路炮借你的五路兵当炮架，瞄着对方的5路卒');
+  assert.equal(child({ k: 'cannon_mount', by: P('opp', 'C', 5), on: P('opp', 'A', 4), on2: P('me', 'P', 5) }), '对方的5路炮借你的五路兵当炮架，瞄着对方的4路士');
+  assert.equal(child({ k: 'attack', by: P('me', 'R', 2), on: P('opp', 'H', 7) }), '你的二路车捉对方的7路马');
+  // the child's own pieces are not touched (你的 … 你的 as before)
+  assert.equal(child({ k: 'walk_fork', by: P('opp', 'H', 5), on: P('me', 'C', 8), on2: P('me', 'A', 6) }), '对方的5路马一步就能同时捉住你的八路炮和你的六路仕');
+  // the model's line (brief voice) is unchanged: every piece carries its side
+  assert.equal(brief(fork), '我方三路马同时捉住对方7路车和对方3路炮，只能救一个');
+  assert.equal(brief(greedy), '对方5路卒有对方7路马保护，我方五路炮吃了它会被吃回');
+  assert.equal(brief(cannon), '我方五路炮借对方5路卒当炮架，瞄着对方4路士');
+  // over every motif: with the rival's pieces as `on` and `on2` (the child acts) no clause says 对方的 twice
+  for (const k of MOTIF_CODES) {
+    for (const me of ['red', 'black']) {
+      const text = child({ k, by: P('me', 'H', 8), on: P('opp', 'C', 7), on2: P('opp', 'R', 3) }, me);
+      assert.ok((text.match(/对方的/g) ?? []).length <= 1, `${k}: ${text}`);
+      assert.doesNotMatch(text, /[{}]|undefined/, `${k}: ${text}`);
     }
   }
 });

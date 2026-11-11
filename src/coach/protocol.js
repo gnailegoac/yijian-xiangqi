@@ -348,9 +348,22 @@ function oppMove(x, path) {
   });
 }
 
-/** @param {unknown} x @param {string} path @returns {Threat} */
+/**
+ * A flag that travels only when it holds: `true`. An absent member says "no"; `false` is not a value of the wire.
+ * @param {unknown} x @param {string} path @returns {true}
+ */
+function onlyTrue(x, path) {
+  if (typeof x !== 'boolean') return fail(path, 'type');
+  if (!x) return fail(path, 'enum');
+  return true;
+}
+
+/**
+ * `prep` (CONTRACT-NOTES 131): the threat's move takes nothing and `k` / `by` / `on` describe the attack that stands after it.
+ * @param {unknown} x @param {string} path @returns {Threat}
+ */
 function threat(x, path) {
-  const o = record(x, path, ['k', 'by', 'on', 'move', 'net', 'sev', 'name']);
+  const o = record(x, path, ['k', 'by', 'on', 'move', 'net', 'sev', 'name', 'prep']);
   return compact({
     k: motif(o.k, at(path, 'k')),
     by: wpiece(o.by, at(path, 'by')),
@@ -359,6 +372,7 @@ function threat(x, path) {
     net: net(o.net, at(path, 'net')),
     sev: oneOf(o.sev, at(path, 'sev'), SEVERITIES),
     name: optional(o.name, at(path, 'name'), patternCode),
+    prep: optional(o.prep, at(path, 'prep'), onlyTrue),
   });
 }
 

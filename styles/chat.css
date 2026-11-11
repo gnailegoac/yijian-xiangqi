@@ -56,6 +56,20 @@
 }
 .move-link--play:active { background: color-mix(in srgb, var(--accent) 30%, transparent); }
 
+/* A link of an earlier position (chat-panel retireLinks): its squares may hold other pieces by now. It is a word of its
+ * sentence again, in the sentence's colour and weight, with no underline and no tap area: a tap goes to what is
+ * behind it, as on any other word. The ▶ 演示 of such a line leaves. (The third selector outweighs the colour rule
+ * of a board seen from black's side.) */
+.move-link:disabled,
+.move-link[data-color]:disabled,
+:root:has(.bv[data-bottom="black"]) .move-link[data-color]:disabled {
+  display: inline; margin: 0; padding: 0; border-radius: 0; background: none; box-shadow: none;
+  color: inherit; font-weight: inherit; cursor: inherit; pointer-events: none;
+  -webkit-user-select: auto; user-select: auto;
+}
+.move-link:disabled::before, .move-link:disabled::after { content: none; }
+.move-link--play:disabled { display: none; }
+
 /* The tool indicator at the end of a line: 亮在沙盘上摆一摆【…】…… */
 .chat-tool { position: relative; display: block; padding-left: 1.45em; color: var(--ink-2); font-size: .9em; }
 .chat-tool::before {

@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 
 import { SYSTEM_PROMPT, TOOLS, buildMessages, renderEvent, renderToolResult, renderTurn } from '../../../server/prompt.js';
-import { composeLocal } from '../../../src/coach/fallback.js';
+import { composeLocal, cueFor, localLine } from '../../../src/coach/fallback.js';
 import { sanitizeSay, validateCoachRequest } from '../../../src/coach/protocol.js';
 import { ASK_CODES, ASK_LABEL, CATS, CAT_LABEL, CUE, CUE_CODES, HABIT_CODES, NOTATION_SCAN_RE } from '../../../src/core/codes.js';
 
@@ -66,7 +66,20 @@ const TURN_95 = `〔军情〕
 对方刚走：【马8进7】（起马局）。作用：对方7路马出动；给对方5路卒补上保护。
 对方的威胁（清单完整）：眼下没有直接威胁。`;
 
-/** 9.8: the game is over. */
+/** The directive of the game-over event: the goal is on the card already and is not repeated (CONTRACT-NOTES 138). */
+const OVER_DIRECTIVE = '先用半句回应胜负（赢了一起高兴，输了先安慰），再讲「要点」里的那一条，引用本局那一步，这一句不超过30字。'
+  + '「下一盘小目标」界面已经单独显示给小主公了，回复里不要再说一遍；要点就是这个小目标时，只讲它引用的那一步。一共80字以内。';
+
+/** 9.8: the game is over. In its thread (the first event is `over`) the position line does not say 轮到小主公走. */
+const TURN_OVER_THREAD = `〔军情〕
+局面：第34回合，小主公执红，残局阶段。
+形势：胜势。子力：我方 车1 马1 炮1 兵2 仕2 相2；对方 马1 卒1 士1 象1。我方多大约一个车。
+小主公水平：3/9（多用大白话）。
+本局回顾：第18回合我方【马三进四】好棋（捉双）。
+本局已讲过：捉双、贪吃。
+小主公上一步：【车二进七】（好棋，是自己想出来的）。
+对方的威胁（清单完整）：眼下没有直接威胁。`;
+/** The same brief rendered as the turn of a running game (renderTurn with one argument). */
 const TURN_OVER = `〔军情〕
 局面：第34回合，小主公执红，轮到小主公走。残局阶段。
 形势：胜势。子力：我方 车1 马1 炮1 兵2 仕2 相2；对方 马1 卒1 士1 象1。我方多大约一个车。
@@ -123,12 +136,12 @@ const EV_HINT3_LAST = `〔事件〕小主公打开了第三个锦囊。
 
 const EV_OVER = `〔事件〕棋局结束：小主公胜（将死），共走了34步。
 〔本局小结〕亮点：好棋25步，抓住机会2次，吃子9个，妙手1步。
-要点：下一盘的小目标：吃子之前，先看它有没有保镖，例如第2回合【炮五进四】，换成【马二进三】更好。
+要点：下一盘的小目标——吃子之前，先看它有没有保镖，例如第2回合【炮五进四】，换成【马二进三】更好。
 最得意的一步：第18回合【马三进四】（捉双）。
-下一盘小目标：吃子之前，先看它有没有保镖。
+下一盘小目标——吃子之前，先看它有没有保镖。
 兵法境界升到了「初露锋芒」。
 〔已喊〕「大捷！」
-〔要求〕先用半句回应胜负（赢了一起高兴，输了先安慰），再讲「要点」里的那一条，引用本局那一步，这一句不超过30字；有「下一盘小目标」就用它收尾。一共80字以内。`;
+〔要求〕${OVER_DIRECTIVE}`;
 
 const EV_RECAP = `〔前情〕本回合小主公已试走：【炮五进四】（失误）、【兵三进一】（缓着）、【马二进三】（好棋）；锦囊已开到第1个。
 〔推演〕评定：好棋（和最好的走法几乎一样）。
@@ -177,7 +190,7 @@ const GOLDEN = {
   'ask-tools.json': { turn: TURN_95, events: [EV_OPP_95, EV_INTENT, EV_FREE_EARLIER_TOOLS, EV_WHY_LAST] },
   'hint.json': { turn: TURN_95, events: [EV_OPP_95, EV_HINT1, EV_HINT2, EV_HINT3_LAST] },
   'opp.json': { turn: TURN_OPP, events: [EV_OPP_93] },
-  'over.json': { turn: TURN_OVER, events: [EV_OVER] },
+  'over.json': { turn: TURN_OVER, thread: TURN_OVER_THREAD, events: [EV_OVER] },
   'recap.json': { turn: TURN_95, events: [EV_RECAP, EV_GOOD, EV_REPLY_NO_BETTER, EV_SCORE, EV_DANGER, EV_LAST, EV_BETTER_LAST] },
   'start.json': { turn: TURN_START, events: [EV_START] },
   'try-held-ask.json': { turn: TURN_95, events: [EV_OPP_95, EV_TRY_HELD, EV_REPLY_MORE_LAST] },
@@ -230,7 +243,9 @@ test('golden files for renderTurn / renderEvent / renderToolResult on every fixt
         { role: 'tool', tool_call_id: 'call_7Qm2', content: golden.tool },
       ];
     }
-    assert.deepEqual(buildMessages(req, req.resume ? LEGS_97 : []), expectedMessages(req, golden.turn, golden.events, legMessages),
+    // the turn as the first user message carries it: in a game-over thread nobody is to move
+    assert.equal(renderTurn(req.turn, req.events[0].kind === 'over'), golden.thread ?? golden.turn, `${name}: turn of the thread`);
+    assert.deepEqual(buildMessages(req, req.resume ? LEGS_97 : []), expectedMessages(req, golden.thread ?? golden.turn, golden.events, legMessages),
       `${name}: messages`);
   }
   // the past tool exchange of ask-tools.json is the verdict of 9.7
@@ -377,9 +392,39 @@ test('negative sentences appear only with their known flag', () => {
   assert.ok(lines(t).includes(`对方的威胁：${item}`));
   assert.ok(!lines(t).join('\n').includes('清单完整'));
 
+  // a threat that does not stand yet (`prep`, CONTRACT-NOTES 131 b): the move comes first and the model is told that the
+  // attack only follows it; the balance is added as for any threat
+  const NOT_YET = '（这个威胁现在还没有形成，要等这步走完才有）';
+  const prepLine = (threat) => lines({ ...base, threats: [threat], known: { threats: true, chance: false } }).find((l) => l.startsWith('对方的威胁'));
+  // (an attack is told as a capture that then pays: the piece may aim at its target already)
+  assert.equal(prepLine({ ...threat, prep: true }), `对方的威胁（清单完整）：①对方想走【炮5进4】，走完之后对方5路炮就能吃掉我方五路兵${NOT_YET}，得手后我方白丢一个兵。`);
+  const by = { s: 'opp', t: 'H', f: 3 };
+  const on = { s: 'me', t: 'R', f: 6 };
+  const quiet = { move: '马3进4', net: { gain: [], lose: ['R'], cp: -900 }, sev: 'rook', prep: true };
+  assert.equal(prepLine({ k: 'attack', by, on, ...quiet }), `对方的威胁（清单完整）：①对方想走【马3进4】，走完之后对方3路马就能吃掉我方六路车${NOT_YET}，得手后我方白丢一个车。`);
+  assert.equal(prepLine({ k: 'fork', by, on, ...quiet }), `对方的威胁（清单完整）：①对方想走【马3进4】，走完之后对方3路马同时捉住我方六路车和另一个子${NOT_YET}，得手后我方白丢一个车。`);
+  assert.equal(prepLine({ k: 'pin', by, on, ...quiet }), `对方的威胁（清单完整）：①对方想走【马3进4】，走完之后对方3路马牵住了我方六路车，它不能随便动${NOT_YET}，得手后我方白丢一个车。`);
+  assert.equal(prepLine({ k: 'discovered', by, on, ...quiet }), `对方的威胁（清单完整）：①对方想走【马3进4】，走完之后对方3路马一闪开，后面的子就打到了我方六路车${NOT_YET}，得手后我方白丢一个车。`);
+  // a fork that is a check as well (its name says so: a Threat has no on2) is a check that also attacks the piece
+  assert.equal(prepLine({ k: 'fork', by, on, ...quiet, name: 'check_fork' }), `对方的威胁（清单完整）：①对方想走【马3进4】，走完之后对方3路马将军，同时捉住我方六路车${NOT_YET}，得手后我方白丢一个车。`);
+  // a threatened check carries no balance
+  assert.equal(prepLine({ k: 'check', by: { s: 'opp', t: 'R', f: 2 }, move: '车2进7', net: { gain: [], lose: [], cp: 0 }, sev: 'pawn', prep: true }),
+    `对方的威胁（清单完整）：①对方想走【车2进7】，走完之后对方2路车将军${NOT_YET}。`);
+  // a threat that stands is never worded so, and the two forms sit side by side in one list
+  const both = lines({ ...base, threats: [threat, { k: 'attack', by, on, ...quiet }], known: { threats: true, chance: false } }).find((l) => l.startsWith('对方的威胁'));
+  assert.equal(both, `对方的威胁（清单完整）：${item.slice(0, -1)}；②对方想走【马3进4】，走完之后对方3路马就能吃掉我方六路车${NOT_YET}，得手后我方白丢一个车。`);
+  assert.ok(!lines({ ...base, threats: [threat], known: { threats: true, chance: false } }).join('\n').includes('还没有形成'));
+
   // a chance is announced without a move, and then no negative sentence about chances
   t = { ...base, chance: { size: 'piece', theme: 'fork', area: 'their_palace' }, known: { threats: true, chance: true } };
   assert.ok(lines(t).includes('机会：对方阵中有破绽，在对方九宫，和「捉双」有关，分量约一个马或炮。具体着法没有提供。'));
+  // a chance whose move lands in the child's own palace or back rows: the area is not named (在己方九宫 would have the
+  // model tell the child that their own palace holds a chance; CONTRACT-NOTES 138)
+  for (const area of ['my_palace', 'my_back']) {
+    const own = lines({ ...t, chance: { ...t.chance, area } });
+    assert.ok(own.includes('机会：对方阵中有破绽，和「捉双」有关，分量约一个马或炮。具体着法没有提供。'), area);
+    assert.ok(!own.join('\n').includes('己方'), area);
+  }
   assert.ok(!lines(t).includes(NO_CHANCE));
 });
 
@@ -464,7 +509,33 @@ test('the over block contains no count of slips, blunders, misses or pouches', (
     takeaway: null, proud: null, goal: null, kept: false, rank: null };
   const r2 = request(bare);
   assert.equal(renderEvent(r2.events[0], r2.turn), '〔事件〕棋局结束：小主公负（认输），共走了12步。\n〔已喊〕「惜哉……」\n'
-    + '〔要求〕先用半句回应胜负（赢了一起高兴，输了先安慰），再讲「要点」里的那一条，引用本局那一步，这一句不超过30字；有「下一盘小目标」就用它收尾。一共80字以内。');
+    + `〔要求〕${OVER_DIRECTIVE}`);
+  // the goal is said once on the card: the directive tells the model not to say it again, and never to end on it
+  assert.ok(OVER_DIRECTIVE.includes('「下一盘小目标」界面已经单独显示给小主公了，回复里不要再说一遍'));
+  assert.ok(!OVER_DIRECTIVE.includes('收尾'));
+  // 「下一盘注意什么？」 keeps it: its directive asks for the goal, and the block still carries the line it speaks of
+  const asked = clone(stored('over.json'));
+  asked.events[0].said = 'none';
+  asked.events.push({ i: 1, kind: 'ask', ask: 'next' });
+  const r5 = request(asked);
+  assert.ok(renderEvent(r5.events[1], r5.turn).endsWith('〔要求〕小主公问下一盘注意什么：把「下一盘小目标」说成一个开局就能用上的小办法。最多两句，50字以内。'));
+  assert.ok(renderEvent(r5.events[0], r5.turn).includes('\n下一盘小目标——吃子之前，先看它有没有保镖。\n'));
+  // a finished game is not "your move" (CONTRACT-NOTES 138): the turn of a thread that starts with `over` says neither
+  // 轮到小主公走 nor, after a mate, that the check must be answered
+  for (const built of [buildMessages(req, []), buildMessages(r2, []), buildMessages(r5, [])]) {
+    assert.ok(built[1].content.startsWith('〔军情〕\n局面：第34回合，小主公执红，残局阶段。\n'), built[1].content.slice(0, 60));
+    assert.ok(!built[1].content.includes('轮到小主公走'));
+  }
+  const mated = clone(stored('over.json'));
+  mated.turn.check = true;
+  mated.turn.n = 0;
+  mated.events[0].over = { ...mated.events[0].over, result: 'loss', reason: 'checkmate' };
+  mated.events[0].cue = 'lose';
+  const r6 = request(mated);
+  assert.ok(!buildMessages(r6, [])[1].content.includes('必须应将'));
+  assert.ok(renderTurn(r6.turn).includes('轮到小主公走。残局阶段。小主公正被将军，必须应将，共有0种应法。'), 'renderTurn by itself is unchanged');
+  // a thread of a running game keeps the sentence
+  assert.ok(buildMessages(fixture('opp.json'), [])[1].content.includes('，轮到小主公走。'));
 
   // a draw; a strength and an idea as the takeaway; only some of the good things
   const draw = clone(stored('over.json'));
@@ -552,7 +623,7 @@ test('renderTurn: every row of the table of 8.4', () => {
 局面：第21回合，小主公执黑，轮到小主公走。中局阶段。小主公正被将军，必须应将，共有3种应法。
 形势：2步之内有被将死的危险。子力：我方 车1 炮1 卒3 士2 象1；对方 车2 马1 炮1 兵4 仕2 相2。我方少大约一个车。
 小主公水平：7/9（可以直接用术语）。
-本局回顾：第5回合我方【马8进7】好棋（出子）；第12回合对方【车二进六】被对方抓住了疏漏；第15回合我方【炮2平5】失误（送子）；第19回合我方【车1平2】错过机会。
+本局回顾：第5回合我方【马8进7】好棋（出子）；第12回合对方【车二进六】抓住了我方的疏漏；第15回合我方【炮2平5】失误（送子）；第19回合我方【车1平2】错过机会。
 本局已讲过：捉双、马后炮、牵制。
 小主公上一步：【车9进1】（失误，没等点评就落子了）。
 〔上一步的推演〕评定：失误（比最好的走法亏了大约一个马或炮）。
@@ -567,6 +638,16 @@ test('renderTurn: every row of the table of 8.4', () => {
 对方的威胁：①对方四路车下一步就要将死，必须先解围，着法是对方【车四平五】；②对方八路炮捉我方1路车，着法是对方【炮八进七】，得手后我方吃到一个炮，丢掉一个车，算下来亏了。
 机会：对方阵中有破绽，在左翼，和「闪击」有关，分量约一个车。具体着法没有提供。
 小主公刚悔棋，回到了这个局面。`);
+
+  // 本局回顾: a punished moment is the rival's move, and that move caught the child's slip (the subject was wrong:
+  // 对方【车二进六】被对方抓住了疏漏). With its motif; and the other three tags never change with the side.
+  const review = (moments) => renderTurn(request({ v: 1, turn: { ...turn, moments }, events: [{ i: 0, kind: 'opp' }] }).turn).split('\n').find((l) => l.startsWith('本局回顾'));
+  assert.equal(review([{ n: 9, s: 'opp', move: '马二进四', tag: 'punished', k: 'capture_free' }]), '本局回顾：第9回合对方【马二进四】抓住了我方的疏漏（白吃）。');
+  assert.doesNotMatch(renderTurn(req.turn), /对方【[^】]*】被对方/);
+  // (the memory records a punished moment only for the rival; the wire also allows it for the child's move, whose slip it then is)
+  assert.equal(review([{ n: 9, s: 'me', move: '炮2平5', tag: 'punished' }]), '本局回顾：第9回合我方【炮2平5】被对方抓住了疏漏。');
+  assert.equal(review([{ n: 3, s: 'opp', move: '马二进三', tag: 'great' }, { n: 4, s: 'opp', move: '车一平二', tag: 'slip' }, { n: 5, s: 'opp', move: '炮八平五', tag: 'missed' }]),
+    '本局回顾：第3回合对方【马二进三】好棋；第4回合对方【车一平二】失误；第5回合对方【炮八平五】错过机会。');
 
   // the other level notes, the other eval forms, the reload line, a side with nothing but its king
   const plain = { ...stored('start.json').turn, level: 5, eval: { b: 'better', mate: 3 }, back: 'reload', mat: { me: 'R1', opp: '', cp: 900 } };
@@ -643,6 +724,139 @@ test('the 〔推演〕 block: every optional line, and the directive of every ca
 ${FINE}`);
 });
 
+test('a good verdict with nothing to praise: the model is not asked what is good about it, and no praising interjection goes with it (CONTRACT-NOTES 147)', () => {
+  const base = clone(stored('try.json'));
+  const eventOf = (patch) => {
+    const body = clone(base);
+    Object.assign(body.events[1].try, patch);
+    const r = request(body);
+    return { event: r.events[1], turn: r.turn };
+  };
+  const rendered = (patch) => { const { event, turn } = eventOf(patch); return renderEvent(event, turn); };
+  const directive = (patch) => rendered(patch).split('\n').at(-1);
+  const FINE = '〔要求〕点评这步试走：前六个字先说好不好，再用一个事实说清好在哪。24字以内。';
+  const GRIM = '〔要求〕点评这步试走：局面吃紧，这已经是眼下最顽强的一步，照实这样说；不夸它漂亮，也不说它稳。24字以内。';
+  // a move judged 稳健 is not the best one: 最顽强 is not asked for (CONTRACT-NOTES 148)
+  const GRIM_GOOD = '〔要求〕点评这步试走：局面吃紧，这步没有走错，照实这样说；不夸它漂亮，不说它稳，也不说它最好。24字以内。';
+  // 局面吃紧 is asked for only where the child is in trouble after the move (走后形势 落了下风 or 很危险, or mated by
+  // force). Where it is not, the move's line gives material back, and that is what the model is told (CONTRACT-NOTES 150).
+  const COSTLY = '〔要求〕点评这步试走：这已经是眼下最好的一步，但后面要丢子（见代价），照实这样说；不夸它漂亮，也不说它稳。24字以内。';
+  const COSTLY_GOOD = '〔要求〕点评这步试走：这步没有走错，但后面要丢子（见代价），照实这样说；不夸它漂亮，也不说它稳。24字以内。';
+  const NO_PRAISE = [GRIM, GRIM_GOOD, COSTLY, COSTLY_GOOD];
+  const grimOf = (cat, trouble = true) => (trouble ? (cat === 'good' ? GRIM_GOOD : GRIM) : (cat === 'good' ? COSTLY_GOOD : COSTLY));
+  const attack = [{ k: 'attack', by: { s: 'me', t: 'R', f: 3 }, on: { s: 'opp', t: 'C', f: 7 } }];
+  const fork = [{ k: 'fork', by: { s: 'me', t: 'H', f: 4 }, on: { s: 'opp', t: 'R', f: 3 }, on2: { s: 'opp', t: 'C', f: 7 } }];
+  const costly = { gain: ['C'], lose: ['R', 'H'], cp: -850 };
+
+  // The case of the task notes, had the rook move been the best there was: 评定 好棋, 作用 捉子, and a line that loses a rook
+  // and a horse for a cannon. 「再用一个事实说清好在哪」 asked the model to praise it.
+  const text = rendered({ move: '车一平三', cat: 'best', loss: 0, eval: { b: 'lost' }, does: attack, cost: costly,
+    reply: { first: 'opp', moves: ['卒7进1'], net: costly, end: 'quiet' } });
+  assert.equal(text, `〔事件〕小主公试走（本回合第1次）：【车一平三】。
+〔推演〕评定：好棋（和最好的走法几乎一样）。这步是小主公自己想出来的。
+走后形势：很危险。
+作用：我方三路车捉对方7路炮。
+代价：我方吃到一个炮，丢掉一个车、一个马，算下来亏了。
+对方最强应对：对方【卒7进1】，结果：我方吃到一个炮，丢掉一个车、一个马，算下来亏了。
+${GRIM}`);
+  // the directive of the three good verdicts, for both cases of the rule; a move that mates, a sound sacrifice, a move that
+  // wins material back and a tactic keep the directive that asks what is good about the move
+  for (const cat of ['brilliant', 'best', 'good']) {
+    assert.equal(directive({ cat, eval: { b: 'worse' }, does: attack, cost: costly }), grimOf(cat), `${cat}: its own line costs two points or more`);
+    assert.equal(directive({ cat, eval: { b: 'lost' }, cost: { gain: [], lose: ['A'], cp: -200 } }), grimOf(cat), cat);
+    // ... in a position that is level or better the same line is told as what it is, without 局面吃紧 (the fixture's 均势)
+    assert.equal(directive({ cat, does: attack, cost: costly }), grimOf(cat, false), `${cat}: level, its own line costs two points or more`);
+    for (const b of ['even', 'better', 'won']) assert.equal(directive({ cat, eval: { b }, cost: { gain: [], lose: ['A'], cp: -200 } }), grimOf(cat, false), `${cat} ${b}`);
+    // a move after which the child is mated: nothing to praise whatever it does, and a bad position whatever the band says
+    assert.equal(directive({ cat, eval: { b: 'lost', mate: -1 }, does: fork, cost: null }), grimOf(cat), `${cat}: mated after a fork`);
+    assert.equal(directive({ cat, eval: { b: 'lost', mate: -2 }, does: attack, cost: { gain: ['R'], lose: [], cp: 900 } }), grimOf(cat), `${cat}: mated after a capture`);
+    assert.equal(directive({ cat, eval: { b: 'won', mate: -3 }, does: fork, cost: null, avoided: 'greedy', chance: 'taken', only: true }), grimOf(cat), cat);
+    assert.equal(directive({ cat, eval: { b: 'lost' }, does: attack, cost: null }), grimOf(cat), `${cat}: far behind and nothing won`);
+    assert.equal(directive({ cat, eval: { b: 'lost' }, does: [{ k: 'quiet' }], cost: null }), grimOf(cat), cat);
+    assert.equal(directive({ cat, does: attack, cost: { gain: [], lose: ['P'], cp: -100 } }), FINE, cat);
+    assert.equal(directive({ cat, eval: { b: 'worse' }, does: attack, cost: null }), FINE, cat);
+    assert.equal(directive({ cat, eval: { b: 'lost' }, does: attack, cost: { gain: ['P'], lose: [], cp: 100 } }), FINE, cat);
+    assert.equal(directive({ cat, eval: { b: 'lost' }, does: fork, cost: null }), FINE, cat);
+    assert.equal(directive({ cat, eval: { b: 'won', mate: 2 }, does: attack, cost: costly }), FINE, cat);
+    assert.equal(directive({ cat, sac: true, does: [{ k: 'sacrifice', by: { s: 'me', t: 'R', f: 3 } }], cost: { gain: [], lose: ['R'], cp: -900 } }), FINE, cat);
+  }
+  // a trap of old that was stepped around is still to be praised (the system prompt says so): the avoided row of the local narrator
+  assert.equal(directive({ cat: 'best', avoided: 'greedy', cost: costly }), FINE);
+  // the other verdicts keep their directives whatever the balance says
+  assert.match(directive({ cat: 'ok', eval: { b: 'lost' }, cost: costly }), /说清它做到了什么/);
+  assert.match(directive({ cat: 'mistake', eval: { b: 'lost' }, cost: costly }), /说清差在哪一点/);
+  assert.match(directive({ cat: 'blunder', held: true, reply: null, eval: { b: 'lost' }, cost: costly }), /这是危险着/);
+
+  // 「这是唯一不吃亏的走法。」 is not said of a move whose own line leaves the child two points or more down
+  const onlyLine = '这是唯一不吃亏的走法。';
+  assert.ok(rendered({ only: true }).includes(onlyLine));
+  assert.ok(rendered({ only: true, cost: { gain: [], lose: ['P'], cp: -100 } }).includes(onlyLine));
+  assert.ok(rendered({ only: true, eval: { b: 'lost' } }).includes(onlyLine), 'far behind, but nothing more is lost: it is the way out');
+  assert.ok(!rendered({ only: true, cost: { gain: [], lose: ['A'], cp: -200 } }).includes(onlyLine));
+  assert.ok(!rendered({ only: true, cost: costly }).includes(onlyLine));
+
+  // The case of the closing review: the child is a rook up, 兵三进一 is 稳健 and its line gives the crossed pawn back. The
+  // model was sent 走后形势：胜势 and, in the same block, 局面吃紧.
+  const pawn = rendered({ move: '兵三进一', cat: 'good', loss: 167, eval: { b: 'won' }, does: [{ k: 'cross_river', by: { s: 'me', t: 'P', f: 3 } }],
+    cost: { gain: [], lose: ['P'], cp: -200 }, reply: { first: 'opp', moves: ['车7进3'], net: { gain: [], lose: ['P'], cp: -200 }, end: 'quiet' } });
+  assert.equal(pawn, `〔事件〕小主公试走（本回合第1次）：【兵三进一】。
+〔推演〕评定：稳健（比最好的走法亏了大约一个兵）。这步是小主公自己想出来的。
+走后形势：胜势。
+作用：我方三路兵过了河，之后可以横走。
+代价：我方白丢一个兵。
+对方最强应对：对方【车7进3】，结果：我方白丢一个兵。
+${COSTLY_GOOD}`);
+
+  // One rule for both narrators, over a grid of packets: the directive is one of the four that ask for no praise exactly
+  // when the local narrator would speak from its row try.grim, and which of them follows the verdict and the evaluation
+  // after the move; the interjection the stage shows (cueFor, with every flag that can praise) is a praising one only
+  // when the directive asks what is good about the move. 主公英明！ never stands before a grim or a steady sentence, from
+  // either narrator, and 局面吃紧 is never asked for next to 走后形势 均势, 占优 or 胜势.
+  const PRAISING = ['lord', 'wow', 'nice'];
+  let grim = 0, praised = 0, cases = 0, mated = 0;
+  for (const cat of CATS) {
+    for (const ev of [{ b: 'won' }, { b: 'better' }, { b: 'even' }, { b: 'worse' }, { b: 'lost' }, { b: 'lost', mate: -2 }]) {
+      const b = ev.b;
+      const trouble = b === 'worse' || b === 'lost';
+      for (const cost of [null, { gain: ['P'], lose: [], cp: 100 }, { gain: [], lose: ['P'], cp: -100 }, { gain: ['H'], lose: ['R'], cp: -500 }, { gain: ['H'], lose: ['H'], cp: 0 }]) {
+        for (const does of [[], [{ k: 'quiet' }], attack, fork, [{ k: 'check', by: { s: 'me', t: 'R', f: 2 } }]]) {
+          for (const extra of [{}, { only: true }, { chance: 'taken' }, { avoided: 'greedy' }, { sac: true }]) {
+            const { event, turn } = eventOf({ cat, eval: ev, cost, does, ...extra });
+            const row = localLine(turn, [event], []).row;
+            const block = renderEvent(event, turn);
+            const last = block.split('\n').at(-1);
+            const what = `${cat} ${JSON.stringify(ev)} ${JSON.stringify(cost)} ${JSON.stringify(does)} ${JSON.stringify(extra)}`;
+            assert.equal(NO_PRAISE.includes(last), row === 'try.grim', what);
+            if (row === 'try.grim') assert.equal(last, grimOf(cat, trouble), what);
+            if (!trouble) assert.ok(!last.includes('局面吃紧') && !last.includes('最顽强'), what);
+            // a move judged good or better after which the child is mated is always told without praise (a sound sacrifice
+            // is never mated: the packet with `sac` and a mate against the child does not occur)
+            if (ev.mate !== undefined && ['brilliant', 'best', 'good'].includes(cat) && !extra.sac) {
+              assert.equal(row, 'try.grim', what);
+              mated++;
+            }
+            // praise is earned only by a move judged 妙手 or 好棋 (isEarned, section 4.14.5): the director passes no flag otherwise
+            const earned = cat === 'brilliant' || cat === 'best';
+            const cue = cueFor(turn, event, { earned, lord: earned });
+            if (PRAISING.includes(cue)) {
+              assert.equal(last, FINE, `a praising interjection with ${last}`);
+              assert.ok(['try.only', 'try.avoided', 'try.taken', 'try.praise'].includes(row), row);
+              praised++;
+            }
+            if (NO_PRAISE.includes(last)) {
+              assert.equal(cue, null);
+              assert.ok(['brilliant', 'best', 'good'].includes(cat));
+              grim++;
+            }
+            cases++;
+          }
+        }
+      }
+    }
+  }
+  assert.ok(cases === 4500 && grim > 300 && praised > 500 && mated === 300, `${cases} cases, ${grim} grim, ${praised} praised, ${mated} mated`);
+});
+
 test('renderEvent: the directive of every question, and the additions to the opp directive in their order', () => {
   const ASK_TEXT = {
     good: '小主公问这步好不好：直说评定和最主要的一个理由。最多两句，50字以内。',
@@ -702,6 +916,8 @@ test('renderEvent: the directive of every question, and the additions to the opp
   assert.equal(directive({ ...everything, threats: [], opp: { ...everything.opp, punishes: false } }),
     OPP + '可以提一句对方刚才漏掉了什么，让小主公松一口气。');
   assert.equal(directive({ ...everything, threats: [], opp: turn.opp }), OPP + '提醒小主公那一带有机会，让小主公自己找。');
+  // ... without 那一带 when the area is not named (the child's own palace or back rows)
+  assert.equal(directive({ ...everything, threats: [], opp: turn.opp, chance: { ...everything.chance, area: 'my_palace' } }), OPP + '提醒小主公眼下有机会，让小主公自己找。');
   assert.equal(directive({ ...everything, threats: [], opp: turn.opp, chance: null }), OPP + '先用半句话接上悔棋或回到棋局这件事。');
   assert.equal(directive({ ...everything, threats: [], opp: turn.opp, chance: null, back: null }), OPP);
 

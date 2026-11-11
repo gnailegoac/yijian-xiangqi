@@ -9,17 +9,20 @@
 //      module app.js reaches
 //   5. every href / src of dist/index.html and every icon of the manifest exists in dist/
 //   6. dist/config.json
-//   7. the secret scan; no server/, scripts/, tests/, dev/, legacy/ and no .env* file in dist/
+//   7. the secret scan (the environment's secrets, and COACH_API_KEY / COACH_SIGNING_KEY of .env and .env.local of
+//      this directory); no server/, scripts/, tests/, dev/, legacy/ and no .env* file in dist/
 //   8. the file count and the total size
 //
 // The checks of step 4 read the source tree and run before anything is copied, so a build that fails them writes
-// nothing. A failed build never leaves a dist/ behind. All module imports and the Worker URL are relative, so they
+// nothing. A failed build never leaves a dist/ behind, with one exception: in a folder that is not the project (one of
+// the five entries of the site is missing) it removes nothing, that folder's dist/ included. All module imports and the Worker URL are relative, so they
 // resolve inside the hashed folder: a deploy can never mix old and new modules from the HTTP cache.
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { isBuiltin } from 'node:module';
 import { join, posix } from 'node:path';
+import { parseEnv } from 'node:util';
 import { makeIcon } from './make-icons.js';
 
 const ROOT = process.cwd();
@@ -555,7 +558,52 @@ async function verifyReferences(html) {
 const KEY_NAME_IN_SETTINGS_TEXT = Buffer.from('服务器没有配置密钥（COACH_API_KEY）', 'utf8').toString('latin1');
 const NO_DIST_DIRS = new Set(['server', 'scripts', 'tests', 'dev', 'legacy']);
 
-/** Step 7. Values are never printed, only the name of the variable. */
+/** The files of the build's directory that hold the gateway key on the owner's PC, and the variables looked for in them. */
+const ENV_FILES = ['.env', '.env.local'];
+const ENV_FILE_SECRETS = ['COACH_API_KEY', 'COACH_SIGNING_KEY'];
+/** A value shorter than this is not looked for (it would be found by accident). */
+const SECRET_MIN_LENGTH = 8;
+
+/**
+ * What the secret scan looks for, as [where it comes from, value] pairs: the value of every environment variable
+ * whose name ends in _KEY, _TOKEN or _SECRET, and the values of COACH_API_KEY and COACH_SIGNING_KEY in `.env` and
+ * `.env.local` of the build's directory, when those files exist. The build loads neither file, so without the
+ * second part a key pasted into src/ would pass a build on the owner's PC. The values stay inside this function's
+ * result: nothing prints, logs or writes them, and a problem names the variable and its file only.
+ * @param {string[]} problems receives a line for an environment file that exists and cannot be read
+ * @returns {Promise<[string, string][]>}
+ */
+async function secretValues(problems) {
+  /** @type {[string, string][]} */
+  const secrets = [];
+  for (const [name, value] of Object.entries(process.env)) {
+    if (/(_KEY|_TOKEN|_SECRET)$/.test(name) && (value ?? '').length >= SECRET_MIN_LENGTH) secrets.push([`the environment variable ${name}`, value ?? '']);
+  }
+  for (const file of ENV_FILES) {
+    /** @type {NodeJS.Dict<string>} */
+    let variables;
+    try {
+      const text = await readFile(join(ROOT, file), 'utf8');
+      if (text.includes('\0')) {                              // UTF-16: parseEnv would return garbage names and find no key
+        problems.push(`${file} is not UTF-8 text (it looks like UTF-16), so the build cannot look for its keys: save it as UTF-8`);
+        continue;
+      }
+      variables = parseEnv(text.replace(/^\uFEFF/, ''));
+    } catch (e) {
+      const code = /** @type {{code?: unknown}|null|undefined} */ (e)?.code;
+      if (code !== 'ENOENT') problems.push(`${file} could not be read (${typeof code === 'string' ? code : 'error'}), so the build cannot look for its keys`);
+      continue;
+    }
+    for (const name of ENV_FILE_SECRETS) {
+      const value = variables[name];
+      if (typeof value !== 'string' || value.length < SECRET_MIN_LENGTH) continue;
+      if (!secrets.some(([, known]) => known === value)) secrets.push([`${name} of ${file}`, value]);
+    }
+  }
+  return secrets;
+}
+
+/** Step 7. Values are never printed, only the name of the variable (and of the file it was read from). */
 async function scanDist() {
   const { files, dirs } = await listTree(DIST);
   /** @type {string[]} */
@@ -565,7 +613,7 @@ async function scanDist() {
     if (NO_DIST_DIRS.has(name)) problems.push(`dist/${dir}/ must never be published`);
     if (name.startsWith('.env')) problems.push(`dist/${dir}/ looks like an environment file`);
   }
-  const secrets = Object.entries(process.env).filter(([name, value]) => /(_KEY|_TOKEN|_SECRET)$/.test(name) && (value ?? '').length >= 8);
+  const secrets = await secretValues(problems);
   let bytes = 0;
   for (const file of files) {
     if (posix.basename(file).startsWith('.env')) problems.push(`dist/${file} is an environment file`);
@@ -574,8 +622,8 @@ async function scanDist() {
     const text = data.toString('latin1');
     if (text.replaceAll(KEY_NAME_IN_SETTINGS_TEXT, '').includes('COACH_API_KEY')) problems.push(`dist/${file} contains COACH_API_KEY`);
     if (/(?<![A-Za-z0-9_-])sk-/.test(text)) problems.push(`dist/${file} contains what looks like a secret key ("sk-")`);
-    for (const [name, value] of secrets) {
-      if (data.includes(value ?? '')) problems.push(`dist/${file} contains the value of the environment variable ${name}`);
+    for (const [source, value] of secrets) {
+      if (data.includes(value)) problems.push(`dist/${file} contains the value of ${source}`);
     }
   }
   if (problems.length) fail(['secret scan:', ...problems]);
@@ -586,8 +634,17 @@ async function scanDist() {
 // The build
 // ---------------------------------------------------------------------------------------------------------------
 
+/** Set once the build has made sure that it stands in the project: only then is dist/ this build's to remove. */
+let ownsDist = false;
+
 async function build() {
+  // Before anything is removed: is this the project? Called from another folder (node path/to/build.js) the script
+  // would otherwise delete that folder's dist/ and then report that index.html is missing (CONTRACT-NOTES 150).
+  for (const name of ['index.html', 'favicon.svg', 'manifest.webmanifest', 'src', 'styles']) {
+    if (!existsSync(join(ROOT, name))) fail(`${name} is missing in ${ROOT}`);
+  }
   // 1
+  ownsDist = true;
   await rm(DIST, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   const id = buildId();
   const apiBase = process.env.COACH_API_BASE || null;           // for step 6; a wrong value fails before any work
@@ -595,9 +652,6 @@ async function build() {
     let protocol = '';
     try { protocol = new URL(apiBase).protocol; } catch { /* not a URL */ }
     if (protocol !== 'https:') fail('COACH_API_BASE must be empty or an https URL');
-  }
-  for (const name of ['index.html', 'favicon.svg', 'manifest.webmanifest', 'src', 'styles']) {
-    if (!existsSync(join(ROOT, name))) fail(`${name} is missing in ${ROOT}`);
   }
 
   // 4, on the sources
@@ -642,7 +696,7 @@ async function build() {
 try {
   await build();
 } catch (e) {
-  await rm(DIST, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }).catch(() => {});
+  if (ownsDist) await rm(DIST, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }).catch(() => {});
   if (e instanceof BuildError) console.error(`build failed:\n${e.message}`);
   else console.error('build failed:', e);
   process.exitCode = 1;

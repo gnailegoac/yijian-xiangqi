@@ -16,8 +16,8 @@
  *   while its king is in check, although the recapture is legal again as soon as the check is answered, and it
  *   would miss a piece whose only guard is the king that has to step away. Relative pins of the checked side are not
  *   reported for the same reason; absolute pins need "side not in check" by the appendix.
- * - Exchange values (hanging, capture.see, cannon aims, pins, the tail of materialOutcome) are the exact minimax of the
- *   captures on the square. Position.see (A2.4) tries only the least valuable recapture and is off in rare cases; see
+ * - Exchange values (hanging, capture.see, cannon aims, pins, the capture that is pending at the end of a line) are the
+ *   exact minimax of the captures on the square. Position.see (A2.4) tries only the least valuable recapture and is off in rare cases; see
  *   exchangeValue.
  * - Relative pin (A6.1): the capture on the shielded piece must be one that lifting the pinned piece makes possible
  *   (the attacker did not attack it before) and the attacker is a rook, cannon or horse, which is what `Pin.kind` can name.
@@ -35,8 +35,15 @@
  *   credited with what stood before it: an attack with the same attackers and guards as before is no new `threat` (so no
  *   `fork` either), and a pin whose line stood before is neither `created` nor `suffered`. A move that gives check
  *   does not release a relative pin whose line still stands.
- * - `materialOutcome` (4.6.3): the tail is settled by the whole exchange on the square of the best pending capture (the
- *   capture and the recaptures that its value assumes), not by the first victim alone.
+ * - `materialOutcome` (4.6.3, as CONTRACT-NOTES item 150 overrules it): the balance of a line is what the line does.
+ *   Without an explicit `maxPlies` the whole line is walked (not six plies of a line that has seven or eight). The static
+ *   tail adds material only where the line ends cut (or where an explicit `maxPlies` stopped the walk), and never what
+ *   the other side takes back: it is the main line of a minimax over the captures from there on, material only, in
+ *   which each side may also stop (`settleCaptures`). That is what the search's own quiescence did behind the cut, so
+ *   a capture that is answered by an equal or better capture elsewhere is not counted, and one that is answered by a
+ *   smaller one is counted with the answer. A line with no move at all is asked only by brain.js, to learn whether a
+ *   capture is pending at the end of a principal variation (it marks the line 'cut' then): there the answer stays the
+ *   best pending capture and the exchange on its square.
  * - A line with |mate| >= 50 carries a repetition verdict and is never treated as a mate (CONTRACT-NOTES item 88).
  * - `Line.end` 'mate' means "the side to move has no legal move" (item 89); the mates reported by `positionFacts` are
  *   checkmates only (the checks-only search of A6.1), and each is replayed by the rules engine before it is reported.
@@ -53,13 +60,31 @@
  *   patterns, then discovered check, double check and the forks; a threatened mate-in-one adds its pattern with stage 'threat'.
  * - The search-backed `double_rooks` (A6.4) needs a line that ends in checkmate; a line whose last rook move leaves the
  *   king without a legal move but not in check (困毙, which `Line.end` also calls 'mate') is not the pattern.
+ * - Differences between two moves (CONTRACT-NOTES item 147). `scoreToCp` clamps every score that is no mate to +-1900, so
+ *   beyond that every move reads the same and a move that gave a rook away would cost nothing. Wherever two scores are
+ *   compared to decide what the child is told (the loss and the category of a move, `isBest`, the sacrifice's
+ *   compensation, `onlyMove`, `missedWin`, the alternatives of an assessment and of a hint, the group and the tier of a
+ *   tactical test, the greedy trap), the difference is that of the search scores themselves; only when one of the two is
+ *   a mate score (a mate or a repetition verdict) is it the difference of their centipawn values, as section 4.6.1 has
+ *   it (`scoreGap`). What is stored and shown (`bestCp`, `moveCp`) stays clamped; `loss` is the true difference.
+ * - Two cases in which the score of a move is not what the move costs (CONTRACT-NOTES item 150). (1) The better move
+ *   mates and the tried one does not: the difference to a mate score is 100 for every move that stays above +1900, so
+ *   the loss is at least what the tried move's own line gives away (`assessMove`), and `quickVerdict`, which has no
+ *   line, also measures the move against the static evaluation of the position: what the mover holds when nothing is
+ *   given away. (Measured against the best line of the table that is no mate, the first face was 失误 or 漏着 for half
+ *   of the moves that lose nothing wherever that line wins a piece, and the assessment 稳健 a moment later.)
+ *   (2) The tried move's line only
+ *   re-creates the position before it within four plies: the search scores the first return as a repetition, but the
+ *   mover has lost a turn and nothing else. The loss is then at most the smallest one that is 缓着 at the level and
+ *   `moveCp` is `bestCp` (the mover stands as before); `quickVerdict` gives no verdict for such a line. A return that
+ *   is the best there is, and a mate score, are left as they are.
  */
 
 import { CROSSED_PAWN_VALUE, PATTERN_NAME, PIECE_POINTS, PIECE_VALUE } from './codes.js';
 import { applyMove, boardToFen, fenToBoard } from './engine.js';
 import { describeMove, pieceRef, toLine } from './notation.js';
 import { Position, KING, ELEPHANT, HORSE, ROOK, CANNON, PAWN, TYPE_NAME, sqOf, rowOf, colOf, mkMove, mvFrom, mvTo } from './position.js';
-import { lineOf, mateIn, revealDepth, revealTier, scoreToCp, separationDepth } from './search.js';
+import { WIN, lineOf, mateIn, revealDepth, revealTier, scoreToCp } from './search.js';
 
 /** @import { Cat, DangerCode, HabitCode, HintTheme, PatternCode } from './codes.js' */
 /** @import { Analysis, Block, Board, CannonAim, Color, Exposed, Flight, Hanging, Hint, KingFacts, Line, MateThreat, MaterialOutcome, MoveAssessment, MoveFacts, MoveInfo, MoveRef, MoveTag, NewThreat, Open, Parry, Pattern, PieceRef, PieceStatus, PieceType, Pin, PositionFacts, Quick, Refutation, RootLine, Square, TacticalTest, ThreatInfo } from './types.js' */
@@ -85,6 +110,8 @@ const PIN_KIND = { [ROOK]: 'rook', [CANNON]: 'cannon', [HORSE]: 'horse', [KING]:
 const PV_LENGTH = 8;
 /** mateIn() of a repetition-ban score is 50 or more (CONTRACT-NOTES item 88). */
 const REPETITION_MATE = 50;
+/** A move made when the side to move had at most this many legal moves is forced (CONTRACT-NOTES item 138). */
+const FORCED_MOVES = 2;
 
 /** @param {Color} color @returns {number} side index of position.js */
 const sideOf = color => (color === 'red' ? 0 : 1);
@@ -316,6 +343,59 @@ function bestPendingCapture(pos) {
     }
   }
   return best === 0 ? null : { mv: best, see: bestSee };
+}
+
+/** The static tail of materialOutcome looks at most this many captures ahead. */
+const SETTLE_PLIES = 6;
+/** ... and counts nothing when the captures from the end of a line make more positions than this (never seen above 100). */
+const SETTLE_NODES = 2000;
+
+/**
+ * What the side to move wins from here on by captures alone, when both sides capture or stop as suits them: the minimax
+ * of the material over the legal captures (a king is never taken), with the right to stop at every turn. It is the
+ * quiescence of the search with material in the place of the evaluation, and so it settles a line that was cut the way
+ * the search itself went on: a capture that the other side answers by taking as much or more elsewhere is not made, a
+ * piece that is taken back is counted with what took it. At the last ply of the horizon a capture counts only when
+ * nothing can profitably take back on its square.
+ * @param {Position} pos @param {number} depth captures still to look ahead
+ * @param {number} alpha @param {number} beta the window, in cp for the side to move
+ * @param {{left:number}} budget positions that may still be visited; the result is void once it is used up
+ * @returns {{value:number, pv:number[]}} cp >= 0 for the side to move, and the captures of the main line
+ */
+function settleCaptures(pos, depth, alpha, beta, budget) {
+  /** @type {{value:number, pv:number[]}} */
+  let best = { value: 0, pv: [] };                         // stopping here
+  if (depth <= 0 || best.value >= beta) return best;
+  if (best.value > alpha) alpha = best.value;
+  const b = pos.squares;
+  const buf = new Int32Array(128);
+  const n = pos.generate(buf, true);
+  /** Captures, the most valuable victim first, then the cheapest capturer; equal ones as the mover sees the board. @type {{mv:number, gain:number, order:number}[]} */
+  const captures = [];
+  for (let i = 0; i < n; i++) {
+    const mv = buf[i], from = mvFrom(mv), to = mvTo(mv);
+    if ((b[to] & 7) === KING) continue;
+    const gain = valueAt(b[to], to);
+    captures.push({ mv, gain, order: (valueAt(b[from], from) * 128 + ownView(b[from], from)) * 128 + ownView(b[from], to) });
+  }
+  captures.sort((x, y) => y.gain - x.gain || x.order - y.order);
+  for (const capture of captures) {
+    if (budget.left <= 0) break;
+    if (!pos.make(capture.mv)) continue;
+    budget.left--;
+    /** @type {{value:number, pv:number[]}} */
+    let answer;
+    if (depth > 1) answer = settleCaptures(pos, depth - 1, capture.gain - beta, capture.gain - alpha, budget);
+    else answer = { value: bestCaptureExact(pos, mvTo(capture.mv)) > 0 ? Infinity : 0, pv: [] };
+    pos.unmake();
+    const value = capture.gain - answer.value;
+    if (value > best.value) {
+      best = { value, pv: [capture.mv, ...answer.pv] };
+      if (value > alpha) alpha = value;
+      if (value >= beta) break;
+    }
+  }
+  return best;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1342,9 +1422,13 @@ export function moveFacts(fen, move, opts) {
 // settled material (section 4.6.3)
 // ---------------------------------------------------------------------------------------------------------------
 
-/** @param {Line} line @param {Color} pov @param {number} [maxPlies=6] @returns {MaterialOutcome} */
+/**
+ * @param {Line} line @param {Color} pov
+ * @param {number} [maxPlies] plies to walk before the tail is settled; without it the whole line is walked
+ * @returns {MaterialOutcome}
+ */
 export function materialOutcome(line, pov, maxPlies) {
-  const limit = maxPlies === undefined || Number.isNaN(maxPlies) ? 6 : Math.max(0, Math.floor(maxPlies));
+  const limit = maxPlies === undefined || Number.isNaN(maxPlies) ? line.moves.length : Math.max(0, Math.floor(maxPlies));
   const pos = Position.fromFen(line.start);
   const b = pos.squares;
   const povSide = sideOf(pov);
@@ -1357,7 +1441,7 @@ export function materialOutcome(line, pov, maxPlies) {
     (capturer === povSide ? won : lost).push({ piece: TYPE_NAME[victim & 7], points: pointsAt(victim, sq) });
   };
 
-  // Walk the line: maxPlies plies, then on while an exchange is running (at most four more plies).
+  // Walk the line: all of it, or maxPlies plies and then on while an exchange is running (at most four more plies).
   const n = line.moves.length;
   let walked = 0, extra = 0;
   let lastWasCapture = false;
@@ -1382,10 +1466,23 @@ export function materialOutcome(line, pov, maxPlies) {
   let mate = null;
   if (walked === n && n > 0 && pos.legalMoves().length === 0) mate = (pos.side ^ 1) === povSide ? 'gives' : 'suffers';
 
-  // Settle the tail: the best pending capture of the side to move and the exchange it starts.
+  // Settle the tail, where the line ends cut or the walk was stopped: what the captures from here on leave the side to
+  // move, each side free to take or to stop. Counted from a pawn on, with every capture of that main line.
   if (mate === null && (line.end === 'cut' || walked < n)) {
-    const pending = bestPendingCapture(pos);
-    if (pending !== null) playExchange(pos, pending.mv, record);
+    if (n === 0) {
+      // No line at all: the question of brain.js, "is a capture pending here?". The best one and the exchange on its square.
+      const pending = bestPendingCapture(pos);
+      if (pending !== null) playExchange(pos, pending.mv, record);
+    } else {
+      const budget = { left: SETTLE_NODES };
+      const settled = settleCaptures(pos, SETTLE_PLIES, -Infinity, Infinity, budget);
+      if (settled.value >= 100 && budget.left > 0) {
+        for (const mv of settled.pv) {
+          record(b[mvTo(mv)], mvTo(mv), pos.side);
+          pos.make(mv);
+        }
+      }
+    }
   }
 
   const sum = /** @param {{points:number}[]} list */ list => list.reduce((total, item) => total + item.points, 0);
@@ -1448,13 +1545,27 @@ export function verdictScale(level) {
 }
 
 /**
+ * How much better the search score `a` is than the search score `b` (same position, same side's view). It is the
+ * difference of the scores themselves: `scoreToCp` clamps every score that is no mate to +-1900, and a difference of two
+ * clamped scores vanishes where the scale has run out (far behind or far ahead, a move that gives a rook away would
+ * cost nothing; CONTRACT-NOTES item 147). A mate score (a mate or a repetition verdict) has no such distance to another
+ * score: with one on either side the result is the difference of the two centipawn values, as section 4.6.1 has it.
+ * @param {number} a @param {number} b @returns {number}
+ */
+function scoreGap(a, b) {
+  const mate = Math.abs(a) >= WIN || Math.abs(b) >= WIN;
+  return mate ? scoreToCp(a) - scoreToCp(b) : a - b;
+}
+
+/**
  * The thresholds of section 4.6.1 without the brilliant test.
- * @param {number} bestCp @param {number} moveCp @param {number} level
+ * @param {number} raw what the move loses against the best move: the true difference of the two scores (scoreGap), not below 0
+ * @param {number} bestCp @param {number} moveCp centipawn values of the two; they decide only whether the position is decided
+ * @param {number} level
  * @param {boolean} forcedBlunder the move allows a forced mate and the best move did not
  * @returns {{cat:Exclude<Cat, 'brilliant'>, eff:number}}
  */
-function verdictOf(bestCp, moveCp, level, forcedBlunder) {
-  const raw = bestCp - moveCp;
+function verdictOf(raw, bestCp, moveCp, level, forcedBlunder) {
   let eff = raw;
   if (Math.min(bestCp, moveCp) >= 500) eff = 0.4 * raw;
   else if (Math.max(bestCp, moveCp) <= -500) eff = 0.5 * raw;
@@ -1469,15 +1580,48 @@ function verdictOf(bestCp, moveCp, level, forcedBlunder) {
   return { cat, eff };
 }
 
-/** Value of a table line that may not be exact at the table's depth: min(score, upper), in centipawns. @param {RootLine} line @returns {number} */
-function boundedCp(line) {
-  return scoreToCp(line.upper === null ? line.score : Math.min(line.score, line.upper));
+/** Value of a table line that may not be exact at the table's depth: min(score, upper), as a search score. @param {RootLine} line @returns {number} */
+function boundedScore(line) {
+  return line.upper === null ? line.score : Math.min(line.score, line.upper);
 }
 
 /** @param {number} score @returns {boolean} the score is a real mate against the side it belongs to */
 function isMated(score) {
   const m = realMate(score);
   return m !== null && m < 0;
+}
+
+/** @param {number} score @returns {boolean} the score is a real mate for the side it belongs to */
+function isMating(score) {
+  const m = realMate(score);
+  return m !== null && m > 0;
+}
+
+/**
+ * Does a line re-create the position it starts from, with the same side to move, within its first four plies (the mover
+ * steps out, the opponent forces the piece back and returns himself)? The search scores that first return as a
+ * repetition (Appendix A3.4), which is not what the move is worth (CONTRACT-NOTES item 150).
+ * @param {string} start FEN before the first move @param {MoveRef[]} moves @returns {boolean}
+ */
+function comesBack(start, moves) {
+  if (typeof start !== 'string' || !Array.isArray(moves) || moves.length < 4) return false;
+  const pos = Position.fromFen(start);
+  const before = pos.squares.slice();
+  for (let i = 0; i < 4; i++) {
+    const move = moves[i];
+    if (!move || !isSquare(move.from) || !isSquare(move.to) || !pos.make(pos.fromRef(move))) return false;
+  }
+  return pos.squares.every((piece, sq) => piece === before[sq]);
+}
+
+/**
+ * The smallest loss that is judged 缓着 (`ok`) at a level when both moves are worth `cp`: what a move costs that only
+ * loses a turn. @param {number} level @param {number} cp @returns {number}
+ */
+function tempoLoss(level, cp) {
+  let loss = 0;
+  while (loss < 1000 && verdictOf(loss, cp, cp, level, false).cat !== 'ok') loss++;
+  return loss;
 }
 
 /**
@@ -1492,26 +1636,52 @@ export function quickVerdict(table, move, level) {
   if (m === null) return null;
   const best = table.lines[0];
   const bestCp = scoreToCp(best.score);
+  // A line that only lets the position come back is scored as a repetition, which is not what the move is worth: the
+  // face waits for the assessment (CONTRACT-NOTES item 150). Not when that return is the best there is.
+  if (m !== best && Math.abs(m.score) < WIN && scoreGap(best.score, m.score) > 0 && comesBack(table.fen, m.pv)) return null;
+  // Every loss below is a difference of search scores (scoreGap), so that it does not vanish beyond the clamp of scoreToCp.
+  // The distance to a mate score has no such difference: it reads 100 for every move that stays above +1900, also for one
+  // that leaves a rook to be taken. When the best line mates, a move that does not mate is therefore measured as well
+  // against what the mover holds when nothing is given away, the static evaluation of the position (item 150). That is
+  // what assessMove does with the balance of the move's own line, which is not known here, and so the first face agrees
+  // with the assessment: a move that gives a rook away is behind by the rook, a quiet move by the 100 of the missed mate.
+  // (The best line of the table that is no mate is no measure for it: where that line wins a piece, every move that
+  // merely keeps everything would be a mistake at first sight and 稳健 a moment later.)
+  const still = isMating(best.score) && typeof table.fen === 'string' ? Position.fromFen(table.fen).evaluate() : null;
+  /** @param {number} score a value of the tried move @returns {number} how far it is behind */
+  const behindOf = score => {
+    const gap = scoreGap(best.score, score);
+    return still !== null && !isMating(score) ? Math.max(gap, scoreGap(still, score)) : gap;
+  };
   if (m.depth === table.depth) {
     const moveCp = scoreToCp(m.score);
-    const loss = Math.max(0, bestCp - moveCp);
-    const { cat } = verdictOf(Math.max(bestCp, moveCp), moveCp, level, isMated(m.score) && !isMated(best.score));
-    return { cat, loss: Math.min(9999, loss), depth: table.depth, isBest: m === best || moveCp >= bestCp };
+    const behind = behindOf(m.score);
+    const loss = Math.max(0, behind);
+    const { cat } = verdictOf(loss, Math.max(bestCp, moveCp), moveCp, level, isMated(m.score) && !isMated(best.score));
+    return { cat, loss: Math.min(9999, loss), depth: table.depth, isBest: m === best || behind <= 0 };
   }
   // Not exact at the table's depth: the last all-exact iteration and the proven upper bound, whichever is worse.
   const d = table.allDepth;
   let loss = -Infinity;
   if (d >= 1 && m.byDepth.length >= d) {
+    const at = m.byDepth[d - 1];
     let bestAt = -Infinity;
     for (const line of table.lines) {
-      if (line.byDepth.length >= d) bestAt = Math.max(bestAt, scoreToCp(line.byDepth[d - 1]));
+      if (line.byDepth.length >= d) bestAt = Math.max(bestAt, line.byDepth[d - 1]);
     }
-    loss = Math.max(loss, bestAt - scoreToCp(m.byDepth[d - 1]));
+    loss = Math.max(loss, scoreGap(bestAt, at));
+    if (still !== null && !isMating(at)) loss = Math.max(loss, scoreGap(still, at));
   }
-  if (m.upper !== null) loss = Math.max(loss, bestCp - scoreToCp(m.upper));
-  if (loss === -Infinity) loss = bestCp - scoreToCp(m.score);
+  if (m.upper !== null) loss = Math.max(loss, behindOf(m.upper));
+  if (loss === -Infinity) loss = behindOf(m.score);
   loss = Math.max(0, loss);
-  const { cat } = verdictOf(bestCp, bestCp - loss, level, false);
+  // what the move is worth, for the test "is the position decided": that much below the best move
+  const moveCp = Math.abs(best.score) >= WIN ? bestCp - loss : scoreToCp(best.score - loss);
+  // The forced-mate rule of 4.6.1 holds here too: a proven bound, or the score of the last all-exact iteration, that is a
+  // mate against the mover is a forced mate. Beyond -1900 its distance to the best move reads as 100 only, and the move
+  // would be "good" (CONTRACT-NOTES 148).
+  const mated = (m.upper !== null && isMated(m.upper)) || (d >= 1 && m.byDepth.length >= d && isMated(m.byDepth[d - 1]));
+  const { cat } = verdictOf(loss, bestCp, moveCp, level, mated && !isMated(best.score));
   return { cat, loss: Math.min(9999, loss), depth: d, isBest: false };
 }
 
@@ -1643,10 +1813,13 @@ export function assessMove(input) {
 
   const moveCp = scoreToCp(tried.score);
   const compareCp = scoreToCp(compared.score);
-  const isBest = moveCp >= compareCp;
+  // What the move loses against the comparison move is the difference of the two search scores (scoreGap), not of their
+  // clamped centipawns: in a position beyond +-1900 a move that gives a rook away is not "as good as the best".
+  const behind = scoreGap(compared.score, tried.score);
+  const isBest = behind <= 0;
   const bestRoot = isBest ? tried : compared;
   const bestCp = Math.max(moveCp, compareCp);
-  const raw = bestCp - moveCp;
+  let raw = Math.max(0, behind);
   const best = isBest ? info : describeMove(board, compare);
 
   const line = searchLine(board, turn, tried.pv);
@@ -1659,23 +1832,44 @@ export function assessMove(input) {
   const givesMate = moveMate !== null && moveMate > 0 ? moveMate : null;
   const bestMates = bestMate !== null && bestMate > 0;
 
+  // The better move mates and this one does not (CONTRACT-NOTES item 150). The distance to a mate score is that of the
+  // centipawn values, 100 for every move that stays above +1900, so a move that leaves a rook to be taken would be 稳健.
+  // The loss is then at least what the move's own line gives away.
+  if (!isBest && bestMates && givesMate === null && outcome.net < 0) raw = Math.max(raw, Math.round(-100 * outcome.net));
+
+  // A move whose line only re-creates the position before it (item 150): the opponent forces the piece back and returns
+  // himself. The search scores that first return as a repetition, on purpose (Appendix A3.4), but the game goes on from
+  // the same position: the mover has lost a turn and nothing else. The loss is at most the smallest one that is 缓着 at
+  // this level, and the mover stands as before. Not when the return is the best there is (a side that is behind and
+  // finds the repetition), and not for a mate score.
+  const returns = !isBest && Math.abs(tried.score) < WIN && comesBack(line.start, line.moves);
+  if (returns) raw = Math.min(raw, tempoLoss(level, bestCp));
+  /** What the mover stands at after the move, as it is stored and shown. */
+  const standsCp = returns ? bestCp : moveCp;
+
+  // A forced move (CONTRACT-NOTES item 138): with at most two legal moves there was nothing to find and nothing to give
+  // up by choice. It is never 妙手 and never 弃子, whatever the search says about it.
+  const forced = Position.fromFen(fen).legalMoves().length <= FORCED_MOVES;
+
   // 弃子: after the opponent's reply the mover is two points or more down on the exchange so far, yet loses at most 15 cp.
   // It is the moved piece that is given: the reply takes it. And material that is lost whatever the mover plays is not
   // given up for anything: the move must also mate, or keep the evaluation within a pawn of what the position was worth.
-  const sacrifice = raw <= 15 && line.moves.length >= 2 && sameSquare(line.moves[1].to, info.to)
+  // A move after which the mover is mated or loses by the repetition rule keeps nothing: beyond -1900 its -2000 would read
+  // as "within a pawn" of a static evaluation that reads -1900 (CONTRACT-NOTES 147).
+  const sacrifice = !forced && raw <= 15 && line.moves.length >= 2 && sameSquare(line.moves[1].to, info.to)
     && materialOutcome({ start: line.start, moves: line.moves.slice(0, 2), end: 'quiet' }, turn, 2).net <= -2
-    && (givesMate !== null || moveCp >= scoreToCp(Position.fromFen(fen).evaluate()) - 100);
+    && (givesMate !== null || (tried.score > -WIN && scoreGap(tried.score, Position.fromFen(fen).evaluate()) >= -100));
 
   let onlyMove = false;
   /** @type {MoveAssessment['alternatives']} */
   const alternatives = [];
   if (table !== null && table !== undefined && table.lines.length > 0) {
-    const top = scoreToCp(table.lines[0].score);
-    if (table.lines.length >= 2) onlyMove = top - boundedCp(table.lines[1]) >= 150;
+    const top = table.lines[0].score;
+    if (table.lines.length >= 2) onlyMove = scoreGap(top, boundedScore(table.lines[1])) >= 150;
     for (const other of table.lines) {
       if (alternatives.length >= 3) break;
       if (sameMove(other.move, move)) continue;
-      alternatives.push({ move: describeMove(board, other.move), loss: Math.min(9999, Math.max(0, top - boundedCp(other))) });
+      alternatives.push({ move: describeMove(board, other.move), loss: Math.min(9999, Math.max(0, scoreGap(top, boundedScore(other)))) });
     }
   }
 
@@ -1690,11 +1884,13 @@ export function assessMove(input) {
 
   const revealBest = revealDepth(bestRoot.byDepth, bestRoot.score, 'good');
   /** @type {Cat} */
-  let cat = verdictOf(bestCp, moveCp, level, allowsMate && !isMated(bestRoot.score)).cat;
+  let cat = verdictOf(raw, bestCp, standsCp, level, allowsMate && !isMated(bestRoot.score)).cat;
   // 妙手 is not for a plain winning capture (CONTRACT-NOTES item 106): the only-move clause does not count when the move
   // itself takes material with profit at once; such a move is `best`. The sacrifice and the forced-mate clauses are as in 4.6.1.
   const winsAtOnce = facts.capture !== null && facts.capture.exchange === 'wins';
-  if (cat === 'best' && (flags.sacrifice || (flags.onlyMove && revealBest >= 3 && !winsAtOnce) || (givesMate !== null && givesMate >= 2))) cat = 'brilliant';
+  // ... and not for a forced move either (CONTRACT-NOTES item 138).
+  if (cat === 'best' && !forced
+    && (flags.sacrifice || (flags.onlyMove && revealBest >= 3 && !winsAtOnce) || (givesMate !== null && givesMate >= 2))) cat = 'brilliant';
 
   // Patterns: those of the move, plus the search-backed ones.
   const patterns = facts.patterns.slice();
@@ -1724,7 +1920,7 @@ export function assessMove(input) {
   return {
     move: info,
     depth: pair.depth,
-    moveCp,
+    moveCp: standsCp,
     bestCp,
     loss: Math.min(9999, Math.max(0, raw)),
     cat,
@@ -1788,12 +1984,12 @@ export function hintFor(input) {
     zone: depth <= 2 ? 'home' : depth >= 7 ? 'enemy' : 'river',
   };
 
-  const value = boundedCp(root);
+  const value = boundedScore(root);
   /** @type {MoveInfo[]} */
   const alternatives = [];
   for (const other of table.lines) {
     if (alternatives.length >= 2) break;
-    if (other === root || Math.abs(boundedCp(other) - value) > 30) continue;
+    if (other === root || Math.abs(scoreGap(boundedScore(other), value)) > 30) continue;
     alternatives.push(describeMove(board, other.move));
   }
 
@@ -1835,19 +2031,40 @@ export function threatInfo(fen, pass, facts) {
 /** @param {string} fen @param {Analysis} table @param {PositionFacts} facts @returns {TacticalTest|null} */
 export function tacticalTest(fen, table, facts) {
   if (table === null || table === undefined || table.depth < 4 || table.lines.length === 0) return null;
-  const best = scoreToCp(table.lines[0].score);
-  const W = table.lines.filter(line => line.depth === table.depth && best - scoreToCp(line.score) <= 60);
+  // The group, the gap below it and the depth at which it stands out are measured on the search scores (scoreGap): beyond
+  // the clamp of scoreToCp every move would be "within 60 cp of the best", or a move far below the best would join the group.
+  const best = table.lines[0].score;
+  const W = table.lines.filter(line => line.depth === table.depth && scoreGap(best, line.score) <= 60);
   if (W.length === 0 || W.length > 3) return null;
   let outside = -Infinity;
   for (const line of table.lines) {
-    if (!W.includes(line)) outside = Math.max(outside, boundedCp(line));
+    if (!W.includes(line)) outside = Math.max(outside, boundedScore(line));
   }
-  if (outside === -Infinity || best - outside < 150) return null;
+  if (outside === -Infinity || scoreGap(best, outside) < 150) return null;
   const child = facts.turn, rival = otherColor(child);
   const save = facts.check !== null || facts.mates[rival] !== null
     || facts.hanging.some(h => h.piece.color === child && !h.now && h.gain >= 300);
   const { board } = fenToBoard(fen);
-  return { tier: revealTier(separationDepth(table, W)), kind: save ? 'save' : 'win', group: W.map(line => describeMove(board, line.move)) };
+  return { tier: revealTier(standsOutAt(table, W)), kind: save ? 'save' : 'win', group: W.map(line => describeMove(board, line.move)) };
+}
+
+/**
+ * search.separationDepth on the search scores: the first all-exact depth d at which every line of `group` beats every
+ * other line by 100 cp or more; table.allDepth + 1 if never. (separationDepth compares clamped centipawns, so beyond
+ * +-1900 a group would never stand out and every test there would be of the deepest tier.)
+ * @param {Analysis} table @param {RootLine[]} group lines of the table @returns {number}
+ */
+function standsOutAt(table, group) {
+  for (let d = 1; d <= table.allDepth; d++) {
+    let weakest = Infinity, strongestOther = -Infinity;
+    for (const line of table.lines) {
+      const score = line.byDepth[d - 1];
+      if (group.includes(line)) weakest = Math.min(weakest, score);
+      else strongestOther = Math.max(strongestOther, score);
+    }
+    if (scoreGap(weakest, strongestOther) >= 100) return d;
+  }
+  return table.allDepth + 1;
 }
 
 /**
@@ -1863,11 +2080,11 @@ export function habitTraps(fen, table, facts, threat) {
   if (table !== null && table !== undefined && table.lines.length > 0) {
     const pos = Position.fromFen(fen);
     const b = pos.squares;
-    const top = scoreToCp(table.lines[0].score);
+    const top = table.lines[0].score;
     for (const line of table.lines) {
       const mv = pos.fromRef(line.move);
       // A capture that loses the exchange (moveFacts(...).capture.exchange === 'loses') and costs 150 cp or more.
-      if (b[mvTo(mv)] === 0 || top - boundedCp(line) < 150 || exchangeValue(pos, mv) > -50) continue;
+      if (b[mvTo(mv)] === 0 || scoreGap(top, boundedScore(line)) < 150 || exchangeValue(pos, mv) > -50) continue;
       traps.push('greedy');
       break;
     }

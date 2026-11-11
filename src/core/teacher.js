@@ -44,6 +44,37 @@
  * - The first game's guaranteed chance is never given on the rival move that answers a blunder (as written it overrode
  *   that too); it waits for the next move of its window.
  * - A line that the search values as a plain repetition is never offered as a chance (step 5a).
+ * - Opening variety (step 1; CONTRACT-NOTES 143 c): when the near-best moves of his first moves hold developing moves, the
+ *   pick is uniform among those; otherwise among all of them, as written. A developing move is read on the board from
+ *   his own side (developingLines): a horse from his back rank to his third rank, a cannon sideways along the rank it
+ *   starts on, an elephant or an advisor from his back rank, a pawn of the third or seventh file one step forward, a
+ *   rook along his back rank or second rank or one step forward from its corner, and any capture. The 25 cp margin
+ *   and the move numbers of step 1 are as written, so his strength is the same; his first moves look like an opening.
+ * - The wrap-up (CONTRACT-NOTES 143 b): a game that has gone on long is brought to its end. From his move 60 on
+ *   (ctx.moveNo >= WRAP_UP_MOVE) the mode is 'finish' when the child is level or ahead (eBest >= WRAP_UP_AHEAD, which
+ *   is -50 cp: level within half a pawn), whatever aheadRun says: he cracks, as a tired player does. A crack that the
+ *   wrap-up alone asks for (section 4.7.6 does not: the child is not at +600 for the second decision running) keeps
+ *   the manners of a gift (CONTRACT-NOTES 151). It is never the answer to a blunder of the child (GIFT_WAIT: he takes
+ *   what is hung). After a chance of his, and a slip is one, he plays WRAP_UP_HOLD honest moves first. And while the
+ *   child is not clearly ahead (eBest < WRAP_UP_CLEAR, 250 cp), or his last chance is less than WRAP_UP_SETTLE moves
+ *   old, the crack is a slip, not a collapse: no mate, no more than a gift may give up (GIFT_CAP), no rook for less
+ *   than a rook, and of two slips the one that does not show at a glance. The first version cracked in full from a
+ *   level game: a rook for an elephant on move 60, a step into mate in one, which a child reads as throwing the game
+ *   (CONTRACT-NOTES 124); the second slipped and then collapsed on the very next move. From his move 80
+ *   on (WRAP_UP_PRESS_MOVE) the mode is 'press' when he is 250 cp or more ahead (eBest <= -WRAP_UP_BEHIND): he plays
+ *   the honest move of his level and wins his won game, with no ease move, no overlook and no gift. In between the
+ *   mode is the band's, as written. The press, the finish of section 4.7.6 and the rails below are what they are before move 60.
+ *   The numbers were set with the simulation (the owner's starting point was move 60 and 250 cp for both). Games of
+ *   100 child moves fell from 12 to 15 % of all teaching games to 6 to 8 % (mid, two seed sets; the strongest
+ *   pairings keep about one long game in five). Cracking in full from a level game brought them to 4 to 5 % and was
+ *   given up for the look; what stays long are mostly endings nobody can win (a rook each, a cannon each), which the
+ *   sixty-move rule ends as a draw. He presses twenty moves later than he cracks
+ *   because pressing from move 60 cost every simulated child points for no shorter games, and so a weak child who is
+ *   behind at move 60 meets the same rival as on move 59.
+ *   And section 4.7.2: a move of mode 'press' or 'finish' made from his move 60 on does not count towards the band
+ *   drift. recordOpponentMove reads the move number from the ply (floor(ply / 2) + 1, as the game counts it) and leaves
+ *   easeRun, pressRun and drift as they are for such a move: a long game says nothing about the child cruising, and a
+ *   press that the wrap-up chose against a child who is behind must not raise the level. Ease and spar moves count as written.
  *
  * Naturalness rails (CONTRACT-NOTES 124: the rival must not look as if he were throwing the game):
  * - (h) A mate in one is not overlooked when his last move was an overlook: it is never left unplayed twice running.
@@ -160,6 +191,24 @@ const TAKING_MARGIN = 100;
 const AHEAD = 600;
 /** ... while another move is less than this much below it (the margin of the repetition filter). */
 const BACK_MARGIN = 200;
+/**
+ * The wrap-up (CONTRACT-NOTES 143 b): a game that has gone on long is brought to its end. From this move of his on ...
+ */
+const WRAP_UP_MOVE = 60;
+/** ... a child who stands at this or better (cp, after his best move: level within half a pawn, or ahead) meets a rival who cracks: mode 'finish', whatever aheadRun says. */
+const WRAP_UP_AHEAD = -50;
+/** ... and while the child stands below this, the crack is a slip: no mate, no more than GIFT_CAP (CONTRACT-NOTES 151). */
+const WRAP_UP_CLEAR = 250;
+/** After a chance of his (a slip is one) the wrap-up does not crack on his next moves: this many honest moves first ... */
+const WRAP_UP_HOLD = 2;
+/** ... and until his last chance is this many moves old the crack stays a slip, however far the slip put the child ahead. */
+const WRAP_UP_SETTLE = 5;
+/** From this later move of his on ... */
+const WRAP_UP_PRESS_MOVE = 80;
+/** ... a rival who is this much ahead or more plays properly and wins his won game: mode 'press'. In between nothing changes. */
+const WRAP_UP_BEHIND = 250;
+/** The rank cannons start on, counted from the mover's back rank (0); horses and elephants develop to it. */
+const CANNON_RANK = 2;
 /** Squares of the board, and the largest code of a move (RailState.lastRival). */
 const SQUARES = 90;
 const MOVE_CODE_MAX = SQUARES * SQUARES;
@@ -620,7 +669,12 @@ export function recordChildMove(profile, game, sample) {
  */
 export function recordOpponentMove(game, ply, choice) {
   let { easeRun, pressRun, drift } = game;
-  if (choice.mode === 'ease') {                           // the child is stuck below the band
+  // The wrap-up: from his move WRAP_UP_MOVE on (the move number of a ply as the game counts it: 1, 1, 2, 2, ...) a move
+  // of mode press or finish says nothing about the child cruising. It leaves both runs and the drift as they are.
+  const wrapUp = Math.floor(ply / 2) + 1 >= WRAP_UP_MOVE && (choice.mode === 'press' || choice.mode === 'finish');
+  if (wrapUp) {
+    // nothing to count
+  } else if (choice.mode === 'ease') {                    // the child is stuck below the band
     easeRun += 1;
     pressRun = 0;
     if (easeRun % 6 === 0) drift = Math.max(-3, drift - 0.5);
@@ -747,6 +801,41 @@ function playableLines(lines, value) {
 }
 
 /**
+ * The lines of `pool` whose move is a developing move, the kind a player opens with (CONTRACT-NOTES 143 c). Read on the
+ * board, from the mover's own side (rank 0 is his back rank, CANNON_RANK the rank his cannons start on):
+ * a horse from his back rank to the cannons' rank; a cannon moving sideways along the cannons' rank; an elephant or an
+ * advisor leaving his back rank; a pawn of the third or the seventh file stepping forward; a rook moving along his
+ * back rank or his second rank, or stepping forward from its corner; and any capture.
+ * A table whose position cannot be read has no developing move.
+ * @param {Analysis} table @param {RootLine[]} pool @returns {RootLine[]}
+ */
+function developingLines(table, pool) {
+  /** @type {Board} */
+  let board;
+  try {
+    board = fenToBoard(table.fen).board;
+  } catch {
+    return [];
+  }
+  /** @param {number} row */
+  const rank = row => (table.turn === 'red' ? 9 - row : row);
+  return pool.filter(line => {
+    const { from, to } = line.move;
+    const piece = board[from.row]?.[from.col] ?? null;
+    const target = board[to.row]?.[to.col] ?? null;
+    if (piece === null || piece.color !== table.turn || target?.color === table.turn) return false;    // not a move of this position
+    if (target !== null) return true;                                                                  // any capture
+    const start = rank(from.row), end = rank(to.row);
+    if (piece.type === 'horse') return start === 0 && end === CANNON_RANK;
+    if (piece.type === 'cannon') return start === CANNON_RANK && end === CANNON_RANK;
+    if (piece.type === 'elephant' || piece.type === 'advisor') return start === 0;
+    if (piece.type === 'pawn') return (from.col === 2 || from.col === 6) && to.col === from.col;       // a pawn's move along its file is one step forward
+    if (piece.type === 'rook') return (start === end && start <= 1) || (start === 0 && end === 1 && (from.col === 0 || from.col === 8));
+    return false;
+  });
+}
+
+/**
  * The teaching opponent's selection (section 4.7.5). Lines as RootLine; brain.js converts to Line.
  * @param {Analysis} table the root table of the rival's position (allDepth >= 3, multiPV = 6)
  * @param {TeachingContext} ctx
@@ -794,8 +883,14 @@ export async function chooseTeachingMove(table, ctx, verify) {
   const bestCp = cp(best.score);
   const eBest = 0 - bestCp;                                          // the child's evaluation if the rival plays its best move
   const band = P.T + ctx.bandShift;                                  // T'
+  // The wrap-up: a game that has gone on long is brought to its end. From his move WRAP_UP_MOVE on he cracks when the child
+  // is level (within half a pawn) or ahead (finish). From his move WRAP_UP_PRESS_MOVE on he plays properly and wins his
+  // won game when he is WRAP_UP_BEHIND or more ahead (press: no ease move, no overlook, no gift). In between the band
+  // decides, as before.
   /** @type {TeachingChoice['mode']} */
-  const mode = eBest >= 600 && ctx.aheadRun >= 1 ? 'finish' : eBest > band + P.W ? 'press' : eBest >= band - P.W ? 'spar' : 'ease';
+  const mode = (eBest >= 600 && ctx.aheadRun >= 1) || (ctx.moveNo >= WRAP_UP_MOVE && eBest >= WRAP_UP_AHEAD) ? 'finish'
+    : ctx.moveNo >= WRAP_UP_PRESS_MOVE && eBest <= -WRAP_UP_BEHIND ? 'press'
+    : eBest > band + P.W ? 'press' : eBest >= band - P.W ? 'spar' : 'ease';
 
   // The honest move: the best move of a search of depth honestDepth.
   let honest = best;
@@ -833,9 +928,12 @@ export async function chooseTeachingMove(table, ctx, verify) {
 
   if (playable.length === 1) return choice(honest, 'honest');
 
-  // 1. Opening variety: the first rival moves pick uniformly among near-best moves.
+  // 1. Opening variety: the first rival moves pick uniformly among near-best moves; among the developing ones when the
+  //    pool holds any, so that his first moves look like an opening.
   if (ctx.moveNo <= (ctx.firstGame ? 2 : 4)) {
-    const pool = playable.filter(line => line.depth === D && bestCp - cp(line.score) <= 25);
+    const near = playable.filter(line => line.depth === D && bestCp - cp(line.score) <= 25);
+    const developing = developingLines(table, near);
+    const pool = developing.length > 0 ? developing : near;
     return choice(pool.length > 0 ? pool[Math.floor(rnd() * pool.length)] : best, 'variety');
   }
 
@@ -873,10 +971,47 @@ export async function chooseTeachingMove(table, ctx, verify) {
   /** @param {RootLine} line @param {number} loss @param {number} rd @returns {NonNullable<TeachingChoice['chance']>} */
   const chanceOf = (line, loss, rd) => ({ gain: loss, points: loss / 100, tier: revealTier(rd), revealDepth: rd, line: pvAsLine(line.pv.slice(1)) });
 
+  // What his moves take (rails i, j, k of CONTRACT-NOTES 124). A table whose position cannot be read names no piece.
+  /** @type {Board|null} */
+  let board = null;
+  try {
+    board = fenToBoard(table.fen).board;
+  } catch {
+    board = null;
+  }
+  /**
+   * Rail (j): the line gives a rook for less than a rook. Along its principal variation the child takes a rook and
+   * everything the rival takes is worth less.
+   * @param {RootLine} line
+   */
+  const losesRook = line => {
+    if (board === null) return false;
+    const grid = board.map(row => row.slice());
+    let rooks = 0, got = 0;                                          // rooks the child takes; the value of what the rival takes
+    for (let i = 0; i < line.pv.length; i++) {
+      const { from, to } = line.pv[i];
+      const mover = grid[from.row]?.[from.col] ?? null;
+      if (mover === null || grid[to.row] === undefined) break;       // not a line of this position
+      const victim = grid[to.row][to.col] ?? null;
+      if (victim !== null && i % 2 === 0) got += PIECE_VALUE[victim.type];
+      if (victim !== null && i % 2 === 1 && victim.type === 'rook') rooks += 1;
+      grid[to.row][to.col] = mover;
+      grid[from.row][from.col] = null;
+    }
+    return rooks > 0 && got < rooks * PIECE_VALUE.rook;
+  };
+
   // 2. Finish: let the child deliver the blow (4.7.6).
   if (mode === 'finish') {
+    // The mode is 'finish' through the wrap-up alone when section 4.7.6 does not ask for it. Such a crack keeps the
+    // manners of a gift: never as the answer to a blunder, not on the moves after a chance of his, and a slip, not a
+    // collapse, while the child is not clearly ahead or his last chance is still fresh.
+    const wrapUp = !(eBest >= 600 && ctx.aheadRun >= 1);
+    if (wrapUp && (ctx.sinceBlunder < GIFT_WAIT[ctx.level < GIFT_WAIT_LEVEL ? 0 : 1] || ctx.sinceChance < WRAP_UP_HOLD)) return choice(honest, 'honest');
+    const slip = wrapUp && (eBest < WRAP_UP_CLEAR || ctx.sinceChance < WRAP_UP_SETTLE);
     const pool = playable.filter(line => !(line.score >= WIN) && natural(line, 200))      // a commander under pressure may crack
-      .map(line => ({ line, loss: prov(line) })).sort((a, b) => b.loss - a.loss).slice(0, 5);
+      .map(line => ({ line, loss: prov(line) })).filter(candidate => !slip || candidate.loss <= GIFT_CAP)
+      .sort((a, b) => b.loss - a.loss).slice(0, 5);
     /** @type {{v:RootLine, m:number, rd:number}[]} */
     const mates = [];
     /** @type {{v:RootLine, loss:number, rd:number}[]} */
@@ -888,6 +1023,7 @@ export async function chooseTeachingMove(table, ctx, verify) {
       const rd = revealDepth(v.byDepth, v.score, 'bad');
       const m = mateIn(child);
       if (child >= WIN && m !== null && m < VERDICT_MATE) {
+        if (slip) continue;                                          // he does not walk into a mate from a level game
         if (m <= ctx.reveal / 2) {
           mates.push({ v, m, rd });
           continue;
@@ -896,10 +1032,12 @@ export async function chooseTeachingMove(table, ctx, verify) {
         continue;                                                    // a repetition verdict is never a finish
       }
       const loss = bestCp - cp(v.score);
-      if (loss >= 300 && loss <= 900 && rd <= ctx.reveal) wins.push({ v, loss, rd });
+      if (slip && losesRook(v)) continue;                            // nor does he give a rook for less than a rook (rail j)
+      if (loss >= 300 && loss <= (slip ? GIFT_CAP : 900) && rd <= ctx.reveal) wins.push({ v, loss, rd });
     }
     mates.sort((a, b) => a.m - b.m);
-    wins.sort((a, b) => b.loss - a.loss);
+    // The largest win; of two slips first the one that does not show at a glance (a fork or a pin, not a piece left hanging).
+    wins.sort((a, b) => (slip ? Math.min(b.rd, 2) - Math.min(a.rd, 2) : 0) || b.loss - a.loss);
     const pick = mates[0] ?? wins[0];
     return pick ? choice(pick.v, 'finisher', { chance: chanceOf(pick.v, bestCp - cp(pick.v.score), pick.rd) }) : choice(honest, 'honest');
   }
@@ -922,14 +1060,6 @@ export async function chooseTeachingMove(table, ctx, verify) {
     }
   }
 
-  // What his moves take (rails i, j, k of CONTRACT-NOTES 124). A table whose position cannot be read names no piece.
-  /** @type {Board|null} */
-  let board = null;
-  try {
-    board = fenToBoard(table.fen).board;
-  } catch {
-    board = null;
-  }
   /** The child's piece on a square, if any. @param {Square} square */
   const childAt = square => {
     const piece = board === null ? null : board[square.row]?.[square.col] ?? null;
@@ -959,27 +1089,6 @@ export async function chooseTeachingMove(table, ctx, verify) {
   const forTaking = playable.some(takes) || (countOf(rails.missRun, 0) >= 1 && winners.some(gains));
   /** A line that the search values as a plain repetition: it gives the child a draw, nothing to win. @param {RootLine} line */
   const repeating = line => line.depth === D && line.score === REPETITION_SCORE;
-  /**
-   * Rail (j): the line gives a rook for less than a rook. Along its principal variation the child takes a rook and
-   * everything the rival takes is worth less.
-   * @param {RootLine} line
-   */
-  const losesRook = line => {
-    if (board === null) return false;
-    const grid = board.map(row => row.slice());
-    let rooks = 0, got = 0;                                          // rooks the child takes; the value of what the rival takes
-    for (let i = 0; i < line.pv.length; i++) {
-      const { from, to } = line.pv[i];
-      const mover = grid[from.row]?.[from.col] ?? null;
-      if (mover === null || grid[to.row] === undefined) break;       // not a line of this position
-      const victim = grid[to.row][to.col] ?? null;
-      if (victim !== null && i % 2 === 0) got += PIECE_VALUE[victim.type];
-      if (victim !== null && i % 2 === 1 && victim.type === 'rook') rooks += 1;
-      grid[to.row][to.col] = mover;
-      grid[from.row][from.col] = null;
-    }
-    return rooks > 0 && got < rooks * PIECE_VALUE.rook;
-  };
 
   // The plain move: what he plays when he neither overlooks nor gives. In press and spar, and whenever he has a forced
   // mate, it is the honest move. In ease below level 5 it is the best move of a shallower search (EASE_DEPTH_ANCHORS)

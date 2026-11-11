@@ -1,7 +1,9 @@
 // tests/unit/coach/fallback.test.js (C2) — the local narrator: contract sections 4.15, 8.3, 8.6, 8.7.
 // Packets are the fixtures of section 9 (tests/fixtures/coach) and variations of them; every expected sentence is the template
 // of section 8.6 filled in by hand, with the wording the owner decided where 8.6 was wrong (CONTRACT-NOTES items 111 to 113:
-// the start index of localLine, 为什么？ after the game, and the corrected sentences).
+// the start index of localLine, 为什么？ after the game, and the corrected sentences; items 131 and 133, fix package CL: one
+// dash before a goal, a threat that does not stand yet, a bad verdict without a named flaw, the three open wordings, a rival
+// move that gave something up).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -86,7 +88,11 @@ const MATE_TRY = () => heldEvent({ move: '仕四进五', cat: 'blunder', loss: 2
 const HANG_TRY = () => heldEvent({ move: '马三进四', does: [{ k: 'cross_river', by: P('me', 'H', 4) }], flaws: [{ k: 'hang', on: P('me', 'H', 4), by: P('opp', 'C', 2) }], cost: { gain: [], lose: ['H'], cp: -400 } });
 const UNGUARD_TRY = () => heldEvent({ move: '炮五平六', does: [{ k: 'quiet' }], flaws: [{ k: 'unguard', by: P('me', 'C', 6), on: P('me', 'H', 3) }], cost: { gain: [], lose: ['H'], cp: -400 } });
 const THREAT_TRY = () => heldEvent({ move: '兵三进一', does: [{ k: 'quiet' }], flaws: [{ k: 'ignore_threat', by: P('opp', 'C', 2), on: P('me', 'H', 8) }], cost: { gain: [], lose: ['H'], cp: -400 } });
-const FORK_TRY = (by = P('opp', 'H', 4)) => heldEvent({ move: '车一进一', does: [{ k: 'develop', by: P('me', 'R', 1) }], flaws: [{ k: 'walk_fork', by, on: P('me', 'R', 1), on2: P('me', 'C', 5) }], cost: { gain: [], lose: ['C'], cp: -450 } });
+/** `by` undefined: no single piece forks (the brief then names none). */
+const FORK_TRY = (...args) => {
+  const by = args.length === 0 ? P('opp', 'H', 4) : args[0];
+  return heldEvent({ move: '车一进一', does: [{ k: 'develop', by: P('me', 'R', 1) }], flaws: [{ k: 'walk_fork', ...(by ? { by } : {}), on: P('me', 'R', 1), on2: P('me', 'C', 5) }], cost: { gain: [], lose: ['C'], cp: -450 } });
+};
 const PIN_TRY = () => heldEvent({ move: '马三进五', does: [{ k: 'quiet' }], flaws: [{ k: 'walk_pin', by: P('opp', 'R', 5), on: P('me', 'H', 5) }], cost: { gain: [], lose: ['H'], cp: -400 } });
 const COST_TRY = () => heldEvent({ move: '兵三进一', does: [{ k: 'quiet' }], flaws: [{ k: 'waste' }], cost: { gain: [], lose: ['P', 'C'], cp: -550 } });
 const OTHER_TRY = () => heldEvent({ move: '兵三进一', does: [{ k: 'quiet' }], flaws: [], cost: { gain: [], lose: [], cp: -200 } });
@@ -133,16 +139,53 @@ const GOLDEN = deepFreeze([
     expect: ['看看对方的6路马，它瞄着谁？', '对方的6路马在打什么主意？', '留神对方的6路马的去向。'] },
   { name: 'opp.threat', row: 'opp.threat', turn: oppTurn({ move: '马7进6', does: [{ k: 'attack', by: P('opp', 'H', 6), on: P('me', 'C', 5) }] }, { threats: [PIECE_THREAT] }), events: OPP_LAST,
     expect: ['对方盯上了你的五路炮。', '你的五路炮被盯上了。', '小心，你的五路炮有危险。', '对方想吃你的五路炮。', '你的五路炮要当心。', '不可不防：你的五路炮被瞄上了。'] },
+  // a threat that does not stand yet (prep): 它瞄着谁？ and 被瞄上了 would tell an aim that is not there; they give way to the next variant
+  { name: 'opp.threat.q (level 5), a threat that does not stand yet', row: 'opp.threat.q', events: OPP_LAST,
+    turn: oppTurn({ move: '马7进6', does: [{ k: 'develop', by: P('opp', 'H', 6) }] }, { level: 5, threats: [{ ...PIECE_THREAT, prep: true }] }),
+    expect: ['对方的6路马在打什么主意？', '对方的6路马在打什么主意？', '留神对方的6路马的去向。'] },
+  { name: 'opp.threat, a threat that does not stand yet', row: 'opp.threat', events: OPP_LAST,
+    turn: oppTurn({ move: '马7进6', does: [{ k: 'develop', by: P('opp', 'H', 6) }] }, { threats: [{ ...PIECE_THREAT, prep: true }] }),
+    expect: ['对方盯上了你的五路炮。', '你的五路炮被盯上了。', '小心，你的五路炮有危险。', '对方想吃你的五路炮。', '你的五路炮要当心。', '对方盯上了你的五路炮。'] },
   { name: 'opp.overlooked', row: 'opp.overlooked', turn: oppTurn({ move: '卒3进1', quality: 'slip', overlooked: { on: P('me', 'H', 8), move: '炮2进7' } }), events: OPP_LAST,
     expect: ['好险，对方漏看了一步。', '对方刚才错过了机会。', '司马懿也有走眼的时候。'] },
   { name: 'opp.chance', row: 'opp.chance', turn: oppTurn({ move: '卒3进1', quality: 'slip' }, { chance: { size: 'piece', theme: 'fork', area: 'left' }, known: { threats: true, chance: true } }), events: OPP_LAST,
     expect: ['左翼好像露了破绽。', '左翼有文章可做。', '看看左翼，有机会。'] },
+  // a chance in the child's own palace or back rows is told without its area (CONTRACT-NOTES 138): 己方九宫有文章可做 would
+  // tell the child that their own palace holds a chance
+  { name: 'opp.chance, in the child\'s own palace', row: 'opp.chance', events: OPP_LAST,
+    turn: oppTurn({ move: '卒3进1', quality: 'slip' }, { chance: { size: 'piece', theme: 'capture', area: 'my_palace' }, known: { threats: true, chance: true } }),
+    expect: ['对方好像露了破绽。', '眼下有文章可做。', '找一找，有机会。'] },
+  { name: 'opp.chance, in the child\'s own back rows', row: 'opp.chance', events: OPP_LAST,
+    turn: oppTurn({ move: '卒3进1', quality: 'slip' }, { chance: { size: 'pawn', theme: 'capture', area: 'my_back' }, known: { threats: true, chance: true } }),
+    expect: ['对方好像露了破绽。', '眼下有文章可做。', '找一找，有机会。'] },
+  // The caption above the bubble reads 【炮8平5】顺炮: the sentence tells what kind of formation that is, never the name alone
   { name: 'opp.name (section 9.3)', row: 'opp.name', turn: clone(F.opp.turn), events: clone(F.opp.events),
-    expect: ['对方摆出了顺炮。', '这是顺炮。', '顺炮，常见的阵势。'] },
-  { name: 'opp.effect', row: 'opp.effect', turn: oppTurn({ does: [{ k: 'develop', by: P('opp', 'H', 7) }, { k: 'defend', on: P('opp', 'P', 5) }] }), events: OPP_LAST,
-    expect: ['对方的7路马出动。', '对方这步在出子。', '这步的用意：出子。', '司马懿这步是出子。', '对方在出子。', '出子，不可不看。'] },
+    expect: ['顺炮，常见的阵势。'] },
+  // The caption reads 【炮8进1】保护: the sentence tells which piece is protected, in the rival voice (自己的, not 对方的).
+  // The sentence of the intent answer (对方这步的用意：给自己的5路卒补上保护。) is two characters over the cap of 18.
+  { name: 'opp.effect', row: 'opp.effect', turn: oppTurn({ move: '炮8进1', does: [{ k: 'defend', on: P('opp', 'P', 5) }, { k: 'develop', by: P('opp', 'C', 8) }] }), events: OPP_LAST,
+    expect: ['这步给自己的5路卒补上保护。', '这步给自己的5路卒补上保护。', '这步给自己的5路卒补上保护。'] },
+  { name: 'opp.effect, the sentence of the intent answer fits', row: 'opp.effect', turn: oppTurn({ move: '车9平8', does: [{ k: 'attack', by: P('opp', 'R', 8), on: P('me', 'H', 3) }] }), events: OPP_LAST,
+    expect: ['对方这步的用意：8路车捉你的三路马。', '对方的8路车捉你的三路马。', '对方这步的用意：8路车捉你的三路马。'] },
+  { name: 'opp.effect, only the shorter clause fits', row: 'opp.effect', events: OPP_LAST,
+    turn: oppTurn({ move: '炮8平5', does: [{ k: 'cannon_mount', by: P('opp', 'C', 5), on: P('me', 'P', 5), on2: P('opp', 'P', 5) }] }),
+    expect: ['对方的5路炮瞄着你的五路兵。', '对方的5路炮瞄着你的五路兵。', '对方的5路炮瞄着你的五路兵。'] },
+  // an effect that names no piece besides the one that moved says what the caption says (【马8进7】出子): no line
+  { name: 'opp: nothing to add to the caption (a developing move)', row: '', turn: oppTurn({ does: [{ k: 'develop', by: P('opp', 'H', 7) }, { k: 'defend', on: P('opp', 'P', 5) }] }), events: OPP_LAST,
+    expect: ['', '', ''] },
+  { name: 'opp: nothing to add to the caption (a piece that steps away)', row: '', turn: oppTurn({ move: '象5退3', does: [{ k: 'escape', by: P('opp', 'E', 3) }] }), events: OPP_LAST,
+    expect: ['', '', ''] },
+  { name: 'opp: nothing to add to the caption (the name of a tactic, its clause over the cap)', row: '', events: OPP_LAST,
+    turn: oppTurn({ move: '马6进5', name: 'fork_two', does: [{ k: 'fork', by: P('opp', 'H', 5), on: P('me', 'R', 4), on2: P('me', 'R', 6), name: 'fork_two' }] }),
+    expect: ['', '', ''] },
+  // the caption of a quiet move reads 调整: no variant says that word again
   { name: 'opp.quiet', row: 'opp.quiet', turn: oppTurn({ move: '士4进5', does: [{ k: 'quiet' }] }), events: OPP_LAST,
-    expect: ['对方稳稳地调了一步。', '对方在调整阵形。', '这步不急不躁。', '司马懿在布阵。', '对方先把阵脚站稳。', '平平常常的一步。'] },
+    expect: ['对方稳稳地走了一步。', '对方没有急着进攻。', '这步不急不躁。', '司马懿在布阵。', '对方先把阵脚站稳。', '平平常常的一步。'] },
+  // a move that gave something up is not called steady or ordinary (稳稳地, 把阵脚站稳, 平平常常 give way)
+  { name: 'opp.quiet, a move that left a hole', row: 'opp.quiet', turn: oppTurn({ move: '士4进5', quality: 'slip', does: [{ k: 'quiet' }] }), events: OPP_LAST,
+    expect: ['对方没有急着进攻。', '对方没有急着进攻。', '这步不急不躁。', '司马懿在布阵。', '对方没有急着进攻。', '对方没有急着进攻。'] },
+  { name: 'opp.quiet, a soft move', row: 'opp.quiet', turn: oppTurn({ move: '士4进5', quality: 'soft', does: [{ k: 'quiet' }] }), events: OPP_LAST,
+    expect: ['对方没有急着进攻。', '对方没有急着进攻。', '这步不急不躁。', '司马懿在布阵。', '对方没有急着进攻。', '对方没有急着进攻。'] },
 
   // ---- hint ----
   { name: 'hint 1: focus danger', row: 'hint1', turn: base(), events: [OPP_SILENT, hintEvent(1, { focus: 'danger', theme: 'escape' })], expect: ['先别急着进攻：对方想干什么？'] },
@@ -154,9 +197,21 @@ const GOLDEN = deepFreeze([
   { name: 'hint 1: theme mate_threat', row: 'hint1', turn: base(), events: [OPP_SILENT, hintEvent(1, { focus: 'chance', theme: 'mate_threat' })], expect: ['对方的老将，身边还安全吗？'] },
   { name: 'hint 1: focus develop (section 9.4)', row: 'hint1', turn: base(), events: asLast(F.hint.events.slice(0, 2)), expect: ['你还有哪个大子没出动？'] },
   { name: 'hint 1: focus finish', row: 'hint1', turn: base(), events: [OPP_SILENT, hintEvent(1, { focus: 'finish', theme: 'attack' })], expect: ['怎么把对方的老将逼到没路走？'] },
+  { name: 'hint 1: focus chance, a piece to attack', row: 'hint1', turn: base(), events: [OPP_SILENT, hintEvent(1, { focus: 'chance', theme: 'attack' })], expect: ['找一找：对方哪里有破绽？'] },
+  { name: 'hint 1: focus chance, a pin', row: 'hint1', turn: base(), events: [OPP_SILENT, hintEvent(1, { focus: 'chance', theme: 'pin' })], expect: ['找一找：对方哪里有破绽？'] },
   { name: 'hint 1: otherwise', row: 'hint1', turn: base(), events: [OPP_SILENT, hintEvent(1, { focus: 'improve', theme: 'quiet' })], expect: ['哪个子待的位置最别扭？'] },
   { name: 'hint 2: focus danger', row: 'hint2', turn: base(), events: [OPP_SILENT, spoken(hintEvent(1, { focus: 'danger', theme: 'escape' })), hintEvent(2, { piece: P('me', 'H', 8), area: 'left', theme: 'escape' })], expect: ['该照顾一下你的八路马了。'] },
+  { name: 'hint 2: focus danger, the king under check', row: 'hint2', turn: base(), events: [OPP_SILENT, spoken(hintEvent(1, { focus: 'danger', theme: 'check' })), hintEvent(2, { piece: P('me', 'K', 5), area: 'my_palace', theme: 'check' })], expect: ['该照顾一下你的帅了。'] },
+  { name: 'hint 2: focus danger, a piece that helps (it stands in the way of a check)', row: 'hint2', turn: base(), events: [OPP_SILENT, spoken(hintEvent(1, { focus: 'danger', theme: 'check' })), hintEvent(2, { piece: P('me', 'A', 4), area: 'my_palace', theme: 'check' })], expect: ['看看你的四路仕，它能帮上忙。'] },
+  { name: 'hint 2: focus danger, a piece that helps (it guards)', row: 'hint2', turn: base(), events: [OPP_SILENT, spoken(hintEvent(1, { focus: 'danger', theme: 'defend' })), hintEvent(2, { piece: P('me', 'H', 2), area: 'right', theme: 'defend' })], expect: ['看看你的二路马，它能帮上忙。'] },
   { name: 'hint 2: otherwise (section 9.4)', row: 'hint2', turn: base(), events: asLast(F.hint.events.slice(0, 3)), expect: ['看看你的二路马，机会在右翼。'] },
+  // 机会在己方九宫 / 机会在己方底线 are not said (CONTRACT-NOTES 138)
+  { name: 'hint 2: otherwise, the piece is headed for the child\'s own palace', row: 'hint2', turn: base(),
+    events: [OPP_SILENT, spoken(hintEvent(1, { focus: 'improve', theme: 'quiet' })), hintEvent(2, { piece: P('me', 'A', 4), area: 'my_palace', theme: 'quiet' })],
+    expect: ['看看你的四路仕，它有更好的去处。'] },
+  { name: 'hint 2: otherwise, the piece is headed for the child\'s own back rows', row: 'hint2', turn: base(),
+    events: [OPP_SILENT, spoken(hintEvent(1, { focus: 'improve', theme: 'quiet' })), hintEvent(2, { piece: P('me', 'R', 1), area: 'my_back', theme: 'quiet' })],
+    expect: ['看看你的一路车，它有更好的去处。'] },
   { name: 'hint 3: with a line (section 9.4)', row: 'hint3', turn: base(), events: clone(F.hint.events), expect: ['可以走【马二进三】：你的三路马出动。对方多半走【车9平8】。'] },
   { name: 'hint 3: without a line', row: 'hint3', turn: base(), events: [OPP_SILENT, hintEvent(3, { move: '车二进七', does: [{ k: 'check', by: P('me', 'R', 2) }], line: null })], expect: ['可以走【车二进七】：你的二路车将军。'] },
 
@@ -175,6 +230,13 @@ const GOLDEN = deepFreeze([
     expect: ['对方的5路卒背后有没有保镖？', '吃完，你的五路炮回得来吗？', '对方的5路卒是白给的吗？再看看。', '这个子，真的没人管吗？', '吃它之前，看看谁在撑腰。', '吃完这一口，接下来呢？'] },
   { name: 'held.fork', row: 'held.fork', turn: base(), events: [OPP_SILENT, FORK_TRY()],
     expect: ['对方的4路马下一步能跳到哪儿？', '你的一路车和你的五路炮，是不是站得太近？', '对方有没有一步捉两个？'] },
+  { name: 'held.fork (a rook reaches along a whole line)', row: 'held.fork', turn: base(), events: [OPP_SILENT, FORK_TRY(P('opp', 'R', 4))],
+    expect: ['你的一路车和你的五路炮，会同时被捉吗？', '你的一路车和你的五路炮，会同时被捉吗？', '对方有没有一步捉两个？'] },
+  { name: 'held.fork (two pieces attacked by different pieces)', row: 'held.fork', turn: base(), events: [OPP_SILENT, FORK_TRY(undefined)],
+    expect: ['你的一路车和你的五路炮，会同时被捉吗？', '你的一路车和你的五路炮，会同时被捉吗？', '对方有没有一步捉两个？'] },
+  { name: 'held.fork (a piece and the king: a check that also attacks the piece)', row: 'held.fork', turn: base(),
+    events: [OPP_SILENT, heldEvent({ move: '炮二平四', does: [{ k: 'quiet' }], flaws: [{ k: 'walk_fork', by: P('opp', 'H', 4), on: P('me', 'R', 1), on2: P('me', 'K', 5) }], cost: { gain: [], lose: ['R'], cp: -900 } })],
+    expect: ['对方的4路马下一步能跳到哪儿？', '对方将军的时候，你的一路车怎么办？', '对方有没有一步捉两个？'] },
   { name: 'held.pin', row: 'held.pin', turn: base(), events: [OPP_SILENT, PIN_TRY()],
     expect: ['你的五路马后面站着谁？', '你的五路马还能自由走动吗？', '对方的5路车和你的五路马在不在一条线上？'] },
   { name: 'held.cost', row: 'held.cost', turn: base(), events: [OPP_SILENT, COST_TRY()],
@@ -185,8 +247,55 @@ const GOLDEN = deepFreeze([
   // ---- try: comments (cap 24) ----
   { name: 'try.only', row: 'try.only', turn: base(), events: [OPP_SILENT, tryEvent({ only: true })],
     expect: ['【马二进三】是眼下唯一的解法，走得对。', '只有【马二进三】能解围，好眼力。', '此计可行：【马二进三】是唯一的路。'] },
+  // a forced move (at most two legal moves) was not found: no 走得对, no 好眼力, no 此计可行 (CONTRACT-NOTES 147)
+  { name: 'try.only, a forced move', row: 'try.only', turn: turnWith({ check: true, n: 2 }), events: [OPP_SILENT, tryEvent({ move: '帅五平六', only: true, does: [{ k: 'escape', by: P('me', 'K', 5) }] })],
+    expect: ['【帅五平六】是眼下唯一的解法。'] },
+  // The best there was, and nothing to praise (CONTRACT-NOTES 147): the move's own line leaves the child two points or
+  // more down. The grim row stands in for only, taken, praise and steady.
+  { name: 'try.grim: the line still costs a piece (in place of praise)', row: 'try.grim', turn: base(),
+    events: [OPP_SILENT, tryEvent({ move: '车一平三', eval: { b: 'lost' }, does: [{ k: 'attack', by: P('me', 'R', 3), on: P('opp', 'C', 7) }], cost: { gain: ['C'], lose: ['R', 'H'], cp: -850 } })],
+    expect: ['【车一平三】是眼下最顽强的一步。', '局面吃紧，【车一平三】是最好的应法。', '难是难，【车一平三】没有走错。'] },
+  { name: 'try.grim: the line still costs two points (in place of only)', row: 'try.grim', turn: base(),
+    events: [OPP_SILENT, tryEvent({ move: '相七进五', only: true, eval: { b: 'worse' }, does: [{ k: 'defend', on: P('me', 'P', 5) }], cost: { gain: [], lose: ['A'], cp: -200 } })],
+    expect: ['【相七进五】是眼下最顽强的一步。', '局面吃紧，【相七进五】是最好的应法。', '难是难，【相七进五】没有走错。'] },
+  // ... or the child stays far behind after it (走后形势: 很危险) and the line wins nothing
+  { name: 'try.grim: far behind and nothing won (in place of steady)', row: 'try.grim', turn: base(),
+    events: [OPP_SILENT, tryEvent({ move: '帅五退一', eval: { b: 'lost' }, does: [{ k: 'quiet' }] })],
+    expect: ['【帅五退一】是眼下最顽强的一步。', '局面吃紧，【帅五退一】是最好的应法。', '难是难，【帅五退一】没有走错。'] },
+  // ... a move judged 稳健 is not the best one: 最顽强 and 最好的 are not said of it (CONTRACT-NOTES 148)
+  { name: 'try.grim: a move judged good', row: 'try.grim', turn: base(),
+    events: [OPP_SILENT, tryEvent({ move: '帅五退一', cat: 'good', eval: { b: 'lost' }, does: [{ k: 'quiet' }] })],
+    expect: ['难是难，【帅五退一】没有走错。', '局面吃紧，【帅五退一】可以走。'] },
+  { name: 'try.grim: far behind and nothing won (in place of taken)', row: 'try.grim', turn: base(),
+    events: [OPP_SILENT, tryEvent({ move: '车二进七', eval: { b: 'lost' }, does: [{ k: 'check', by: P('me', 'R', 2) }], chance: 'taken' })],
+    expect: ['【车二进七】是眼下最顽强的一步。', '局面吃紧，【车二进七】是最好的应法。', '难是难，【车二进七】没有走错。'] },
+  // The words of the row follow the evaluation after the move (CONTRACT-NOTES 150). 最顽强, 局面吃紧 and 难是难 all say that
+  // the position is bad; where the child is not in trouble (走后形势 均势, 占优 or 胜势) the row is reached by a line that
+  // gives two points back, and that is what is said.
+  { name: 'try.grim: winning, the line gives two points back', row: 'try.grim', turn: base(),
+    events: [OPP_SILENT, tryEvent({ move: '兵三进一', eval: { b: 'won' }, does: [{ k: 'cross_river', by: P('me', 'P', 3) }], cost: { gain: [], lose: ['A'], cp: -200 } })],
+    expect: ['【兵三进一】是眼下最好的一步，只是要丢点子。', '【兵三进一】没有走错，只是要丢点子。'] },
+  { name: 'try.grim: a level position, a brilliant move whose line costs a piece (in place of only)', row: 'try.grim', turn: base(),
+    events: [OPP_SILENT, tryEvent({ move: '车一平三', cat: 'brilliant', only: true, does: [{ k: 'attack', by: P('me', 'R', 3), on: P('opp', 'C', 7) }], cost: { gain: ['C'], lose: ['R'], cp: -450 } })],
+    expect: ['【车一平三】是眼下最好的一步，只是要丢点子。', '【车一平三】没有走错，只是要丢点子。'] },
+  { name: 'try.grim: ahead, a move judged good', row: 'try.grim', turn: base(),
+    events: [OPP_SILENT, tryEvent({ move: '兵三进一', cat: 'good', loss: 40, eval: { b: 'better' }, does: [{ k: 'quiet' }], cost: { gain: [], lose: ['A'], cp: -200 } })],
+    expect: ['【兵三进一】可以走，只是要丢点子。', '【兵三进一】没有走错，只是要丢点子。'] },
+  // A move after which the child is mated has nothing to praise, whatever it does and whatever it takes (item 150): where
+  // every move is mated all moves are 好棋. A fork one move before the mate was 妙哉！好一步【马六退七】：捉双。
+  { name: 'try.grim: the child is mated after the move (in place of praise for a fork)', row: 'try.grim', turn: base(),
+    events: [OPP_SILENT, tryEvent({ move: '马六退七', eval: { b: 'lost', mate: -1 }, does: [{ k: 'fork', by: P('me', 'H', 7), on: P('opp', 'R', 7), on2: P('opp', 'C', 5) }] })],
+    expect: ['【马六退七】是眼下最顽强的一步。', '局面吃紧，【马六退七】是最好的应法。', '难是难，【马六退七】没有走错。'] },
+  { name: 'try.grim: the child is mated after the move (in place of praise for a capture, of taken and of avoided)', row: 'try.grim', turn: base(),
+    events: [OPP_SILENT, tryEvent({ move: '车六平五', eval: { b: 'lost', mate: -2 }, does: [{ k: 'capture_free', by: P('me', 'R', 5), on: P('opp', 'P', 5) }],
+      cost: { gain: ['P'], lose: [], cp: 100 }, chance: 'taken', avoided: 'greedy' })],
+    expect: ['【车六平五】是眼下最顽强的一步。', '局面吃紧，【车六平五】是最好的应法。', '难是难，【车六平五】没有走错。'] },
   { name: 'try.avoided', row: 'try.avoided', turn: base(), events: [OPP_SILENT, tryEvent({ avoided: 'greedy' })],
     expect: ['这回没踩坑，【马二进三】走得稳。', '躲开了以前的坑，【马二进三】可行。'] },
+  // 走得稳 is not said of a move after which the child comes out behind in material
+  { name: 'try.avoided, the line still costs material', row: 'try.avoided', turn: base(),
+    events: [OPP_SILENT, tryEvent({ avoided: 'greedy', eval: { b: 'worse' }, cost: { gain: [], lose: ['H'], cp: -400 } })],
+    expect: ['躲开了以前的坑，【马二进三】可行。', '躲开了以前的坑，【马二进三】可行。'] },
   { name: 'try.taken', row: 'try.taken', turn: base(), events: [OPP_SILENT, tryEvent({ move: '马三进四', does: [FORK], chance: 'taken' })],
     expect: ['【马三进四】抓住了对方的破绽！', '【马三进四】正中对方的破绽。', '对方的漏洞被【马三进四】抓个正着。'] },
   { name: 'try.praise', row: 'try.praise', turn: base(), events: [OPP_SILENT, tryEvent({ move: '车二进七', does: [{ k: 'check', by: P('me', 'R', 2) }] })],
@@ -198,6 +307,14 @@ const GOLDEN = deepFreeze([
     expect: ['【马二进三】走得稳，没有毛病。', '【马二进三】可行。', '稳当的一步。', '【马二进三】，不急不躁。', '这步扎实。', '【马二进三】没问题。'] },
   { name: 'try.missed', row: 'try.missed', turn: base(), events: [OPP_SILENT, tryEvent({ move: '兵三进一', cat: 'ok', loss: 160, does: [{ k: 'quiet' }], toward: { area: 'left', theme: 'fork' }, chance: 'missed' })],
     expect: ['【兵三进一】没危险，可左翼有个机会。', '别急，左翼还有便宜没占。', '【兵三进一】稳，但错过了左翼的机会。'] },
+  // 可己方九宫有个机会 is not said (CONTRACT-NOTES 138): the area of the child's own palace or back rows is not named
+  { name: 'try.missed, the better idea lies in the child\'s own palace', row: 'try.missed', turn: base(),
+    events: [OPP_SILENT, tryEvent({ move: '兵三进一', cat: 'ok', loss: 160, does: [{ k: 'quiet' }], toward: { area: 'my_palace', theme: 'capture' }, chance: 'missed' })],
+    expect: ['【兵三进一】没危险，可还有个机会没抓。', '别急，还有便宜没占。', '【兵三进一】稳，但错过了一个机会。'] },
+  { name: 'try.missed, the announced chance lies in the child\'s own back rows', row: 'try.missed',
+    turn: turnWith({ chance: { size: 'piece', theme: 'capture', area: 'my_back' }, known: { threats: true, chance: true } }),
+    events: [OPP_SILENT, tryEvent({ move: '兵三进一', cat: 'ok', loss: 160, does: [{ k: 'quiet' }], toward: null, chance: 'missed' })],
+    expect: ['【兵三进一】没危险，可还有个机会没抓。', '别急，还有便宜没占。', '【兵三进一】稳，但错过了一个机会。'] },
   { name: 'try.ok', row: 'try.ok', turn: base(), events: [OPP_SILENT, tryEvent({ move: '兵三进一', cat: 'ok', loss: 80, does: [{ k: 'quiet' }] })],
     expect: ['【兵三进一】可以走，不吃亏。', '【兵三进一】稳，但略慢。', '可行，只是不够紧。'] },
   { name: 'try.ok (with toward.area)', row: 'try.ok', turn: base(), events: [OPP_SILENT, tryEvent({ move: '兵三进一', cat: 'ok', loss: 80, does: [{ k: 'quiet' }], toward: { area: 'right', theme: 'develop' } })],
@@ -212,23 +329,181 @@ const GOLDEN = deepFreeze([
   { name: 'ask good: ok', row: 'ask.good', turn: base(), events: [OPP_SILENT, spoken(tryEvent({ cat: 'ok' })), ask('good')], expect: ['【马二进三】稍慢，但不算错。'] },
   { name: 'ask good: mistake, netClause(cost)', row: 'ask.good', turn: base(), events: [OPP_SILENT, HELD_TRY, ask('good')], expect: ['【炮五进四】是失误：你吃到一个卒，丢掉一个炮，算下来亏了。'] },
   { name: 'ask good: blunder, effectClause(flaws[0])', row: 'ask.good', turn: base(), events: [OPP_SILENT, spoken(MATE_TRY()), ask('good')], expect: ['【仕四进五】是漏着：这步走完，对方就有杀棋。'] },
-  { name: 'ask reply (section 9.5)', row: 'ask.reply', turn: base(), events: clone(F.tryHeldAsk.events), expect: ['对方多半走【马7进5】，你吃到一个卒，丢掉一个炮，算下来亏了。'] },
-  { name: 'ask reply: a quiet line', row: 'ask.reply', turn: base(), events: [OPP_SILENT, spoken(clone(F.try.events[1])), ask('reply', { more: { better: [] } })], expect: ['对方多半走【车9平8】，双方都没有丢子。'] },
+  // 稳健，可以走 is not said of a move after which a piece falls, or in a position that stays 很危险 (CONTRACT-NOTES 148);
+  // 是眼下最好的一步 stays: it is true
+  { name: 'ask good: good, behind, its line still costs a piece', row: 'ask.good', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '兵七平八', cat: 'good', eval: { b: 'worse' }, does: [{ k: 'quiet' }], cost: { gain: [], lose: ['H'], cp: -400 } })), ask('good')],
+    expect: ['【兵七平八】没有走错，只是局面吃紧。'] },
+  // ... 局面吃紧 only where the child is in trouble after the move: in a level or a winning position the line gives
+  // material back, and that is what is said (CONTRACT-NOTES 150)
+  { name: 'ask good: good, level, its line still costs a piece', row: 'ask.good', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '兵七平八', cat: 'good', does: [{ k: 'quiet' }], cost: { gain: [], lose: ['H'], cp: -400 } })), ask('good')],
+    expect: ['【兵七平八】没有走错，只是要丢点子。'] },
+  { name: 'ask good: good, winning, its line gives a pawn back', row: 'ask.good', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '兵三进一', cat: 'good', loss: 160, eval: { b: 'won' }, does: [{ k: 'cross_river', by: P('me', 'P', 3) }], cost: { gain: [], lose: ['A'], cp: -200 } })), ask('good')],
+    expect: ['【兵三进一】没有走错，只是要丢点子。'] },
+  { name: 'ask good: best, winning, its line gives a pawn back', row: 'ask.good', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '兵三进一', eval: { b: 'won' }, does: [{ k: 'quiet' }], cost: { gain: [], lose: ['A'], cp: -200 } })), ask('good')],
+    expect: ['【兵三进一】是眼下最好的一步。'] },
+  { name: 'ask good: good, far behind', row: 'ask.good', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '帅六平五', cat: 'good', eval: { b: 'lost' }, does: [{ k: 'quiet' }] })), ask('good')],
+    expect: ['【帅六平五】没有走错，只是局面吃紧。'] },
+  { name: 'ask good: good, far behind, but it wins material back', row: 'ask.good', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '炮五进四', cat: 'good', eval: { b: 'lost' }, does: [{ k: 'capture', by: P('me', 'C', 5), on: P('opp', 'P', 5) }], cost: { gain: ['P'], lose: [], cp: 100 } })), ask('good')],
+    expect: ['【炮五进四】稳健，可以走。'] },
+  { name: 'ask good: best, far behind', row: 'ask.good', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '帅五平四', eval: { b: 'lost' }, does: [{ k: 'quiet' }] })), ask('good')],
+    expect: ['【帅五平四】是眼下最好的一步。'] },
+  // first his reply, then what follows it (CONTRACT-NOTES 147): the outcome is introduced by 之后
+  { name: 'ask reply (section 9.5)', row: 'ask.reply', turn: base(), events: clone(F.tryHeldAsk.events), expect: ['对方多半走【马7进5】，之后你吃到一个卒，丢掉一个炮，算下来亏了。'] },
+  { name: 'ask reply: a quiet line', row: 'ask.reply', turn: base(), events: [OPP_SILENT, spoken(clone(F.try.events[1])), ask('reply', { more: { better: [] } })], expect: ['对方多半走【车9平8】，之后双方都没有丢子。'] },
+  // 对方多半走【马8进7】，你白吃一个卒 read as if his reply gave the pawn away: the child can take it afterwards
+  { name: 'ask reply: the child wins something after his reply', row: 'ask.reply', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '马二进三', reply: { first: 'opp', moves: ['马8进7', '炮五进四'], net: { gain: ['P'], lose: [], cp: 100 }, end: 'quiet' } })), ask('reply')],
+    expect: ['对方多半走【马8进7】，之后你能白吃一个卒。'] },
+  { name: 'ask reply: the child loses something after his reply', row: 'ask.reply', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '车一平二', cat: 'ok', loss: 90, reply: { first: 'opp', moves: ['炮7平1'], net: { gain: [], lose: ['H'], cp: -400 }, end: 'quiet' } })), ask('reply')],
+    expect: ['对方多半走【炮7平1】，之后你白丢一个马。'] },
+  // 之后 and 最后 do not go together: a line that ends in mate with nothing changing hands says 最后… alone
+  { name: 'ask reply: the line ends in mate', row: 'ask.reply', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '车二进七', cat: 'brilliant', eval: { b: 'won', mate: 1 }, does: [{ k: 'check', by: P('me', 'R', 2) }],
+      reply: { first: 'opp', moves: ['将5进1', '车二退一'], net: NET0, end: 'mate' } })), ask('reply')],
+    expect: ['对方多半走【将5进1】，最后你将死对方。'] },
+  { name: 'ask reply: the line wins a piece and ends in mate', row: 'ask.reply', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '车二进七', cat: 'brilliant', eval: { b: 'won', mate: 2 }, does: [{ k: 'check', by: P('me', 'R', 2) }],
+      reply: { first: 'opp', moves: ['士5退4', '车二平四', '将5进1', '车四退一'], net: { gain: ['A'], lose: [], cp: 200 }, end: 'mate' } })), ask('reply')],
+    expect: ['对方多半走【士5退4】，之后你能白吃一个士，最后将死对方。'] },
   { name: 'ask reply: no reply line', row: 'ask.reply', turn: base(), events: [OPP_SILENT, spoken(tryEvent()), ask('reply', { more: { better: [] } })], expect: ['对方没有特别厉害的应对。'] },
   { name: 'ask better', row: 'ask.better', turn: base(), events: [OPP_SILENT, HELD_TRY, ask('better', { more: clone(MORE) })], expect: ['更好的是【马二进三】：你的三路马出动。之后双方都没有丢子。'] },
+  // what follows the better move reads as a sequence too: 之后你能白吃…, and 最后… when its line ends in mate
+  { name: 'ask better: its line wins something', row: 'ask.better', turn: base(),
+    events: [OPP_SILENT, HELD_TRY, ask('better', { more: { reply: clone(MORE.reply), better: [{ move: '马三进四', gain: 500, does: [FORK],
+      line: { first: 'opp', moves: ['车3平2', '马四进三'], net: { gain: ['C'], lose: [], cp: 450 }, end: 'quiet' } }] } })],
+    expect: ['更好的是【马三进四】：你的四路马同时捉住对方的3路车和7路炮，只能救一个。之后你能白吃一个炮。'] },
+  { name: 'ask better: its line ends in mate', row: 'ask.better', turn: base(),
+    events: [OPP_SILENT, HELD_TRY, ask('better', { more: { reply: clone(MORE.reply), better: [{ move: '车二进七', gain: 2000, does: [{ k: 'check', by: P('me', 'R', 2) }],
+      line: { first: 'opp', moves: ['将5进1', '车二退一'], net: NET0, end: 'mate' } }] } })],
+    expect: ['更好的是【车二进七】：你的二路车将军。最后你将死对方。'] },
   { name: 'ask better: no line', row: 'ask.better', turn: base(), events: [OPP_SILENT, HELD_TRY, ask('better', { more: { reply: clone(MORE.reply), better: [{ ...clone(MORE.better[0]), line: null }] } })], expect: ['更好的是【马二进三】：你的三路马出动。'] },
   { name: 'ask better: nothing better', row: 'ask.better', turn: base(), events: [OPP_SILENT, spoken(tryEvent()), ask('better', { more: { better: [] } })], expect: ['亮没找到更好的了，就它。'] },
   { name: 'ask why: a try with flaws', row: 'ask.why', turn: base(), events: [OPP_SILENT, HELD_TRY, ask('why', { more: clone(MORE) })],
-    expect: ['因为对方的5路卒有对方的7路马保护，你的五路炮吃了它会被吃回。对方走【马7进5】之后，你吃到一个卒，丢掉一个炮，算下来亏了。'] },
+    expect: ['因为对方的5路卒有7路马保护，你的五路炮吃了它会被吃回。对方走【马7进5】之后，你吃到一个卒，丢掉一个炮，算下来亏了。'] },
+  // what the child wins after his answer is something the child can then take (…之后，你能白吃一个卒), not a gift of his move
+  { name: 'ask why: a try with a flaw whose reply line wins something for the child', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '兵三进一', cat: 'mistake', loss: 200, does: [{ k: 'quiet' }], flaws: [{ k: 'waste' }],
+      reply: { first: 'opp', moves: ['卒7进1', '兵三进一'], net: { gain: ['P'], lose: [], cp: 100 }, end: 'quiet' } })), ask('why')],
+    expect: ['因为这步没有实际作用，白让对方走一步。对方走【卒7进1】之后，你能白吃一个卒。'] },
+  // The reason for a slow move is a reason (CONTRACT-NOTES 147): about a 缓着 that does nothing in particular, what the
+  // better move would have done, when the thread knows one with an effect; else that the move asks the rival no question.
+  { name: 'ask why: a slow quiet move, a better move with an effect is known', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '炮八进三', cat: 'ok', loss: 90, does: [{ k: 'quiet' }] })),
+      spoken(ask('good', { i: 2 })), ask('why', { i: 3, more: { better: [{ move: '马八进七', gain: 90, does: [{ k: 'develop', by: P('me', 'H', 7) }], line: null }] } })],
+    expect: ['因为【马八进七】更紧：你的七路马出动。'] },
+  { name: 'ask why: a slow quiet move, the better move is a quiet one too', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '炮八进三', cat: 'ok', loss: 90, does: [{ k: 'quiet' }] })),
+      ask('why', { more: { better: [{ move: '帅五退一', gain: 90, does: [{ k: 'quiet' }], line: null }] } })],
+    expect: ['这步没有错，只是没给对方出难题。'] },
+  { name: 'ask why: a slow quiet move, nothing better is known', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '炮八进三', cat: 'ok', loss: 90, does: [{ k: 'quiet' }] })), ask('why', { more: { better: [] } })],
+    expect: ['这步没有错，只是没给对方出难题。'] },
+  { name: 'ask why: a slow quiet move, the withheld packet never came', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '炮八进三', cat: 'ok', loss: 90, does: [{ k: 'quiet' }] })), ask('why')],
+    expect: ['这步没有错，只是没给对方出难题。'] },
+  // The best there was in a position that stays bad, doing nothing in particular: 因为调整了一下阵形 is no reason for
+  // 是眼下最好的一步 (CONTRACT-NOTES 148). With an effect of its own the effect stays the answer.
+  { name: 'ask why: a quiet best move, far behind', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '帅五平四', eval: { b: 'lost' }, does: [{ k: 'quiet' }] })), ask('why')],
+    expect: ['因为眼下没有明显更好的走法。'] },
+  // 没有明显更好的走法 is said of a 稳健 move only when the thread knows that no better move is listed: the next chip
+  // (有更好的吗？) must not name one right after it (CONTRACT-NOTES 150). With a better move listed the answer is that of a
+  // slow move; so it is while the list has not arrived.
+  { name: 'ask why: a good move without an effect whose line costs a piece, nothing better is listed', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '兵七平八', cat: 'good', does: [], cost: { gain: [], lose: ['H'], cp: -400 } })), ask('why', { more: { better: [] } })],
+    expect: ['因为眼下没有明显更好的走法。'] },
+  { name: 'ask why: a quiet good move far behind, a better move with an effect is listed', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '炮二平四', cat: 'good', loss: 82, eval: { b: 'lost' }, does: [{ k: 'quiet' }] })),
+      ask('why', { more: { better: [{ move: '炮二平一', gain: 82, does: [{ k: 'cannon_mount', by: P('me', 'C', 1), on: P('opp', 'R', 9), on2: P('opp', 'P', 9) }], line: null }] } })],
+    expect: ['因为【炮二平一】更紧：你的一路炮借对方的9路卒当炮架，瞄着9路车。'] },
+  { name: 'ask why: a quiet good move far behind, the better move that is listed is a quiet one too', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '炮二平四', cat: 'good', loss: 82, eval: { b: 'lost' }, does: [{ k: 'quiet' }] })),
+      ask('why', { more: { better: [{ move: '帅五退一', gain: 82, does: [{ k: 'quiet' }], line: null }] } })],
+    expect: ['这步没有错，只是没给对方出难题。'] },
+  { name: 'ask why: a quiet good move far behind, the list of better moves has not arrived', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '炮二平四', cat: 'good', loss: 82, eval: { b: 'lost' }, does: [{ k: 'quiet' }] })), ask('why')],
+    expect: ['这步没有错，只是没给对方出难题。'] },
+  { name: 'ask why: a quiet good move far behind, the better move was named by an earlier chip', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '炮二平四', cat: 'good', loss: 82, eval: { b: 'lost' }, does: [{ k: 'quiet' }] })),
+      spoken(ask('better', { i: 2, more: { better: [{ move: '炮二平一', gain: 82, does: [{ k: 'attack', by: P('me', 'C', 1), on: P('opp', 'R', 9) }], line: null }] } })), ask('why', { i: 3 })],
+    expect: ['因为【炮二平一】更紧：你的一路炮捉对方的9路车。'] },
+  // the tactic of a move after which the child is mated is no reason for anything (item 150)
+  { name: 'ask why: the child is mated after the move, a fork', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '马六退七', eval: { b: 'lost', mate: -1 }, does: [{ k: 'fork', by: P('me', 'H', 7), on: P('opp', 'R', 7), on2: P('opp', 'C', 5) }] })), ask('why')],
+    expect: ['因为眼下没有明显更好的走法。'] },
+  { name: 'ask why: a best move with an effect, far behind', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '仕六进五', eval: { b: 'lost' }, does: [{ k: 'defend', on: P('me', 'A', 4) }] })), ask('why')],
+    expect: ['因为给你的四路仕补上保护。'] },
+  { name: 'ask why: a quiet best move of a level position', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '帅五平四', does: [{ k: 'quiet' }] })), ask('why')],
+    expect: ['因为调整了一下阵形。'] },
+  // a slow move with an effect of its own keeps that effect as its answer, and so does a quiet move that is not slow
+  { name: 'ask why: a slow move with an effect of its own', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '炮六平八', cat: 'ok', loss: 90, does: [{ k: 'restrict_king', on: P('opp', 'K', 5) }] })),
+      ask('why', { more: { better: [{ move: '马八进七', gain: 90, does: [{ k: 'develop', by: P('me', 'H', 7) }], line: null }] } })],
+    expect: ['因为封住了对方的将的一条退路。'] },
+  { name: 'ask why: a quiet move that is the best there is', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '仕四进五', cat: 'best', does: [{ k: 'quiet' }] })), ask('why', { more: { better: [] } })],
+    expect: ['因为调整了一下阵形。'] },
   { name: 'ask why: a try with flaws, no reply line', row: 'ask.why', turn: base(), events: [OPP_SILENT, spoken(tryEvent({ move: '兵三进一', cat: 'mistake', loss: 300, does: [{ k: 'quiet' }], flaws: [{ k: 'waste' }] })), ask('why')],
     expect: ['因为这步没有实际作用，白让对方走一步。'] },
   { name: 'ask why: a try without flaws', row: 'ask.why', turn: base(), events: [OPP_SILENT, spoken(clone(F.try.events[1])), ask('why')], expect: ['因为你的三路马出动。'] },
+  { name: 'ask why: a mistake without a named flaw, the reply costs something', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '兵五进一', cat: 'mistake', loss: 200, does: [{ k: 'attack', by: P('me', 'P', 5), on: P('opp', 'P', 5) }], cost: { gain: [], lose: ['P'], cp: -100 },
+      reply: { first: 'opp', moves: ['卒5进1'], net: { gain: [], lose: ['P'], cp: -100 }, end: 'quiet' } })), ask('why')],
+    expect: ['因为对方走【卒5进1】之后，你白丢一个兵。'] },
+  { name: 'ask why: a mistake without a named flaw, nothing is lost', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '兵五进一', cat: 'mistake', loss: 200, does: [{ k: 'attack', by: P('me', 'P', 5), on: P('opp', 'P', 5) }],
+      reply: { first: 'opp', moves: ['卒5进1'], net: NET0, end: 'quiet' } })), ask('why')],
+    expect: ['【兵五进一】是失误。'] },
+  // a balance that reads 大致相当 is no reason for a mistake (因为…你吃到一个马，丢掉一个炮，大致相当。): the verdict alone
+  { name: 'ask why: a mistake without a named flaw, the reply reads even', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '车一进二', cat: 'mistake', loss: 200, does: [{ k: 'develop', by: P('me', 'R', 1) }], cost: { gain: ['H'], lose: ['C'], cp: -50 },
+      reply: { first: 'opp', moves: ['炮8平7'], net: { gain: ['H'], lose: ['C'], cp: -50 }, end: 'quiet' } })), ask('why')],
+    expect: ['【车一进二】是失误。'] },
+  { name: 'ask why: a mistake without a named flaw, the reply comes out behind', row: 'ask.why', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '车一进二', cat: 'mistake', loss: 200, does: [{ k: 'develop', by: P('me', 'R', 1) }], cost: { gain: ['P'], lose: ['C'], cp: -350 },
+      reply: { first: 'opp', moves: ['炮8平7'], net: { gain: ['P'], lose: ['C'], cp: -350 }, end: 'quiet' } })), ask('why')],
+    expect: ['因为对方走【炮8平7】之后，你吃到一个卒，丢掉一个炮，算下来亏了。'] },
+  { name: 'ask good: a mistake without a named flaw whose balance reads even', row: 'ask.good', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '车一进二', cat: 'mistake', loss: 200, does: [{ k: 'develop', by: P('me', 'R', 1) }], cost: { gain: ['H'], lose: ['C'], cp: -50 } })), ask('good')],
+    expect: ['【车一进二】是失误。'] },
+  { name: 'ask good: a mistake whose balance reads even, with a flaw', row: 'ask.good', turn: base(),
+    events: [OPP_SILENT, spoken(tryEvent({ move: '车一进二', cat: 'mistake', loss: 200, does: [{ k: 'develop', by: P('me', 'R', 1) }], flaws: [{ k: 'waste' }], cost: { gain: ['H'], lose: ['C'], cp: -50 } })), ask('good')],
+    expect: ['【车一进二】是失误：这步没有实际作用，白让对方走一步。'] },
   { name: 'ask why: no try (the intent sentence)', row: 'ask.why', turn: clone(F.opp.turn), events: [spoken({ i: 0, kind: 'opp' }), ask('why')], expect: ['对方下一步想走【炮5进4】，那样你白丢一个兵。'] },
   { name: 'ask show', row: 'ask.show', turn: base(), events: [OPP_SILENT, spoken(HANG_TRY()), ask('show', { more: { reply: { first: 'opp', moves: ['炮2进3'], net: { gain: [], lose: ['H'], cp: -400 }, end: 'quiet' }, better: [] } })],
-    expect: ['是对方的2路炮在威胁。它会走【炮2进3】，你白丢一个马。'] },
+    expect: ['是对方的2路炮在威胁。它会走【炮2进3】，之后你白丢一个马。'] },
   { name: 'ask intent: a mate threat', row: 'ask.intent', turn: turnWith({ threats: [MATE_THREAT] }), events: [OPP_SILENT, ask('intent')], expect: ['对方下一步想走【车2进7】，那就是杀棋。'] },
   { name: 'ask intent: another threat', row: 'ask.intent', turn: clone(F.opp.turn), events: [OPP_SILENT, ask('intent')], expect: ['对方下一步想走【炮5进4】，那样你白丢一个兵。'] },
-  { name: 'ask intent: opp.does (section 9.7)', row: 'ask.intent', turn: clone(F.askChip.turn), events: clone(F.askChip.events), expect: ['对方这步的用意：对方的7路马出动。'] },
+  { name: 'ask intent: opp.does (section 9.7)', row: 'ask.intent', turn: clone(F.askChip.turn), events: clone(F.askChip.events), expect: ['对方这步的用意：7路马出动。'] },
+  { name: 'ask intent: opp.does, a move that left a hole', row: 'ask.intent', turn: oppTurn({ quality: 'slip', does: [{ k: 'develop', by: P('opp', 'H', 7) }] }), events: [OPP_SILENT, ask('intent')],
+    expect: ['对方这步的用意：7路马出动。不过这步有漏洞。'] },
+  { name: 'ask intent: opp.does, a soft move', row: 'ask.intent', turn: oppTurn({ quality: 'soft', does: [{ k: 'develop', by: P('opp', 'H', 7) }] }), events: [OPP_SILENT, ask('intent')],
+    expect: ['对方这步的用意：7路马出动。不过这步走得偏软。'] },
+  { name: 'ask intent: another threat, after a move that left a hole', row: 'ask.intent', turn: oppTurn({ quality: 'slip' }, { threats: [PIECE_THREAT] }), events: [OPP_SILENT, ask('intent')],
+    expect: ['对方下一步想走【马6进5】，那样你白丢一个炮。不过对方刚走的这步有漏洞。'] },
+  { name: 'ask intent: another threat, after a soft move', row: 'ask.intent', turn: oppTurn({ quality: 'soft' }, { threats: [PIECE_THREAT] }), events: [OPP_SILENT, ask('intent')],
+    expect: ['对方下一步想走【马6进5】，那样你白丢一个炮。不过对方刚走的这步偏软。'] },
+  { name: 'ask intent: a move that passed something up', row: 'ask.intent', turn: oppTurn({ move: '卒3进1', quality: 'slip', overlooked: { on: P('me', 'H', 8), move: '炮2进7' }, does: [{ k: 'cross_river', by: P('opp', 'P', 3) }] }), events: [OPP_SILENT, ask('intent')],
+    expect: ['对方这步的用意：3路卒过了河，之后可以横走。不过对方刚才漏看了一步。'] },
+  // whose piece (CONTRACT-NOTES 138): in a sentence about the rival his own pieces are 自己的, and the piece that acts has no side word
+  { name: 'ask intent: opp.does, a piece of his own is protected', row: 'ask.intent', turn: oppTurn({ move: '炮8进1', does: [{ k: 'defend', on: P('opp', 'P', 5) }] }), events: [OPP_SILENT, ask('intent')],
+    expect: ['对方这步的用意：给自己的5路卒补上保护。'] },
+  { name: 'ask intent: opp.does, his cannon behind his own pawn', row: 'ask.intent', events: [OPP_SILENT, ask('intent')],
+    turn: oppTurn({ move: '炮8平5', does: [{ k: 'cannon_mount', by: P('opp', 'C', 5), on: P('me', 'P', 5), on2: P('opp', 'P', 5) }] }),
+    expect: ['对方这步的用意：5路炮借自己的5路卒当炮架，瞄着你的五路兵。'] },
+  { name: 'ask intent: opp.does, a piece of the child is attacked', row: 'ask.intent', turn: oppTurn({ move: '车9平8', does: [{ k: 'attack', by: P('opp', 'R', 8), on: P('me', 'H', 3) }] }), events: [OPP_SILENT, ask('intent')],
+    expect: ['对方这步的用意：8路车捉你的三路马。'] },
+  { name: 'ask intent: nothing, known, a move that left a hole', row: 'ask.intent', turn: oppTurn({ quality: 'slip', does: [] }), events: [OPP_SILENT, ask('intent')], expect: ['对方眼下没有直接的威胁，是在调整阵形。不过这步有漏洞。'] },
   { name: 'ask intent: nothing, known', row: 'ask.intent', turn: oppTurn({ does: [] }), events: [OPP_SILENT, ask('intent')], expect: ['对方眼下没有直接的威胁，是在调整阵形。'] },
   { name: 'ask intent: nothing, not known', row: 'ask.intent', turn: oppTurn({ does: [] }, { known: { threats: false, chance: false } }), events: [OPP_SILENT, ask('intent')], expect: ['亮还在沙盘上摆，眼下没看到直接的威胁。'] },
   { name: 'ask score: even', row: 'ask.score', turn: base(), events: [OPP_SILENT, ask('score')], expect: ['现在均势。双方子力相当。'] },
@@ -236,10 +511,45 @@ const GOLDEN = deepFreeze([
   { name: 'ask score: behind', row: 'ask.score', turn: turnWith({ eval: { b: 'worse' }, mat: { me: 'R2H2C2P4A2E2', opp: 'R2H2C2P5A2E2', cp: -100 } }), events: [OPP_SILENT, ask('score')], expect: ['现在落了下风。你大约少一个兵。'] },
   { name: 'ask score: a mate', row: 'ask.score', turn: turnWith({ eval: { b: 'won', mate: 3 }, mat: { me: 'R2H2C2P5A2E2', opp: 'R1H1C2P5A2E2', cp: 1300 } }), events: [OPP_SILENT, ask('score')], expect: ['现在3步之内可以将死对方。你多一个车以上。'] },
   { name: 'ask danger: a threat', row: 'ask.danger', turn: clone(F.opp.turn), events: [OPP_SILENT, ask('danger')], expect: ['要当心：对方的5路炮瞄着你的五路兵。'] },
+  ...Object.entries({
+    // an attack is told as a capture that then pays (the piece may aim at its target already; the move makes it worth it)
+    attack: '要当心：对方想走【马6进5】，走完他的6路马就能吃掉你的五路炮了。',
+    cannon_mount: '要当心：对方想走【马6进5】，走完他的6路马就能吃掉你的五路炮了。',
+    check: '要当心：对方想走【马6进5】，走完就是将军。',
+    fork: '要当心：对方想走【马6进5】，走完他的6路马就同时捉住你的五路炮和另一个子了。',
+    discovered: '要当心：对方想走【马6进5】，走完后面的子就打到你的五路炮了。',
+    pin: '要当心：对方想走【马6进5】，走完他的6路马就牵住你的五路炮了。',
+  }).map(([k, text]) => ({ name: `ask danger: a threat that does not stand yet (${k})`, row: 'ask.danger', turn: turnWith({ threats: [{ ...PIECE_THREAT, k, prep: true }] }),
+    events: [OPP_SILENT, ask('danger')], expect: [text] })),
+  // a fork whose other target is the king (its name says so: a Threat has no on2) is a check that also attacks the piece
+  { name: 'ask danger: a threat that does not stand yet (a fork with check)', row: 'ask.danger', turn: turnWith({ threats: [{ ...PIECE_THREAT, k: 'fork', name: 'check_fork', prep: true }] }),
+    events: [OPP_SILENT, ask('danger')], expect: ['要当心：对方想走【马6进5】，走完他的6路马就将军，同时捉住你的五路炮。'] },
   { name: 'ask danger: none, known', row: 'ask.danger', turn: base(), events: [OPP_SILENT, ask('danger')], expect: ['眼下没有直接的危险，可以放心走。'] },
   { name: 'ask danger: none, not known', row: 'ask.danger', turn: turnWith({ known: { threats: false, chance: false } }), events: [OPP_SILENT, ask('danger')], expect: ['亮还在看，眼下没发现直接的危险。'] },
   { name: 'ask last: mine.try', row: 'ask.last', turn: turnWith({ mine: MINE_BEST }), events: [OPP_SILENT, ask('last')], expect: ['【炮二平五】是眼下最好的一步。你的五路炮借你的五路兵当炮架，瞄着对方的5路卒。'] },
-  { name: 'ask last: mine.try, a mistake', row: 'ask.last', turn: turnWith({ mine: MINE_MISTAKE }), events: [OPP_SILENT, ask('last')], expect: ['【炮五进四】是失误：你吃到一个卒，丢掉一个炮，算下来亏了。你的五路炮吃掉对方的5路卒。'] },
+  { name: 'ask last: mine.try, a mistake', row: 'ask.last', turn: turnWith({ mine: MINE_MISTAKE }), events: [OPP_SILENT, ask('last')], expect: ['【炮五进四】是失误：你吃到一个卒，丢掉一个炮，算下来亏了。'] },
+  // ... also when the flaw is the reason: the effect would tell of a piece that may be gone (是漏着：你白丢一个车。你的五路车将军。)
+  { name: 'ask last: mine.try, a blunder with a flaw whose piece gave check', row: 'ask.last', events: [OPP_SILENT, ask('last')],
+    turn: turnWith({ mine: { move: '车五进三', cat: 'blunder', waited: true, self: true, try: { ...clone(MINE_BEST.try), move: '车五进三', cat: 'blunder', loss: 900,
+      does: [{ k: 'check', by: P('me', 'R', 5) }], flaws: [{ k: 'hang', on: P('me', 'R', 5), by: P('opp', 'A', 4) }], cost: { gain: [], lose: ['R'], cp: -900 } } } }),
+    expect: ['【车五进三】是漏着：你白丢一个车。'] },
+  { name: 'ask last: mine.try, a blunder without a named flaw', row: 'ask.last', events: [OPP_SILENT, ask('last')],
+    turn: turnWith({ mine: { move: '兵五进一', cat: 'blunder', waited: true, self: true, try: { ...clone(MINE_BEST.try), move: '兵五进一', cat: 'blunder', loss: 400,
+      does: [{ k: 'attack', by: P('me', 'P', 5), on: P('opp', 'P', 5) }], flaws: [] } } }), expect: ['【兵五进一】是漏着。'] },
+  { name: 'ask last: mine.try, a steady move with nothing to praise', row: 'ask.last', events: [OPP_SILENT, ask('last')],
+    turn: turnWith({ mine: { move: '兵七平八', cat: 'good', waited: true, self: true, try: { ...clone(MINE_BEST.try), move: '兵七平八', cat: 'good', loss: 30,
+      eval: { b: 'lost' }, does: [{ k: 'escape', by: P('me', 'P', 8) }] } } }),
+    expect: ['【兵七平八】没有走错，只是局面吃紧。你的八路兵躲开了攻击。'] },
+  // ... 只是要丢点子 where the child is not in trouble after the move (CONTRACT-NOTES 150)
+  { name: 'ask last: mine.try, a steady move whose line gives material back in a winning position', row: 'ask.last', events: [OPP_SILENT, ask('last')],
+    turn: turnWith({ mine: { move: '兵三进一', cat: 'good', waited: true, self: true, try: { ...clone(MINE_BEST.try), move: '兵三进一', cat: 'good', loss: 160,
+      eval: { b: 'won' }, does: [{ k: 'cross_river', by: P('me', 'P', 3) }], cost: { gain: [], lose: ['A'], cp: -200 } } } }),
+    expect: ['【兵三进一】没有走错，只是要丢点子。你的三路兵过了河，之后可以横走。'] },
+  // ... and the tactic of a move after which the child is mated is not told
+  { name: 'ask last: mine.try, the child is mated after the move', row: 'ask.last', events: [OPP_SILENT, ask('last')],
+    turn: turnWith({ mine: { move: '马六退七', cat: 'best', waited: true, self: true, try: { ...clone(MINE_BEST.try), move: '马六退七',
+      eval: { b: 'lost', mate: -1 }, does: [{ k: 'fork', by: P('me', 'H', 7), on: P('opp', 'R', 7), on2: P('opp', 'C', 5) }] } } }),
+    expect: ['【马六退七】是眼下最好的一步。'] },
   { name: 'ask last: mine without try', row: 'ask.last', turn: base(), events: [OPP_SILENT, ask('last')], expect: ['【炮二平五】是好棋。'] },
   { name: 'ask last: no mine', row: 'ask.last', turn: clone(F.start.turn), events: [spoken({ i: 0, kind: 'start' }), ask('last')], expect: ['这才刚开局呢。'] },
   { name: 'ask proud', row: 'ask.proud', turn: overTurn(), events: overThread('proud'), expect: ['第18回合的【马三进四】最漂亮：捉双。'] },
@@ -249,18 +559,25 @@ const GOLDEN = deepFreeze([
   { name: 'ask improve', row: 'ask.improve', turn: overTurn(), events: overThread('improve'), expect: ['第2回合的【炮五进四】可以更好，换成【马二进三】就对了。'] },
   { name: 'ask improve: no better move', row: 'ask.improve', turn: overTurn(), events: overThread('improve', { takeaway: { kind: 'habit', code: 'greedy', n: 2, ex: { n: 2, move: '炮五进四' } } }), expect: ['第2回合的【炮五进四】可以更好。'] },
   { name: 'ask improve: none', row: 'ask.improve', turn: overTurn(), events: overThread('improve', { takeaway: { kind: 'strength', code: 'S_steady' } }), expect: ['这盘没什么大毛病。'] },
-  { name: 'ask next', row: 'ask.next', turn: overTurn(), events: overThread('next'), expect: ['下一盘记住一件事：吃子之前，先看它有没有保镖。'] },
+  { name: 'ask next', row: 'ask.next', turn: overTurn(), events: overThread('next'), expect: ['下一盘记住一件事——吃子之前，先看它有没有保镖。'] },
   { name: 'ask next: none', row: 'ask.next', turn: overTurn(), events: overThread('next', { goal: null }), expect: ['下一盘照这样下就行。'] },
   { name: 'ask free', row: 'ask.free', turn: base(), events: [OPP_SILENT, ask('free', { say: '如果我走马二进三，对方走炮2平5呢？' })],
     expect: ['这个亮一时答不上来。小主公在棋盘上试走一下，亮就能看明白。', '这件事亮帮不上忙。要是心里有事，记得找爸爸妈妈或老师说说。咱们接着看棋？'] },
 
   // ---- over (cap 80) ----
   { name: 'over: win (section 9.8)', row: 'over', turn: overTurn(), events: clone(F.over.events),
-    expect: ['这盘赢得漂亮！第18回合的【马三进四】最漂亮：捉双。下一盘小目标：吃子之前，先看它有没有保镖。兵法升到「初露锋芒」！'] },
+    expect: ['这盘赢得漂亮！第18回合的【马三进四】最漂亮：捉双。兵法升到「初露锋芒」！'] },
   { name: 'over: win, the goal was kept', row: 'over', turn: overTurn(), events: [overEvent({ kept: true })],
-    expect: ['这盘赢得漂亮！上盘说好的，做到了！第18回合的【马三进四】最漂亮：捉双。下一盘小目标：吃子之前，先看它有没有保镖。兵法升到「初露锋芒」！'] },
+    expect: ['这盘赢得漂亮！上盘说好的，做到了！第18回合的【马三进四】最漂亮：捉双。兵法升到「初露锋芒」！'] },
   { name: 'over: loss', row: 'over', turn: overTurn(), events: [overEvent({ result: 'loss', kept: false, goal: 'miss_threat', rank: null }, 'lose')],
-    expect: ['这盘惜败，不过有几步走得真不错。第18回合的【马三进四】最漂亮：捉双。下一盘小目标：对方走完，先问自己：它想干什么。'] },
+    expect: ['这盘惜败，不过有几步走得真不错。第18回合的【马三进四】最漂亮：捉双。'] },
+  // a lost game without a proud move (CONTRACT-NOTES 138): the line does not invent one, and the goal is left to the card
+  { name: 'over: loss, no proud move', row: 'over', turn: overTurn(), events: [overEvent({ result: 'loss', kept: null, proud: null, goal: 'miss_threat', rank: null }, 'lose')],
+    expect: ['这盘惜败，不过有几步走得真不错。'] },
+  // a lost game with nothing to point at (CONTRACT-NOTES 147): 这盘惜败。 does not stand alone in the takeaway box
+  { name: 'over: loss, nothing to point at', row: 'over', turn: overTurn(),
+    events: [overEvent({ result: 'loss', reason: 'resign', moves: 3, stats: { good: 1, taken: 0, captures: 0, brilliant: 0 }, takeaway: null, kept: null, proud: null, goal: 'hang_piece', rank: null }, 'lose')],
+    expect: ['这盘惜败。每一盘都是练兵，下一盘再战。'] },
   { name: 'over: draw', row: 'over', turn: overTurn(), events: [overEvent({ result: 'draw', reason: 'repetition', takeaway: null, proud: null, goal: null, rank: null }, null)],
     expect: ['握手言和，旗鼓相当。'] },
 ]);
@@ -316,6 +633,13 @@ const SWEEP = (() => {
       { name: `hint3 ${k}`, turn: base(), events: [OPP_SILENT, hint] },
       { name: `intent ${k}`, turn: oppTurn({ does: [theirs] }), events: [OPP_SILENT, ask('intent')] },
       { name: `danger ${k}`, turn: turnWith({ threats: [{ k, by: Q('opp', 'H', 8), on: Q('me', 'C', 7), move: '马8进7', net: { gain: [], lose: ['C'], cp: -450 }, sev: 'piece' }] }), events: [OPP_SILENT, ask('danger')] },
+      { name: `danger prep ${k}`, turn: turnWith({ threats: [{ k, by: Q('opp', 'H', 8), on: Q('me', 'C', 7), move: '前卒3进1', net: { gain: [], lose: ['C'], cp: -450 }, sev: 'piece', prep: true }] }), events: [OPP_SILENT, ask('danger')] },
+      { name: `danger prep ${k}, no target`, turn: turnWith({ threats: [{ k, by: Q('opp', 'H', 8), move: '前卒3进1', net: { gain: [], lose: ['C'], cp: -450 }, sev: 'piece', prep: true }] }), events: [OPP_SILENT, ask('danger')] },
+      { name: `opp.threat prep ${k}`, turn: oppTurn({ does: [theirs] }, { level: 5, threats: [{ k, by: Q('opp', 'H', 8), on: Q('me', 'C', 7), move: '前卒3进1', net: { gain: [], lose: ['C'], cp: -450 }, sev: 'rook', prep: true }] }), events: OPP_LAST },
+      { name: `intent slip ${k}`, turn: oppTurn({ does: [theirs], quality: 'slip' }), events: [OPP_SILENT, ask('intent')] },
+      { name: `intent slip, a threat ${k}`, turn: oppTurn({ does: [theirs], quality: 'slip' }, { threats: [{ k, by: Q('opp', 'H', 8), on: Q('me', 'C', 7), move: '前卒3进1', net: { gain: ['R', 'H', 'C'], lose: ['R', 'H', 'C', 'P'], cp: -450 }, sev: 'piece' }] }), events: [OPP_SILENT, ask('intent')] },
+      { name: `why, a blunder without a flaw ${k}`, turn: base(), events: [OPP_SILENT, spoken(tryEvent({ move: '前兵七进一', cat: 'blunder', loss: 500, does: [mine], flaws: [],
+        reply: { first: 'opp', moves: ['前卒3进1'], net: { gain: ['P'], lose: ['R', 'H', 'C', 'P', 'A', 'E'], cp: -2000 }, end: 'mate' } })), ask('why')] },
       { name: `last ${k}`, turn: turnWith({ mine: { move: '炮五进四', cat: 'blunder', waited: true, self: true, try: { ...clone(MINE_MISTAKE.try), cat: 'blunder', does: [mine], flaws: [theirs] } } }), events: [OPP_SILENT, ask('last')] },
     );
     for (const code of ['good', 'why', 'show', 'better', 'reply']) {
@@ -404,7 +728,26 @@ test('the first applicable row wins', () => {
   assert.equal(rowOf(oppTurn(everything, { threats: [MATE_THREAT, PIECE_THREAT], ...chance })), 'opp.mate');
   assert.equal(rowOf(oppTurn(everything, { threats: [PIECE_THREAT], ...chance })), 'opp.check');
   assert.equal(rowOf(oppTurn({ ...everything, check: false }, { threats: [PIECE_THREAT], ...chance })), 'opp.punished');
-  assert.equal(rowOf(oppTurn({ ...everything, check: false, punishes: false }, { threats: [PIECE_THREAT], ...chance })), 'opp.captured');
+  assert.equal(rowOf(oppTurn({ ...everything, check: false, punishes: false }, { threats: [PIECE_THREAT], ...chance })), 'opp.captured');      // a horse fell: the news
+  // ... but a rook that can be taken next comes before what was taken (the capture is on the board to see; the rook is the news)
+  const ROOK_THREAT = { k: 'attack', by: P('opp', 'H', 6), on: P('me', 'R', 5), move: '马6进5', net: { gain: [], lose: ['R'], cp: -900 }, sev: 'rook' };
+  const tookPawn = { move: '车2进7', captured: 'P', does: [{ k: 'capture', by: P('opp', 'R', 2), on: P('me', 'P', 8) }] };
+  assert.equal(rowOf(oppTurn(tookPawn, { threats: [ROOK_THREAT], level: 3 })), 'opp.threat');
+  assert.equal(rowOf(oppTurn(tookPawn, { threats: [ROOK_THREAT], level: 4 })), 'opp.threat.q');
+  assert.equal(rowOf(oppTurn({ ...tookPawn, captured: 'R' }, { threats: [ROOK_THREAT], level: 3 })), 'opp.threat');
+  assert.equal(composeLocal(oppTurn(tookPawn, { threats: [ROOK_THREAT], level: 3 }), OPP_LAST, 3), '对方想吃你的五路车。');
+  // ... and so does a horse or a cannon after a pawn, an advisor or an elephant was taken (CONTRACT-NOTES 138); after a
+  // piece of its own size was taken the order of section 8.6 stands, and a threat to a pawn never makes a threat row
+  assert.equal(rowOf(oppTurn(tookPawn, { threats: [PIECE_THREAT], level: 3 })), 'opp.threat');
+  assert.equal(composeLocal(oppTurn(tookPawn, { threats: [PIECE_THREAT], level: 3 }), OPP_LAST, 0), '对方盯上了你的五路炮。');
+  assert.equal(rowOf(oppTurn({ ...tookPawn, captured: 'A' }, { threats: [PIECE_THREAT], level: 3 })), 'opp.threat');
+  assert.equal(rowOf(oppTurn({ ...tookPawn, captured: 'E' }, { threats: [PIECE_THREAT], level: 5 })), 'opp.threat.q');
+  assert.equal(rowOf(oppTurn({ ...tookPawn, captured: 'H' }, { threats: [PIECE_THREAT], level: 3 })), 'opp.captured', 'a threat of the same size keeps the order of section 8.6');
+  assert.equal(rowOf(oppTurn({ ...tookPawn, captured: 'C' }, { threats: [PIECE_THREAT], level: 3 })), 'opp.captured');
+  assert.equal(rowOf(oppTurn(tookPawn, { threats: [{ ...PIECE_THREAT, sev: 'pawn' }], level: 3 })), 'opp.captured');
+  assert.equal(rowOf(oppTurn(tookPawn, { threats: [{ ...PIECE_THREAT, sev: 'pawn' }, ROOK_THREAT].reverse(), level: 3 })), 'opp.threat');
+  assert.equal(rowOf(oppTurn({ ...tookPawn, check: true }, { threats: [ROOK_THREAT] })), 'opp.check', 'a check and a punished move still come first');
+  assert.equal(rowOf(oppTurn({ ...tookPawn, punishes: true }, { threats: [ROOK_THREAT] })), 'opp.punished');
   const rest = { move: '卒3进1', name: 'pawn_lead', overlooked: everything.overlooked, does: [{ k: 'develop', by: P('opp', 'H', 7) }] };
   assert.equal(rowOf(oppTurn(rest, { threats: [PIECE_THREAT], level: 4, ...chance })), 'opp.threat.q');
   assert.equal(rowOf(oppTurn(rest, { threats: [PIECE_THREAT], level: 3, ...chance })), 'opp.threat');
@@ -412,8 +755,17 @@ test('the first applicable row wins', () => {
   assert.equal(rowOf(oppTurn(rest, chance)), 'opp.overlooked');
   assert.equal(rowOf(oppTurn({ ...rest, overlooked: undefined }, chance)), 'opp.chance');
   assert.equal(rowOf(oppTurn({ ...rest, overlooked: undefined })), 'opp.name');
-  assert.equal(rowOf(oppTurn({ move: '卒3进1', does: rest.does })), 'opp.effect');
+  // the name of a tactic is all the caption says: the row of the effect follows, and it speaks only of an effect with a target
+  const protects = [{ k: 'defend', on: P('opp', 'P', 5) }];
+  assert.equal(rowOf(oppTurn({ move: '炮8进1', name: 'fork_two', does: protects })), 'opp.effect');
+  assert.equal(rowOf(oppTurn({ move: '炮8进1', does: protects })), 'opp.effect');
+  assert.equal(rowOf(oppTurn({ move: '卒3进1', does: rest.does })), '', 'a developing move: the caption alone');
+  assert.equal(rowOf(oppTurn({ move: '卒3进1', does: [{ k: 'quiet' }] })), 'opp.quiet');
   assert.equal(rowOf(oppTurn({ move: '卒3进1', does: [] })), 'opp.quiet');
+  // a threat without a target (a threatened check) has only the question row: it is asked below level 4 too
+  const CHECK_THREAT = { k: 'check', by: P('opp', 'R', 8), move: '车8进6', net: NET0, sev: 'piece', prep: true };
+  assert.equal(rowOf(oppTurn({ move: '卒3进1', does: rest.does }, { threats: [CHECK_THREAT], level: 2 })), 'opp.threat.q');
+  assert.equal(composeLocal(oppTurn({ move: '卒3进1', does: rest.does }, { threats: [CHECK_THREAT], level: 2 }), OPP_LAST, 0), '对方的8路车在打什么主意？');
   // a threat that wins only a pawn does not make a threat row (section 9.3: the sentence is about the opening)
   assert.equal(rowOf(clone(F.opp.turn)), 'opp.name');
 
@@ -439,6 +791,107 @@ test('the first applicable row wins', () => {
   assert.equal(tryRow({ cat: 'ok' }), 'try.ok');
   assert.equal(tryRow({ cat: 'mistake' }), 'try.slow');
   assert.equal(tryRow({ cat: 'blunder', flaws: [{ k: 'waste' }] }), 'try.slow');
+
+  // try, not held: the grim row (CONTRACT-NOTES 147) stands in for only, taken, praise and steady when a move judged good or
+  // better has nothing to praise. First case: its own line leaves the child two points or more down.
+  const costly = { gain: ['C'], lose: ['R'], cp: -450 };
+  const twoDown = { gain: [], lose: ['A'], cp: -200 };
+  for (const cat of ['brilliant', 'best', 'good']) {
+    assert.equal(tryRow({ cat, only: true, chance: 'taken', does: check, cost: costly }), 'try.grim', cat);
+    assert.equal(tryRow({ cat, chance: 'taken', does: check, cost: twoDown }), 'try.grim', cat);
+    assert.equal(tryRow({ cat, does: check, cost: twoDown }), 'try.grim', cat);
+    assert.equal(tryRow({ cat, cost: twoDown }), 'try.grim', cat);
+  }
+  // pawns for as many pawns are no loss of material, though crossed pawns make the balance read two points down
+  // (CONTRACT-NOTES 152); a pawn for nothing, pawns for fewer pawns and a piece next to the pawns are
+  assert.equal(tryRow({ does: check, cost: { gain: ['P', 'P'], lose: ['P', 'P'], cp: -200 } }), 'try.praise');
+  assert.equal(tryRow({ cost: { gain: ['P', 'P'], lose: ['P', 'P'], cp: -200 } }), 'try.steady');
+  assert.equal(tryRow({ cat: 'good', cost: { gain: ['P', 'H'], lose: ['P'], cp: -200 } }), 'try.steady');
+  assert.equal(composeLocal(base(), [OPP_SILENT, tryEvent({ cost: { gain: ['P', 'P'], lose: ['P', 'P'], cp: -200 } })], 0).includes('丢点子'), false);
+  assert.equal(tryRow({ cost: { gain: [], lose: ['P'], cp: -200 } }), 'try.grim', 'a crossed pawn for nothing');
+  assert.equal(tryRow({ cost: { gain: ['P'], lose: ['P', 'P'], cp: -300 } }), 'try.grim', 'two pawns for one');
+  assert.equal(tryRow({ cost: { gain: ['P', 'P'], lose: ['P', 'A'], cp: -200 } }), 'try.grim', 'an advisor goes with the pawn');
+  assert.equal(tryRow({ eval: { b: 'lost' }, cost: { gain: ['P'], lose: ['P'], cp: -100 } }), 'try.grim', 'far behind, an even exchange of pawns wins nothing');
+  // one point down is not two; a move that mates, and a sound sacrifice, keep their praise
+  assert.equal(tryRow({ does: check, cost: { gain: [], lose: ['P'], cp: -100 } }), 'try.praise');
+  assert.equal(tryRow({ does: check, cost: { gain: ['P'], lose: ['A', 'P'], cp: -199 } }), 'try.praise');
+  assert.equal(tryRow({ cat: 'brilliant', does: check, cost: costly, eval: { b: 'won', mate: 2 } }), 'try.praise');
+  assert.equal(tryRow({ does: [{ k: 'mate', by: P('me', 'R', 2) }], cost: costly, eval: { b: 'won' } }), 'try.praise');
+  assert.equal(tryRow({ cat: 'brilliant', does: [{ k: 'sacrifice', by: P('me', 'R', 2) }], sac: true, cost: { gain: [], lose: ['R'], cp: -900 } }), 'try.praise');
+  // a trap of old that was stepped around is still told (the avoided row), without 走得稳
+  assert.equal(tryRow({ only: true, avoided: 'greedy', does: check, cost: costly }), 'try.avoided');
+  assert.equal(composeLocal(base(), [OPP_SILENT, tryEvent({ avoided: 'greedy', cost: costly })], 0), '躲开了以前的坑，【马二进三】可行。');
+  // a slow move and a mistake are not "the best there was": their own rows stand
+  assert.equal(tryRow({ cat: 'ok', cost: costly }), 'try.ok');
+  assert.equal(tryRow({ cat: 'mistake', cost: costly }), 'try.slow');
+  // Second case: the child stays far behind after the move (走后形势 很危险) and the line wins nothing.
+  const lost = { b: 'lost' };
+  assert.equal(tryRow({ eval: lost, only: true }), 'try.grim');
+  assert.equal(tryRow({ eval: lost, chance: 'taken', does: check }), 'try.grim');
+  assert.equal(tryRow({ eval: lost, does: check }), 'try.grim');
+  assert.equal(tryRow({ eval: lost, does: [{ k: 'attack', by: P('me', 'R', 3), on: P('opp', 'C', 7) }] }), 'try.grim', 'the line of the task notes: 这步捉子，漂亮');
+  assert.equal(tryRow({ eval: lost, cat: 'good' }), 'try.grim');
+  assert.equal(tryRow({ eval: lost, does: check, cost: { gain: ['H'], lose: ['H'], cp: 0 } }), 'try.grim', 'an even trade wins nothing');
+  // ... but a move that wins material back, or a tactic, keeps its praise however far behind the child is
+  assert.equal(tryRow({ eval: lost, does: [{ k: 'capture', by: P('me', 'C', 5), on: P('opp', 'P', 5) }], cost: { gain: ['P'], lose: [], cp: 100 } }), 'try.praise');
+  assert.equal(tryRow({ eval: lost, does: check, cost: { gain: ['R'], lose: ['C'], cp: 450 } }), 'try.praise');
+  for (const k of ['capture_free', 'fork', 'pin', 'discovered', 'mate_threat']) {
+    assert.equal(tryRow({ eval: lost, does: [{ k, by: P('me', 'H', 4), on: P('opp', 'R', 3), on2: P('opp', 'C', 7) }] }), 'try.praise', k);
+  }
+  assert.equal(tryRow({ eval: lost, only: true, does: [FORK] }), 'try.only');
+  // behind, but not far behind (落了下风): the rows of old
+  assert.equal(tryRow({ eval: { b: 'worse' }, does: check }), 'try.praise');
+  assert.equal(tryRow({ eval: { b: 'worse' } }), 'try.steady');
+  // a move that is not good or better is never grim, and a held trial has its question
+  assert.equal(tryRow({ eval: lost, cat: 'ok' }), 'try.ok');
+  assert.equal(heldRow({ eval: lost, cost: costly }), 'held.cost');
+  // Third case (CONTRACT-NOTES 150): the child is mated by force after the move. Whatever tactic the move shows and
+  // whatever it takes, it has nothing to praise: no exemption for a tactic motif, for a gain, for the only move, for a
+  // chance that was taken or for a trap that was avoided.
+  const mated = { b: 'lost', mate: -1 };
+  for (const k of ['capture_free', 'fork', 'pin', 'discovered', 'mate_threat', 'check', 'attack']) {
+    assert.equal(tryRow({ eval: mated, does: [{ k, by: P('me', 'H', 4), on: P('opp', 'R', 3), on2: P('opp', 'C', 7) }] }), 'try.grim', k);
+  }
+  assert.equal(tryRow({ eval: mated, does: check, cost: { gain: ['R'], lose: ['C'], cp: 450 } }), 'try.grim', 'what it takes does not count');
+  assert.equal(tryRow({ eval: mated, only: true, does: [FORK] }), 'try.grim');
+  assert.equal(tryRow({ eval: mated, chance: 'taken', does: [FORK] }), 'try.grim');
+  assert.equal(tryRow({ eval: mated, avoided: 'greedy', does: [FORK] }), 'try.grim', 'neither 走得稳 nor 可行 is said');
+  assert.equal(tryRow({ eval: { b: 'lost', mate: -9 }, cat: 'good', does: check }), 'try.grim');
+  for (let v = 0; v < 6; v++) {
+    assert.match(composeLocal(base(), [OPP_SILENT, tryEvent({ eval: mated, avoided: 'greedy', chance: 'taken', does: [FORK], cost: { gain: ['R'], lose: [], cp: 900 } })], v),
+      /^(【马二进三】是眼下最顽强的一步。|局面吃紧，【马二进三】是最好的应法。|难是难，【马二进三】没有走错。)$/, `variant ${v}`);
+  }
+  // being mated is a bad position whatever the band says: the words are those of a position in trouble
+  assert.equal(composeLocal(base(), [OPP_SILENT, tryEvent({ eval: { b: 'won', mate: -3 }, does: check })], 0), '【马二进三】是眼下最顽强的一步。');
+  // a mate for the child is not one against it, and a mate that is a blunder is a held trial
+  assert.equal(tryRow({ cat: 'brilliant', eval: { b: 'won', mate: 2 }, does: check }), 'try.praise');
+  assert.equal(heldRow({ eval: mated, flaws: [{ k: 'allow_mate' }] }), 'held.mate');
+
+  // The words of the grim row follow the evaluation after the move (CONTRACT-NOTES 150): 最顽强 / 局面吃紧 / 难是难 where
+  // the child is in trouble (落了下风, 很危险), 只是要丢点子 where it is not (均势, 占优, 胜势).
+  const grimText = (patch, v) => composeLocal(base(), [OPP_SILENT, tryEvent({ cost: twoDown, ...patch })], v);
+  for (const b of ['even', 'better', 'won']) {
+    assert.deepEqual([0, 1, 2].map((v) => grimText({ eval: { b } }, v)),
+      ['【马二进三】是眼下最好的一步，只是要丢点子。', '【马二进三】没有走错，只是要丢点子。', '【马二进三】是眼下最好的一步，只是要丢点子。'], b);
+    assert.deepEqual([0, 1].map((v) => grimText({ eval: { b }, cat: 'brilliant' }, v)), ['【马二进三】是眼下最好的一步，只是要丢点子。', '【马二进三】没有走错，只是要丢点子。'], b);
+    assert.deepEqual([0, 1].map((v) => grimText({ eval: { b }, cat: 'good' }, v)), ['【马二进三】可以走，只是要丢点子。', '【马二进三】没有走错，只是要丢点子。'], b);
+  }
+  for (const b of ['worse', 'lost']) {
+    assert.deepEqual([0, 1, 2].map((v) => grimText({ eval: { b } }, v)), ['【马二进三】是眼下最顽强的一步。', '局面吃紧，【马二进三】是最好的应法。', '难是难，【马二进三】没有走错。'], b);
+    assert.deepEqual([0, 1].map((v) => grimText({ eval: { b }, cat: 'good' }, v)), ['难是难，【马二进三】没有走错。', '局面吃紧，【马二进三】可以走。'], b);
+  }
+  for (const b of ['even', 'better', 'won']) {
+    for (const cat of ['brilliant', 'best', 'good']) {
+      for (let v = 0; v < 6; v++) assert.doesNotMatch(grimText({ eval: { b }, cat }, v), /吃紧|难是难|顽强/, `${b}, ${cat}, variant ${v}`);
+    }
+  }
+
+  // try.only about a forced move (at most two legal moves): one variant, the bare statement
+  const forcedRow = (n) => localLine(turnWith({ n }), [OPP_SILENT, tryEvent({ only: true })], []);
+  assert.deepEqual([1, 2].map((n) => forcedRow(n).text), ['【马二进三】是眼下唯一的解法。', '【马二进三】是眼下唯一的解法。']);
+  assert.deepEqual([0, 1, 2, 7].map((v) => composeLocal(turnWith({ n: 2 }), [OPP_SILENT, tryEvent({ only: true })], v)), Array(4).fill('【马二进三】是眼下唯一的解法。'));
+  assert.equal(composeLocal(turnWith({ n: 3 }), [OPP_SILENT, tryEvent({ only: true })], 1), '只有【马二进三】能解围，好眼力。');
+  for (const text of [forcedRow(1).text, forcedRow(2).text]) assert.doesNotMatch(text, /走得对|好眼力|此计可行/);
 });
 
 test('every local line respects its cap', () => {
@@ -454,9 +907,13 @@ test('every local line respects its cap', () => {
 
   // a variant that would pass its cap gives way to the next one
   const long = { turn: oppTurn({ move: '炮8平5', does: [{ k: 'cannon_mount', by: P('opp', 'C', 5), on: P('me', 'P', 5), on2: P('opp', 'P', 5) }] }), events: OPP_LAST };
-  assert.equal(plainLength('对方的5路炮借对方的5路卒当炮架，瞄着你的五路兵。') > CAPS.opp, true);
-  assert.equal(composeLocal(long.turn, long.events, 0), '对方这步在架炮。');
-  assert.equal(localLine(long.turn, long.events, ['opp.effect:1', 'opp.effect:2']).v, 3, 'and it is never offered by localLine either');
+  assert.equal(plainLength('对方的5路炮借自己的5路卒当炮架，瞄着你的五路兵。') > CAPS.opp, true);
+  assert.equal(composeLocal(long.turn, long.events, 0), '对方的5路炮瞄着你的五路兵。');
+  assert.deepEqual(localLine(long.turn, long.events, []), { text: '对方的5路炮瞄着你的五路兵。', row: 'opp.effect', v: 2 }, 'and it is never offered by localLine either');
+  // the rival's line after his move is never cut: when no sentence about the effect fits, the caption stands alone
+  const pinned = { turn: oppTurn({ move: '炮2进4', does: [{ k: 'pin', by: P('opp', 'C', 2), on: P('me', 'H', 8), on2: P('me', 'R', 9) }] }), events: OPP_LAST };
+  assert.deepEqual([0, 1, 2].map((v) => composeLocal(pinned.turn, pinned.events, v)), ['', '', '']);
+  assert.deepEqual(localLine(pinned.turn, pinned.events, []), { text: '', row: '', v: 0 });
   const fork = [OPP_SILENT, tryEvent({ move: '马三进四', cat: 'brilliant', does: [FORK] })];
   assert.equal(composeLocal(base(), fork, 0), '好一步【马三进四】：捉双。');
   assert.equal(composeLocal(base(), fork, 1), '好一步【马三进四】：捉双。');
@@ -471,17 +928,35 @@ test('every local line respects its cap', () => {
   // pouch 3: the rival's answer is added only while it fits 36; a clause that is too long gives way to its term
   const pouch = (does, line) => [OPP_SILENT, hintEvent(3, { move: '马三进四', does, line })];
   const line = { first: 'opp', moves: ['车3平2', '马四进三'], net: { gain: ['C'], lose: [], cp: 450 }, end: 'quiet' };
-  assert.equal(composeLocal(base(), pouch([FORK], line)), '可以走【马三进四】：捉双。对方多半走【车3平2】。');
+  // (with 对方的 said once the whole clause fits 36 without the answer; with the longest names it gives way to the term)
+  assert.equal(plainLength('可以走【马三进四】：你的四路马同时捉住对方的3路车和7路炮，只能救一个。对方多半走【车3平2】。') > CAPS.hint3, true);
+  assert.equal(composeLocal(base(), pouch([FORK], line)), '可以走【马三进四】：你的四路马同时捉住对方的3路车和7路炮，只能救一个。');
+  const longFork = { k: 'fork', by: P('me', 'H', 4, 'front'), on: P('opp', 'R', 3, 'front'), on2: P('opp', 'C', 7, 'front') };
+  assert.equal(plainLength('可以走【马三进四】：你的四路前马同时捉住对方的3路前车和7路前炮，只能救一个。') > CAPS.hint3, true);
+  assert.equal(composeLocal(base(), pouch([longFork], line)), '可以走【马三进四】：捉双。对方多半走【车3平2】。');
   const free = { k: 'capture_free', by: P('me', 'H', 4), on: P('opp', 'R', 3) };
   assert.equal(plainLength('可以走【马三进四】：你的四路马白吃对方的3路车，吃完不会被吃回。对方多半走【车3平2】。'), 40);
   assert.equal(composeLocal(base(), pouch([free], line)), '可以走【马三进四】：你的四路马白吃对方的3路车，吃完不会被吃回。');
   assert.equal(composeLocal(base(), pouch([], null)), '可以走【马三进四】。');
 
-  // over: sentences are dropped from the end to fit 80
+  // over: the goal is not part of the line (the card shows it in a row of its own, CONTRACT-NOTES 138), so even with the
+  // longest of everything (a loss, the kept goal, a move number of three digits, a five-character notation, a
+  // four-character term, the rank) the line is whole and nothing has to be dropped
   const full = overEvent({ result: 'loss', kept: true, goal: 'hang_piece', rank: { to: 4 }, proud: { n: 118, s: 'me', move: '马三进四', tag: 'great', k: 'bad_trade' } }, 'lose');
-  const whole = '这盘惜败，不过有几步走得真不错。上盘说好的，做到了！第118回合的【马三进四】最漂亮：亏本兑子。下一盘小目标：走完先看一眼，这个子有没有人保护。兵法升到「初露锋芒」！';
-  assert.equal(plainLength(whole), 81);
-  assert.equal(composeLocal(overTurn(), [full]), whole.replace('兵法升到「初露锋芒」！', ''));
+  const whole = '这盘惜败，不过有几步走得真不错。上盘说好的，做到了！第118回合的【马三进四】最漂亮：亏本兑子。兵法升到「初露锋芒」！';
+  assert.equal(plainLength(whole), 57);
+  assert.equal(composeLocal(overTurn(), [full]), whole);
+  const longest = (goal, rank) => composeLocal(overTurn(), [overEvent({ result: 'loss', kept: true, goal, rank,
+    proud: { n: 301, s: 'me', move: '前兵七进一', tag: 'great', k: 'bad_trade' } }, 'lose')]);
+  for (const goal of HABIT_CODES) {
+    for (const rank of [null, { to: 1 }, { to: 9 }]) {
+      const text = longest(goal, rank);
+      assert.ok(plainLength(text) <= CAPS.over, `${goal}: ${plainLength(text)}`);
+      assert.ok(!text.includes('小目标') && !text.includes(HABIT_FIX[goal]), `${goal}: the goal is left to the card: ${text}`);
+      assert.equal(text.endsWith('」！'), rank !== null, `${goal}: the rank sentence is never dropped: ${text}`);
+    }
+  }
+  assert.equal(Math.max(...HABIT_CODES.map((goal) => plainLength(longest(goal, { to: 9 })))), 58, 'the longest game-over line');
 
   // an answer of two sentences loses its second one before anything else
   const big = { gain: ['R', 'H', 'C', 'P', 'A', 'E'], lose: ['R', 'H', 'C', 'P', 'A', 'E'], cp: 0 };
@@ -543,11 +1018,12 @@ test('random wire-valid packets: every line is within its cap, whole, grounded a
     me = pick(['red', 'black']);
     const t = { ...base(), ply: int(0, 200), me, eval: evalOf(), level: int(1, 9), mat: { me: 'R2H2C2P5A2E2', opp: 'R1H2C2P4A2E2', cp: int(-2500, 2500) },
       mine: maybe(0.3) ? null : { move: mine(), cat: pick(CATS), waited: true, self: true }, opp: null,
-      threats: list(3, () => ({ k: pick(['mate_threat', 'attack', 'cannon_mount', 'check', 'fork']), by: piece('opp'), ...(maybe(0.8) ? { on: piece('me') } : {}), move: theirs(), net: net(), sev: pick(['pawn', 'piece', 'rook', 'mate']) })),
+      threats: list(3, () => ({ k: pick(['mate_threat', 'attack', 'cannon_mount', 'check', 'fork', 'discovered', 'pin']), by: piece('opp'), ...(maybe(0.8) ? { on: piece('me') } : {}), move: theirs(), net: net(),
+        sev: pick(['pawn', 'piece', 'rook', 'mate']), ...(maybe(0.3) ? { prep: true } : {}) })),
       chance: maybe(0.25) ? { size: 'piece', theme: pick(MOTIF_CODES), area: pick(AREAS) } : null, known: { threats: maybe(0.8), chance: maybe(0.5) } };
     if (t.mine && maybe(0.6)) t.mine.try = { ...packet(), held: false, move: t.mine.move, cat: t.mine.cat };
     if (maybe(0.85)) {
-      t.opp = { move: theirs(), check: maybe(0.15), does: list(3, effect), quality: 'normal' };
+      t.opp = { move: theirs(), check: maybe(0.15), does: list(3, effect), quality: pick(['strong', 'normal', 'normal', 'soft', 'slip']) };
       if (maybe(0.2)) t.opp.captured = pick(PTS);
       if (maybe(0.2)) t.opp.name = pick(PATTERN_CODES);
       if (maybe(0.15)) t.opp.punishes = true;
@@ -819,12 +1295,13 @@ test('a child of either colour hears every variant of every row (CONTRACT-NOTES 
   assert.equal(localLine(start.turn, start.events, ['start:1', 'start:2']).v, 0);
 });
 
-test('the eight frequent rows have at least six variants', () => {
-  // The rows a child hears most: every rival move (effect, quiet, captured, threat) and every trial (praise, steady, ok, slow) ...
-  const frequent = ['opp.effect', 'opp.quiet', 'opp.captured', 'opp.threat', 'try.praise', 'try.steady', 'try.ok', 'try.slow'];
+test('the frequent rows have at least six variants', () => {
+  // The rows a child hears most: a rival move (quiet, captured, threat) and every trial (praise, steady, ok, slow) ...
+  // (opp.effect left this list with CONTRACT-NOTES 138: it says one thing, what the move is aimed at, or nothing)
+  const frequent = ['opp.quiet', 'opp.captured', 'opp.threat', 'try.praise', 'try.steady', 'try.ok', 'try.slow'];
   // ... and the other rows that section 8.6 gives six variants (D-40)
   const six = [...frequent, 'opp.mate', 'opp.check', 'opp.punished', 'held.mate', 'held.hang', 'held.unguard', 'held.threat', 'held.greedy', 'held.other'];
-  assert.equal(six.length, 17);
+  assert.equal(six.length, 16);
   for (const row of six) {
     const g = GOLDEN.filter((x) => x.row === row).sort((a, b) => b.expect.length - a.expect.length)[0];
     assert.ok(g, row);
@@ -854,7 +1331,7 @@ test('composeLocal(turn, events, v) is deterministic and equals localLine\'s tex
   // the answer depends on the last event and the thread before it, not on what comes after
   const thread = F.tryHeldAsk.events;
   assert.equal(composeLocal(F.tryHeldAsk.turn, thread.slice(0, 2), 0), '对方的5路卒背后有没有保镖？');
-  assert.equal(composeLocal(F.tryHeldAsk.turn, thread, 0), '对方多半走【马7进5】，你吃到一个卒，丢掉一个炮，算下来亏了。');
+  assert.equal(composeLocal(F.tryHeldAsk.turn, thread, 0), '对方多半走【马7进5】，之后你吃到一个卒，丢掉一个炮，算下来亏了。');
   // a v that is not a variant number counts as 0
   for (const v of [undefined, null, -1, 1.5, Number.NaN, '2']) assert.equal(composeLocal(F.try.turn, F.try.events, v), '【马二进三】走得稳，没有毛病。');
 });
@@ -878,24 +1355,41 @@ test('cueFor: every row of 8.7', () => {
   assert.equal(cueFor(quiet, opp, {}), null);
   assert.equal(cueFor(quiet, opp, { earned: true, voiced: true, lord: true }), null, 'the flags are about trials');
 
-  // try: lord; earned + brilliant or a tactic motif -> wow; earned -> nice; voiced + blunder -> stop; voiced -> wait; else none
+  // try: lord; earned + brilliant or a tactic motif -> wow; earned -> nice; voiced + blunder -> stop; voiced -> wait; else none.
+  // The three praising interjections go only with a sentence from a praising row (only, avoided, taken, praise;
+  // CONTRACT-NOTES 147): `plain` (a developing move, the steady row) has none, however the praise was earned.
   const plain = tryEvent();
   const tactic = tryEvent({ does: [FORK] });
-  const brilliant = tryEvent({ cat: 'brilliant' });
-  assert.equal(cueFor(quiet, plain, { lord: true, earned: true }), 'lord');
+  const checking = [{ k: 'check', by: P('me', 'R', 2) }];
+  const brilliant = tryEvent({ cat: 'brilliant', does: checking });
+  assert.equal(cueFor(quiet, tryEvent({ does: checking }), { lord: true, earned: true }), 'lord');
   assert.equal(cueFor(quiet, tactic, { lord: true, earned: true, voiced: true }), 'lord');
   assert.equal(cueFor(quiet, brilliant, { earned: true }), 'wow');
   for (const k of ['capture_free', 'fork', 'pin', 'discovered', 'mate', 'mate_threat']) {
     assert.equal(cueFor(quiet, tryEvent({ does: [{ k, by: P('me', 'H', 4), on: P('opp', 'R', 3), on2: P('opp', 'C', 7) }] }), { earned: true }), 'wow', k);
   }
-  assert.equal(cueFor(quiet, tryEvent({ does: [{ k: 'check', by: P('me', 'R', 2) }] }), { earned: true }), 'nice', 'check is not a tactic motif');
-  assert.equal(cueFor(quiet, plain, { earned: true }), 'nice');
-  assert.equal(cueFor(quiet, tryEvent({ does: [] }), { earned: true }), 'nice');
+  assert.equal(cueFor(quiet, tryEvent({ does: checking }), { earned: true }), 'nice', 'check is not a tactic motif');
+  assert.equal(cueFor(quiet, tryEvent({ only: true }), { earned: true }), 'nice', 'the only row praises');
+  assert.equal(cueFor(quiet, tryEvent({ avoided: 'greedy' }), { earned: true }), 'nice', 'the avoided row praises');
+  assert.equal(cueFor(quiet, tryEvent({ chance: 'taken' }), { lord: true, earned: true }), 'lord', 'the taken row praises');
+  assert.equal(cueFor(quiet, plain, { lord: true, earned: true }), null, 'the steady row: 主公英明！…不急不躁。 says two things at once');
+  assert.equal(cueFor(quiet, plain, { earned: true }), null);
+  assert.equal(cueFor(quiet, tryEvent({ cat: 'brilliant' }), { earned: true }), null);
+  assert.equal(cueFor(quiet, tryEvent({ does: [] }), { earned: true }), null);
   assert.equal(cueFor(quiet, heldEvent({ cat: 'blunder' }), { voiced: true }), 'stop');
   assert.equal(cueFor(quiet, heldEvent(), { voiced: true }), 'wait');
   assert.equal(cueFor(quiet, heldEvent({ cat: 'blunder' }), {}), null, 'a held trial that is not voiced has no interjection');
   assert.equal(cueFor(quiet, tactic, {}), null, 'praise that was not earned has none');
   assert.equal(cueFor(quiet, plain, {}), null);
+  // a move after which the child is mated is told from the grim row, whatever it does: no praising interjection, however
+  // the flags were set (CONTRACT-NOTES 150). 妙哉！ was called out for a fork one move before the mate.
+  const matedAfter = { b: 'lost', mate: -1 };
+  for (const patch of [{ does: [FORK] }, { cat: 'brilliant', does: checking }, { only: true }, { avoided: 'greedy' }, { chance: 'taken', does: [FORK] },
+    { does: [{ k: 'capture_free', by: P('me', 'R', 5), on: P('opp', 'P', 5) }], cost: { gain: ['P'], lose: [], cp: 100 } }]) {
+    const event = tryEvent({ ...patch, eval: matedAfter });
+    for (const flags of [{ earned: true }, { lord: true, earned: true }, { lord: true }]) assert.equal(cueFor(quiet, event, flags), null, JSON.stringify(patch));
+    assert.notEqual(cueFor(quiet, tryEvent(patch), { lord: true, earned: true }), null, 'the same move with no mate after it is cheered');
+  }
   assert.equal(cueFor(quiet, F.tryHeld.events[1], { voiced: true }), F.tryHeld.events[1].cue, 'section 9.5: wait');
 
   // hint, ask, recap: none
@@ -917,13 +1411,16 @@ test('cueFor: every row of 8.7', () => {
 
 test('every verdict has exactly one cue rule and one fallback row', () => {
   // D-07, the half that lives in fallback.js (codes.test.js covers the mood): for every verdict of CATS
-  const CUES = {                    // flags -> the one interjection of section 8.7, for a trial without a tactic motif
+  // flags -> the one interjection of section 8.7, for a trial without a tactic motif. `lord` and `earned` are read for a
+  // trial that gets a praising sentence (it gives check: the praise row); a verdict that has no praising row (ok, mistake,
+  // blunder) has no praising interjection either (CONTRACT-NOTES 147).
+  const CUES = {
     brilliant: { lord: 'lord', earned: 'wow', voiced: 'wait', none: null },
     best: { lord: 'lord', earned: 'nice', voiced: 'wait', none: null },
     good: { lord: 'lord', earned: 'nice', voiced: 'wait', none: null },
-    ok: { lord: 'lord', earned: 'nice', voiced: 'wait', none: null },
-    mistake: { lord: 'lord', earned: 'nice', voiced: 'wait', none: null },
-    blunder: { lord: 'lord', earned: 'nice', voiced: 'stop', none: null },
+    ok: { lord: null, earned: null, voiced: 'wait', none: null },
+    mistake: { lord: null, earned: null, voiced: 'wait', none: null },
+    blunder: { lord: null, earned: null, voiced: 'stop', none: null },
   };
   const ROWS = { brilliant: 'try.steady', best: 'try.steady', good: 'try.steady', ok: 'try.ok', mistake: 'try.slow', blunder: 'try.slow' };
   const GOOD = {
@@ -933,10 +1430,13 @@ test('every verdict has exactly one cue rule and one fallback row', () => {
   assert.deepEqual(Object.keys(CUES), [...CATS]);
   for (const cat of CATS) {
     const event = tryEvent({ cat });
-    assert.equal(cueFor(base(), event, { lord: true }), CUES[cat].lord, cat);
-    assert.equal(cueFor(base(), event, { earned: true }), CUES[cat].earned, cat);
+    const checking = tryEvent({ cat, does: [{ k: 'check', by: P('me', 'R', 2) }] });
+    assert.equal(cueFor(base(), checking, { lord: true }), CUES[cat].lord, cat);
+    assert.equal(cueFor(base(), checking, { earned: true }), CUES[cat].earned, cat);
     assert.equal(cueFor(base(), event, { voiced: true }), CUES[cat].voiced, cat);
     assert.equal(cueFor(base(), event, {}), CUES[cat].none, cat);
+    // with the row of a trial that has nothing special about it (steady, ok, slow) there is no praising interjection
+    assert.equal(cueFor(base(), event, { lord: true, earned: true }), null, cat);
     // one row for a trial with nothing special about it, one sentence for 「这步好不好？」
     assert.equal(localLine(base(), [OPP_SILENT, event], []).row, ROWS[cat], cat);
     assert.equal(composeLocal(base(), [OPP_SILENT, spoken(event), ask('good')]), GOOD[cat], cat);
@@ -972,7 +1472,10 @@ test('composeToolReply: the move, its verdict, the likely answer, the comparison
   assert.equal(composeToolReply(base(), own), '【炮五进四】是失误：你吃到一个卒，丢掉一个炮，算下来亏了。对方多半走【马7进5】。这样走比你正在试的那步更差。');
   // when nothing is lost the first flaw is the reason, and the answer keeps its outcome
   const slow = { ...clone(own), cat: 'blunder', flaws: [{ k: 'waste' }], cost: null, reply: { first: 'opp', moves: ['车9平8'], net: NET0, end: 'quiet' }, vsTry: undefined };
-  assert.equal(composeToolReply(base(), slow), '【炮五进四】是漏着：这步没有实际作用，白让对方走一步。对方多半走【车9平8】，双方都没有丢子。');
+  assert.equal(composeToolReply(base(), slow), '【炮五进四】是漏着：这步没有实际作用，白让对方走一步。对方多半走【车9平8】，之后双方都没有丢子。');
+  // what follows the rival's answer is told as a sequence (CONTRACT-NOTES 147): the child can take the pawn afterwards
+  assert.equal(composeToolReply(base(), { ...clone(slow), cat: 'good', flaws: [], reply: { first: 'opp', moves: ['马8进7', '炮五进四'], net: { gain: ['P'], lose: [], cp: 100 }, end: 'quiet' } }),
+    '【炮五进四】稳健，可以走。对方多半走【马8进7】，之后你能白吃一个卒。');
   // a mistake of the rival is one where the child gains
   const gift = { seq: ['马二进三', '炮2进7'], who: 'opp', cat: 'blunder', loss: 450, eval: { b: 'better' }, does: [], flaws: [],
     cost: { gain: ['C'], lose: [], cp: 450 }, reply: { first: 'me', moves: ['车九平八'], net: { gain: ['C'], lose: [], cp: 450 }, end: 'quiet' } };
@@ -1067,11 +1570,33 @@ test('what a sentence says is in the packet', () => {
   assert.equal(composeLocal(overTurn(), [overEvent(draw, null)]), '握手言和，旗鼓相当。');
   // 有几步走得真不错 needs a few good moves to point at
   const short = { result: 'loss', reason: 'resign', moves: 3, takeaway: null, proud: null, goal: null, rank: null };
-  assert.equal(composeLocal(overTurn(), [overEvent({ ...short, stats: { good: 1, taken: 0, captures: 0, brilliant: 0 } }, 'lose')]), '这盘惜败。');
-  assert.equal(composeLocal(overTurn(), [overEvent({ ...short, stats: { good: 2, taken: 0, captures: 0, brilliant: 0 } }, 'lose')]), '这盘惜败，不过有几步走得真不错。');
+  const few = { good: 1, taken: 0, captures: 0, brilliant: 0 };
+  assert.equal(composeLocal(overTurn(), [overEvent({ ...short, kept: true, stats: few }, 'lose')]), '这盘惜败。上盘说好的，做到了！');
+  assert.equal(composeLocal(overTurn(), [overEvent({ ...short, kept: null, rank: { to: 2 }, stats: few }, 'lose')]), `这盘惜败。兵法升到「${RANK_NAMES[1]}」！`);
+  assert.equal(composeLocal(overTurn(), [overEvent({ ...short, kept: null, proud: { n: 2, s: 'me', move: '炮五进四', tag: 'great', k: 'capture' }, stats: few }, 'lose')]),
+    '这盘惜败。第2回合的【炮五进四】最漂亮：吃子。');
+  // ... and with nothing at all to point at (no proud move, no kept goal, no new rank) 这盘惜败。 does not stand alone in the
+  // takeaway box of the card (CONTRACT-NOTES 147). The card's own line under the title says 胜败乃兵家常事: not said twice.
+  for (const kept of [null, false]) {
+    const alone = composeLocal(overTurn(), [overEvent({ ...short, kept, stats: few }, 'lose')]);
+    assert.equal(alone, '这盘惜败。每一盘都是练兵，下一盘再战。');
+    assert.ok(plainLength(alone) <= 30 && plainLength(alone) <= CAPS.over, 'within the cap of the takeaway sentence and of the line');
+    assert.doesNotMatch(alone, /胜败乃兵家常事/);
+  }
+  assert.equal(composeLocal(overTurn(), [overEvent({ ...short, kept: null, goal: 'greedy', stats: few }, 'lose')]), '这盘惜败。每一盘都是练兵，下一盘再战。', 'the goal is the card\'s, not the line\'s');
+  assert.equal(composeLocal(overTurn(), [overEvent({ ...short, kept: null, stats: { good: 2, taken: 0, captures: 0, brilliant: 0 } }, 'lose')]), '这盘惜败，不过有几步走得真不错。');
+  // a win and a draw with nothing to point at are what they were
+  assert.equal(composeLocal(overTurn(), [overEvent({ ...short, result: 'win', reason: 'checkmate', kept: null, stats: few })]), '这盘赢得漂亮！');
   // the goal and the rank are the tables of codes.js
   for (const goal of HABIT_CODES) {
-    assert.equal(composeLocal(overTurn(), [overEvent({ goal, proud: null, rank: null })]), `这盘赢得漂亮！下一盘小目标：${HABIT_FIX[goal]}。`);
+    // the goal is said once on the card, in its own row (CONTRACT-NOTES 138): the game-over line does not carry it ...
+    assert.equal(composeLocal(overTurn(), [overEvent({ goal, proud: null, rank: null })]), '这盘赢得漂亮！');
+    assert.ok(!composeLocal(overTurn(), [overEvent({ goal })]).includes(HABIT_FIX[goal]), goal);
+    assert.ok(!composeLocal(overTurn(), [overEvent({ goal })]).includes('小目标'), goal);
+    // ... and 「下一盘注意什么？」 still answers with it: one dash, and at most the colon the goal itself holds
+    const next = composeLocal(overTurn(), overThread('next', { goal }));
+    for (const sentence of next.split(/[。！？]/)) assert.ok((sentence.match(/：/g) ?? []).length <= 1, sentence);
+    assert.equal(next, `下一盘记住一件事——${HABIT_FIX[goal]}。`);
   }
   RANK_NAMES.forEach((name, k) => {
     assert.equal(composeLocal(overTurn(), [overEvent({ goal: null, proud: null, rank: { to: k + 1 } })]), `这盘赢得漂亮！兵法升到「${name}」！`);
@@ -1079,10 +1604,10 @@ test('what a sentence says is in the packet', () => {
   assert.equal(composeLocal(overTurn(), [overEvent({ goal: null, proud: { n: 7, s: 'me', move: '车二进七', tag: 'great' }, rank: null })]), '这盘赢得漂亮！第7回合的【车二进七】最漂亮。');
 
   // 指给我看 names the rival's piece that threatens: the flaw's `by`, or the guard (`on2`) of a greedy capture (section 9.5)
-  assert.equal(composeLocal(base(), [OPP_SILENT, HELD_TRY, ask('show', { more: clone(MORE) })]), '是对方的7路马在威胁。它会走【马7进5】，你吃到一个卒，丢掉一个炮，算下来亏了。');
+  assert.equal(composeLocal(base(), [OPP_SILENT, HELD_TRY, ask('show', { more: clone(MORE) })]), '是对方的7路马在威胁。它会走【马7进5】，之后你吃到一个卒，丢掉一个炮，算下来亏了。');
   // a flaw that names no rival piece: the reply sentence
   const unguard = [OPP_SILENT, spoken(UNGUARD_TRY()), ask('show', { more: { reply: { first: 'opp', moves: ['炮2进4'], net: { gain: [], lose: ['H'], cp: -400 }, end: 'quiet' }, better: [] } })];
-  assert.equal(composeLocal(base(), unguard), '对方多半走【炮2进4】，你白丢一个马。');
+  assert.equal(composeLocal(base(), unguard), '对方多半走【炮2进4】，之后你白丢一个马。');
 
   // a reply line that ends in mate is not summed up as "nobody loses a piece": it says who is mated
   const mate = [OPP_SILENT, spoken(MATE_TRY()), ask('reply', { more: { reply: { first: 'opp', moves: ['车2进7'], net: NET0, end: 'mate' }, better: [] } })];
@@ -1090,7 +1615,7 @@ test('what a sentence says is in the packet', () => {
   assert.equal(composeLocal(base(), [...mate.slice(0, 2), ask('why', { more: mate[2].more })]), '因为这步走完，对方就有杀棋。对方走【车2进7】，最后你被将死。');
   // with a balance before it the subject is not said twice: 你白丢…，最后被将死
   const costly = { reply: { first: 'opp', moves: ['车2进7', '帅五进一', '车2退1'], net: { gain: [], lose: ['A'], cp: -200 }, end: 'mate' }, better: [] };
-  assert.equal(composeLocal(base(), [...mate.slice(0, 2), ask('reply', { more: costly })]), '对方多半走【车2进7】，你白丢一个仕，最后被将死。');
+  assert.equal(composeLocal(base(), [...mate.slice(0, 2), ask('reply', { more: costly })]), '对方多半走【车2进7】，之后你白丢一个仕，最后被将死。');
   assert.equal(composeLocal(base(), [...mate.slice(0, 2), ask('why', { more: costly })]), '因为这步走完，对方就有杀棋。对方走【车2进7】之后，你白丢一个仕，最后被将死。');
   const rookMate = [OPP_SILENT, spoken(heldEvent({ move: '兵三进一', cat: 'blunder', loss: 2000, eval: { b: 'lost', mate: -1 }, does: [{ k: 'quiet' }],
     flaws: [{ k: 'ignore_threat', by: P('opp', 'R', 2), on: P('me', 'K', 5) }], cost: null })), ask('show', { more: mate[2].more })];
@@ -1101,7 +1626,7 @@ test('what a sentence says is in the packet', () => {
     '更好的是【车二进七】：你的二路车将军。最后你将死对方。');
   const winsHorse = { ...winning, does: [{ k: 'capture', by: P('me', 'R', 2), on: P('opp', 'H', 2) }], line: { ...winning.line, net: { gain: ['H'], lose: [], cp: 400 } } };
   assert.equal(composeLocal(base(), [OPP_SILENT, spoken(tryEvent({ cat: 'mistake', loss: 2000 })), ask('better', { more: { better: [winsHorse] } })]),
-    '更好的是【车二进七】：你的二路车吃掉对方的2路马。之后你白吃一个马，最后将死对方。');
+    '更好的是【车二进七】：你的二路车吃掉对方的2路马。之后你能白吃一个马，最后将死对方。');
   const goodTry = spoken(tryEvent({ move: '车二进七', cat: 'best', eval: { b: 'won', mate: 2 }, does: [{ k: 'check', by: P('me', 'R', 2) }], reply: clone(winning.line) }));
   assert.equal(composeLocal(base(), [OPP_SILENT, goodTry, ask('reply', { more: { better: [] } })]), '对方多半走【将5进1】，最后你将死对方。');
   // every move is mated and the better one only later: the last move of its line is the rival's, so the child is the one mated
@@ -1113,7 +1638,7 @@ test('what a sentence says is in the packet', () => {
   assert.equal(composeLocal(base(), [OPP_SILENT, spoken(heldEvent({ ...MATE_TRY().try, eval: { b: 'lost', mate: -4 } })), ask('reply', { more: cut })]), '对方多半走【车2进7】，最后你被将死。');
   // a line that ends in check or quietly says nothing about a mate
   for (const end of ['quiet', 'check']) {
-    assert.equal(composeLocal(base(), [...mate.slice(0, 2), ask('reply', { more: { reply: { ...mate[2].more.reply, end }, better: [] } })]), '对方多半走【车2进7】，双方都没有丢子。');
+    assert.equal(composeLocal(base(), [...mate.slice(0, 2), ask('reply', { more: { reply: { ...mate[2].more.reply, end }, better: [] } })]), '对方多半走【车2进7】，之后双方都没有丢子。');
   }
 
   // a mistake is explained by what it costs when it costs something, else by its flaw; a gain is never given as the reason
@@ -1128,7 +1653,7 @@ test('what a sentence says is in the packet', () => {
   const level = tryEvent({ move: '炮五进四', cat: 'mistake', loss: 200, flaws: [], cost: { gain: ['P'], lose: ['P'], cp: 0 } });
   assert.equal(composeLocal(base(), [OPP_SILENT, spoken(level), ask('good')]), '【炮五进四】是失误。');
   assert.equal(composeLocal(turnWith({ mine: { move: '车二进五', cat: 'blunder', waited: true, self: true, try: clone(ahead.try) } }), [OPP_SILENT, ask('last')]),
-    '【车二进五】是漏着：错过了一步杀棋。你的二路车吃掉对方的2路车。');
+    '【车二进五】是漏着：错过了一步杀棋。', 'what a blunder did is not added: the piece may be gone by now');
   // the same for a move of the rival in a "what if": its mistake is one in which the child comes out ahead
   const rival = { seq: ['马二进三', '炮2进7'], who: 'opp', cat: 'mistake', loss: 300, eval: { b: 'even' }, does: [], flaws: [], reply: null };
   assert.equal(composeToolReply(base(), { ...rival, cost: { gain: ['C'], lose: ['R'], cp: -450 } }), '对方这步【炮2进7】是失误。');
@@ -1161,7 +1686,7 @@ test('what a sentence says is in the packet', () => {
   assert.equal(composeLocal(base(), [OPP_SILENT, tryEvent({ move: '车二进七', does: threat })], 0), '【车二进七】叫杀。');
   assert.equal(composeLocal(base(), [OPP_SILENT, hintEvent(3, { move: '车二进七', does: threat, line: null })]), '可以走【车二进七】：叫杀。');
   assert.equal(composeLocal(oppTurn({ move: '车2进6', does: [{ k: 'mate_threat', by: P('opp', 'R', 2) }] }), [OPP_SILENT, ask('intent')]),
-    '对方这步的用意：对方的2路车下一步就要将死，必须先解围。');
+    '对方这步的用意：2路车下一步就要将死，必须先解围。');
 
   // before the rival has moved, 是在调整阵形 has nothing to describe
   assert.equal(composeLocal(clone(F.start.turn), [spoken({ i: 0, kind: 'start' }), ask('intent')]), '对方眼下没有直接的威胁。');
@@ -1170,7 +1695,7 @@ test('what a sentence says is in the packet', () => {
   assert.equal(composeLocal(turnWith({ threats: [checkOnly] }), [OPP_SILENT, ask('intent')]), '对方下一步想走【车2进7】。');
   // ... and a check that is only threatened is not on the board yet: 下一步要将军, not the …将军 of a check given
   assert.equal(composeLocal(turnWith({ threats: [checkOnly] }), [OPP_SILENT, ask('danger')]), '要当心：对方的2路车下一步要将军。');
-  assert.equal(composeLocal(oppTurn({ move: '车2进7', check: true, does: [{ k: 'check', by: P('opp', 'R', 2) }] }), [OPP_SILENT, ask('intent')]), '对方这步的用意：对方的2路车将军。');
+  assert.equal(composeLocal(oppTurn({ move: '车2进7', check: true, does: [{ k: 'check', by: P('opp', 'R', 2) }] }), [OPP_SILENT, ask('intent')]), '对方这步的用意：2路车将军。');
 
   // 「我有危险吗？」 with no threat listed: 没有直接的危险，可以放心走 is not said while the child is in check (the list holds
   // captures and mates, not the check itself), nor when the evaluation has found a forced mate against the child
@@ -1202,25 +1727,39 @@ test('what a sentence says is in the packet', () => {
   assert.equal(composeLocal(overTurn(), overThread('proud', { result: 'loss', reason: 'resign', moves: 3, stats: { good: 1, taken: 0, captures: 0, brilliant: 0 }, proud: null, takeaway: null, goal: null, rank: null })),
     '这盘还没走出最漂亮的一步，下一盘咱们一起找。');
 
-  // 摆出了… and 常见的阵势 are said of openings; a tactic pattern is only named; an attacking formation is worded as an attack
-  // and a weakness as a weakness (窝心马 is nothing the rival "set up", and it is not 常见的阵势)
+  // The caption carries the name of the pattern, so the sentence never is the name alone (这是顺炮。 after 【炮8平5】顺炮):
+  // 常见的阵势 is said of openings, an attacking formation is worded as an attack and a weakness as a weakness (窝心马 is
+  // not 常见的阵势); the name of a tactic gets no sentence of its own
   for (const name of PATTERN_CODES) {
-    const texts = [0, 1, 2].map((v) => composeLocal(oppTurn({ name }), OPP_LAST, v));
+    const texts = [0, 1, 2].map((v) => composeLocal(oppTurn({ name, does: [] }), OPP_LAST, v));
     const opening = PATTERN_CODES.indexOf(name) < 9;
-    const expected = opening ? [`对方摆出了${PATTERN_NAME[name]}。`, `这是${PATTERN_NAME[name]}。`, `${PATTERN_NAME[name]}，常见的阵势。`]
-      : name === 'empty_cannon' ? ['对方摆出了空头炮。', '这是空头炮。', '空头炮，厉害的攻势。']
-        : name === 'heart_horse' ? ['对方走成了窝心马。', '这是窝心马。', '窝心马，是个弱点。']
-          : [`这是${PATTERN_NAME[name]}。`, `这是${PATTERN_NAME[name]}。`, `这是${PATTERN_NAME[name]}。`];
-    assert.deepEqual(texts, expected, name);
+    const said = opening ? `${PATTERN_NAME[name]}，常见的阵势。` : name === 'empty_cannon' ? '空头炮，厉害的攻势。' : name === 'heart_horse' ? '窝心马，是个弱点。' : null;
+    if (said) assert.deepEqual(texts, [said, said, said], name);
+    else for (const text of texts) assert.doesNotMatch(text, new RegExp(PATTERN_NAME[name]), name);
     if (!opening) for (const text of texts) assert.doesNotMatch(text, /常见的阵势/, name);
   }
-  // 露了破绽 is said of the rival's side of the board
-  const own = oppTurn({ move: '卒3进1' }, { chance: { size: 'piece', theme: 'capture_free', area: 'my_palace' }, known: { threats: true, chance: true } });
-  assert.deepEqual([0, 1, 2].map((v) => composeLocal(own, OPP_LAST, v)), ['己方九宫有文章可做。', '己方九宫有文章可做。', '看看己方九宫，有机会。']);
+  // a chance in the child's own palace or back rows: the area is not named, in any variant, for either colour
+  for (const area of ['my_palace', 'my_back']) {
+    for (const me of ['red', 'black']) {
+      const own = { ...oppTurn({ move: '卒3进1' }, { chance: { size: 'piece', theme: 'capture_free', area }, known: { threats: true, chance: true } }), me };
+      assert.deepEqual([0, 1, 2, 3].map((v) => composeLocal(own, OPP_LAST, v)), ['对方好像露了破绽。', '眼下有文章可做。', '找一找，有机会。', '对方好像露了破绽。'], area);
+    }
+  }
+  // ... and nowhere does a local line say that the child's own palace or back rows hold a chance (CONTRACT-NOTES 138)
+  for (const c of SWEEP) {
+    for (let v = 0; v < 6; v++) assert.doesNotMatch(composeLocal(c.turn, c.events, v), /己方(?:九宫|底线)(?:有个机会|有文章|好像露|，有机会|还有便宜|的机会)|机会在己方/, c.name);
+  }
   // 跳 is said of a horse
-  assert.equal(composeLocal(base(), [OPP_SILENT, FORK_TRY(P('opp', 'R', 4))], 0), '你的一路车和你的五路炮，是不是站得太近？');
-  // a clause whose pieces are not in the packet is not a sentence of its own about a rival move
-  assert.equal(composeLocal(oppTurn({ does: [{ k: 'develop' }] }), OPP_LAST, 0), '对方这步在出子。');
+  assert.equal(composeLocal(base(), [OPP_SILENT, FORK_TRY(P('opp', 'R', 4))], 0), '你的一路车和你的五路炮，会同时被捉吗？');
+  // 站得太近 is said only when one short-stepping piece attacks both: two pieces a rook or a cannon reaches along a line, or
+  // two pieces attacked by different pieces, need not stand close
+  for (const t of ['H', 'P', 'A', 'E', 'K']) assert.equal(composeLocal(base(), [OPP_SILENT, FORK_TRY(P('opp', t, 4))], 1), '你的一路车和你的五路炮，是不是站得太近？', t);
+  for (const by of [P('opp', 'R', 4), P('opp', 'C', 4), undefined]) {
+    for (let v = 0; v < 3; v++) assert.doesNotMatch(composeLocal(base(), [OPP_SILENT, FORK_TRY(by)], v), /站得太近/);
+  }
+  // a clause whose pieces are not in the packet says no more than the caption: no line about that rival move
+  assert.equal(composeLocal(oppTurn({ does: [{ k: 'develop' }] }), OPP_LAST, 0), '');
+  assert.equal(composeLocal(oppTurn({ does: [{ k: 'defend' }] }), OPP_LAST, 0), '');
   // a missed chance is pointed at through the try's own direction, else through the announced chance; without either it is not mentioned
   const missedTry = (toward) => [OPP_SILENT, tryEvent({ move: '兵三进一', cat: 'ok', loss: 160, does: [{ k: 'quiet' }], toward, chance: 'missed' })];
   assert.equal(composeLocal(turnWith({ chance: { size: 'piece', theme: 'fork', area: 'river' }, known: { threats: true, chance: true } }), missedTry(null), 0), '【兵三进一】没危险，可河口有个机会。');
@@ -1296,17 +1835,19 @@ test('the corrected sentences (CONTRACT-NOTES item 113)', () => {
     }
   }
   assert.equal(composeLocal(oppTurn({ move: '马7进6', does: [] }, { threats: [PIECE_THREAT] }), OPP_LAST, 0), '对方盯上了你的五路炮。');
-  assert.equal(composeLocal(oppTurn({ does: [{ k: 'develop', by: P('opp', 'H', 7) }] }), OPP_LAST, 4), '对方在出子。');
+  assert.equal(composeLocal(oppTurn({ does: [{ k: 'develop', by: P('opp', 'H', 7) }] }), OPP_LAST, 4), '', 'the caption says 出子 already');
 
   // a clause without a subject is not a sentence about the rival's move by itself (给…补上保护。 would read as an order): 这步 leads it
   const read = (effect) => composeLocal(oppTurn({ does: [effect] }), OPP_LAST, 0);
-  assert.equal(read({ k: 'defend', on: P('opp', 'P', 5) }), '这步给对方的5路卒补上保护。');
-  assert.equal(read({ k: 'open_rook', on: P('opp', 'R', 9) }), '这步给对方的9路车亮出了通道。');
+  assert.equal(read({ k: 'defend', on: P('opp', 'P', 5) }), '这步给自己的5路卒补上保护。');
+  assert.equal(read({ k: 'open_rook', on: P('opp', 'R', 9) }), '这步给自己的9路车亮出了通道。');
   assert.equal(read({ k: 'restrict_king', on: P('me', 'K', 5) }), '这步封住了你的帅的一条退路。');
-  assert.equal(read({ k: 'sacrifice', by: P('opp', 'R', 2) }), '这步弃掉对方的2路车换取攻势。');
-  assert.equal(read({ k: 'attack', by: P('opp', 'C', 2), on: P('me', 'P', 7) }), '对方的2路炮捉你的七路兵。');
-  // the same clauses keep their wording where another sentence gives them their subject
-  assert.equal(composeLocal(oppTurn({ does: [{ k: 'defend', on: P('opp', 'P', 5) }] }), [OPP_SILENT, ask('intent')]), '对方这步的用意：给对方的5路卒补上保护。');
+  assert.equal(read({ k: 'sacrifice', by: P('opp', 'R', 2) }), '', 'no piece besides the one that moved: the caption says 弃子 already');
+  // a clause that starts with his piece: the sentence of the intent answer when it fits the cap, the clause by itself as variant 1
+  assert.equal(read({ k: 'attack', by: P('opp', 'C', 2), on: P('me', 'P', 7) }), '对方这步的用意：2路炮捉你的七路兵。');
+  assert.equal(composeLocal(oppTurn({ does: [{ k: 'attack', by: P('opp', 'C', 2), on: P('me', 'P', 7) }] }), OPP_LAST, 1), '对方的2路炮捉你的七路兵。');
+  // the same clauses where another sentence gives them their subject: the rival is that subject, so his pieces are 自己的
+  assert.equal(composeLocal(oppTurn({ does: [{ k: 'defend', on: P('opp', 'P', 5) }] }), [OPP_SILENT, ask('intent')]), '对方这步的用意：给自己的5路卒补上保护。');
   // 「我上一步怎么样？」: what the move did is a sentence of its own after the verdict, so it gets its subject in the same way
   // (…是眼下最好的一步。给你的四路马补上保护。 would read as an order to the child, …。叫杀。 is not a sentence)
   const lastOf = (does, cat = 'best') => composeLocal(turnWith({ mine: { move: '炮二平五', cat, waited: true, self: true, try: { ...clone(MINE_BEST.try), cat, does } } }), [OPP_SILENT, ask('last')]);
@@ -1385,7 +1926,7 @@ test('为什么？ after the game is over always gets a local answer (CONTRACT-N
   assert.equal(why(['improve'], { takeaway: null, goal: null }), LAST_RESORT);
 
   // after 「下一盘注意什么？」: the line was the fix, so the answer is the habit, with the lesson's example when there is one
-  assert.equal(composeLocal(overTurn(), overThread('next')), '下一盘记住一件事：吃子之前，先看它有没有保镖。');
+  assert.equal(composeLocal(overTurn(), overThread('next')), '下一盘记住一件事——吃子之前，先看它有没有保镖。');
   assert.equal(why(['next']), '因为第2回合的【炮五进四】，吃子前没看对方能不能吃回。');
   for (const code of HABIT_CODES) {
     assert.equal(why(['next'], { goal: code, takeaway: habit(code) }), `因为这盘有一步，${HABIT_WORD[code]}。`, code);
@@ -1396,9 +1937,11 @@ test('为什么？ after the game is over always gets a local answer (CONTRACT-N
   assert.equal(composeLocal(overTurn(), overThread('next', { goal: null })), '下一盘照这样下就行。');
   assert.equal(why(['next'], { goal: null }), LAST_RESORT);
 
-  // straight after the game-over line: the habit behind its small goal; without a goal its highlighted move; else the fixed sentence
-  assert.equal(why([]), '因为第2回合的【炮五进四】，吃子前没看对方能不能吃回。');
+  // straight after the game-over line: its highlighted move (the line no longer carries the goal); without a highlighted
+  // move the habit behind the goal the card shows; else the fixed sentence
+  assert.equal(why([]), '因为【马三进四】同时捉住了对方的两个子，对方只能救一个。');
   assert.equal(why([], { goal: null, takeaway: { kind: 'strength', code: 'S_tactics' } }), '因为【马三进四】同时捉住了对方的两个子，对方只能救一个。');
+  assert.equal(why([], { proud: null }), '因为第2回合的【炮五进四】，吃子前没看对方能不能吃回。');
   assert.equal(why([], { goal: null, takeaway: null, proud: null, rank: null }), LAST_RESORT);
   // a second 为什么？ is about the same line; after a free question nothing concrete is known
   assert.equal(why(['proud', 'why']), why(['proud']));

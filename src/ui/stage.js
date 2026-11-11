@@ -13,6 +13,9 @@
 //   - his mouth and the read-aloud feed (CONTRACT-NOTES 77 / 86);
 //   - when 司马懿's reactions show: a `rattled` face fires with the stamp or popup of the move that punished him and
 //     stays long enough to be seen; his thinking dots never outlive his turn;
+//   - what a finger that taps in bursts may reach: nothing under the start overlay or the game-over card while they
+//     leave or come up, and no new game between the end of a game and its card (CONTRACT-NOTES 146, 150);
+//   - when the move links of the strategist's lines stop being buttons: whenever the position changes;
 //   - layout, keyboard shortcuts, the URL switches, the audio unlock, the silent idle peek, the ?test=1 hooks.
 // It holds no game state beyond what it was last told (the last StageView, the phase, the trial on the board).
 //
@@ -82,6 +85,21 @@ const RATTLED_MS = 1600;              // 司马懿's rattled face is seen at lea
 const RATTLED_LINE_MS = 2400;         // ... and for as long as the line he says with it is up (§11.7)
 const UNLOCK_WAIT_MS = 500;           // start(): how long the first deal waits for the audio context
 const REVIEW_ARROW_MS = 2600;
+// Children double-tap (CONTRACT-NOTES 138): the second or third tap on 开战！ must not land on the board under the button.
+const TAP_GUARD_MS = 350;             // the board takes no tap this long after the start overlay has left the screen ...
+const DEAL_LAND_MS = 450;             // ... nor before the pieces of a deal have landed (G1: 14 ms x 16 + 220 ms)
+const TAP_BURST_MS = 500;             // a tap that arrives while the board is held holds it this much longer (a child's triple
+                                      // tap has gaps of 250 to 400 ms: with 350 the third tap of 300 + 300 still landed) ...
+const TAP_BURST_MAX_MS = 1000;        // ... but never past this long after the overlay left or the deal began: a child who
+                                      // keeps tapping a piece that does not answer must not be kept out for good
+const START_LEAVE_MAX_MS = 600;       // the start overlay is gone 200 ms after the choice; never waited for longer than this
+// A game that is over shows its card after the celebration, and children tap on where 确定落子 was meanwhile: until the
+// card is up nothing starts a new game (CONTRACT-NOTES 150). The wait has an end when no card will come.
+const CARD_IDLE_MS = 3000;            // the game is over, no cue is in flight and no card has come up: after this long none will
+const CARD_WAIT_MAX_MS = 15000;       // ... and whatever the cues do, the card is never waited for longer than this
+const CARD_BURST_MAX_MS = 4000;       // taps that keep coming while the card comes up hold what lies around it at most this long
+                                      // (after his mate the card is up two seconds after the move, and a finger that has
+                                      // been tapping since then is not asking for a new game yet)
 
 // ---- game over (§12.6) ---------------------------------------------------------------------------------------------------
 
@@ -332,9 +350,109 @@ export function createStage(app, deps) {
   // Layout, the conversation sheet
   // =========================================================================================================================
 
+  /** The start overlay is on its way out: its fade still takes the taps, and what follows them must not reach the board. */
+  let startLeaving = false;
+  /** The board takes no tap before this moment (the start overlay has just left, a deal is still landing). */
+  let boardFreeAt = 0;
+  let boardFreeTimer = 0;
+  /** Taps that arrive while the board is held hold it longer, but not past this moment (TAP_BURST_MAX_MS). */
+  let burstEndsAt = 0;
+  /** The game is over and its card is still to come: nothing starts a new game (the card has its own 再来一局). */
+  let cardDue = false;
+  let cardDueAt = 0;
+  let cardTimer = 0;
+  /** When the cue queue last fell empty. */
+  let cuesIdleAt = 0;
+
   /** A position is on the board and nothing forbids touching it. */
   function syncInteractive() {
-    board.setInteractive(view !== null && !replaying && !(sheet && layout.layout === 'compact'));
+    const held = startLeaving || now() < boardFreeAt;
+    board.setInteractive(view !== null && !replaying && !(sheet && layout.layout === 'compact') && !held);
+    // What lies under the buttons of the start overlay is not the board in every layout: on a phone 继续上一局 covers the
+    // pouches button, and the third tap of a triple tap opened a pouch. While the board is held, the controls around it
+    // take no tap either. `inert` (not a swallowed click), so that a scripted click waits for the control like a finger.
+    for (const el of [topbarEl, underbarEl, coachEl, actionsEl]) el.inert = held;
+  }
+
+  /** The board takes no tap until `until` (a later moment that was asked for before stands). @param {number} until */
+  function holdBoard(until) {
+    boardFreeAt = Math.max(boardFreeAt, until);
+    win.clearTimeout(boardFreeTimer);
+    boardFreeTimer = win.setTimeout(syncInteractive, Math.max(0, boardFreeAt - now()) + 1);
+    syncInteractive();
+  }
+
+  /**
+   * The choice on the start overlay was a tap, and children tap twice or three times: until the overlay has left the
+   * screen and TAP_GUARD_MS more have passed, the board takes no tap (CONTRACT-NOTES 138).
+   */
+  function guardStartTaps() {
+    const gone = () => overlaysEl.querySelector('dialog[data-dialog="start"]') === null;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      watcher.disconnect();
+      win.clearTimeout(backstop);
+      startLeaving = false;
+      burstEndsAt = Math.max(burstEndsAt, now() + TAP_BURST_MAX_MS);
+      holdBoard(now() + TAP_GUARD_MS);
+    };
+    const watcher = new MutationObserver(() => { if (gone()) release(); });
+    startLeaving = true;
+    syncInteractive();
+    watcher.observe(overlaysEl, { childList: true });
+    const backstop = win.setTimeout(release, START_LEAVE_MAX_MS);
+    if (gone()) release();
+  }
+
+  /**
+   * The wait for the game-over card ends without one when none will come (the director is gone, a cue failed): once
+   * the cue queue has been empty for CARD_IDLE_MS since the game was over, and CARD_WAIT_MAX_MS after it at the latest.
+   * The game is never left without a way to start the next one.
+   */
+  function watchCard() {
+    win.clearTimeout(cardTimer);
+    cardTimer = 0;
+    if (!cardDue) return;
+    const idleSince = cues.length ? now() : Math.max(cardDueAt, cuesIdleAt);
+    const left = Math.min(idleSince + CARD_IDLE_MS, cardDueAt + CARD_WAIT_MAX_MS) - now();
+    if (left > 0) { cardTimer = win.setTimeout(watchCard, left + 1); return; }
+    cardDue = false;
+    hud.holdNewGame(false);
+  }
+
+  /**
+   * The game has just ended: from here until its card is on screen no tap starts a new game. 再来一局 comes into the
+   * action slot where 确定落子 has just been pressed, seconds before the card: the hud shows it (and 新对局 of the menu)
+   * as not yet available, and the `hud:action` listener below takes no 'new-game' meanwhile.
+   */
+  function awaitCard() {
+    cardDue = true;
+    cardDueAt = now();
+    hud.holdNewGame(true);
+    watchCard();
+  }
+
+  /** The card is up, or the game is no longer over. */
+  function cardSettled() {
+    if (!cardDue) return;
+    cardDue = false;
+    win.clearTimeout(cardTimer);
+    cardTimer = 0;
+    hud.holdNewGame(false);
+  }
+
+  /**
+   * A button of the game-over card was a tap, and children tap twice: until the card has left the screen and
+   * TAP_GUARD_MS more have passed, what lies under it takes no tap, exactly as after the start overlay (the board and
+   * the controls around it, the burst rule included). In the upright layout 回看棋局 lies over 再来一局 of the action bar.
+   */
+  function guardCardTaps() {
+    // Under reduced motion the card is gone at once, but the finger is no faster for that, and what it would press
+    // there starts a new game over the one the child asked to look at: the hold lasts the card's 300 ms all the same.
+    burstEndsAt = Math.max(burstEndsAt, now() + CARD_MS + TAP_BURST_MAX_MS);
+    holdBoard(now() + CARD_MS + TAP_GUARD_MS);
   }
 
   /** Portrait: the sheet never covers the square the child is looking at (§12.4); minimum sheet height 280 px. */
@@ -614,6 +732,16 @@ export function createStage(app, deps) {
     lines.delete(line.id);
   }
 
+  /**
+   * The position has changed: the move links written so far point at squares of an earlier board (a tap would draw
+   * an arrow where the piece no longer stands, or try whatever can make that move now). They become plain words, and
+   * the arrow of one that was active goes. What is written from here on is about the new position and stays live.
+   */
+  function retireLinks() {
+    chat.retireLinks();
+    board.clearArrows('chat');
+  }
+
   /** The moment the bubble speaks about is gone (an undo; the child has moved on): caption, question and line leave. */
   function clearBubble() {
     chat.caption([]);
@@ -651,6 +779,7 @@ export function createStage(app, deps) {
     entry.done = true;
     const at = cues.indexOf(entry);
     if (at >= 0) cues.splice(at, 1);
+    if (cues.length === 0) cuesIdleAt = now();
     entry.resolve();
     const next = cues[0];
     if (next && !next.started) startCue(next);
@@ -674,6 +803,7 @@ export function createStage(app, deps) {
   function flushCues() {
     cueGen += 1;
     const pending = cues.splice(0);
+    cuesIdleAt = now();
     for (const entry of pending) entry.done = true;
     board.cancelAnimations();
     fx.clear();
@@ -970,6 +1100,13 @@ export function createStage(app, deps) {
     if (overCard) overCard.close();
     overCard = hud.showOver(info);
     syncChips();
+    cardSettled();
+    // The card may have come up under a finger that is still tapping where 确定落子 was. What lies around it (in
+    // landscape 再来一局 of the action bar stays in view under the card) takes no tap until the card is in place and
+    // TAP_GUARD_MS more have passed, and a burst of taps that is still going on holds it longer (the hud holds the
+    // card's own buttons by the same rule): a new game is started by a tap that was meant.
+    burstEndsAt = Math.max(burstEndsAt, now() + CARD_BURST_MAX_MS);
+    holdBoard(now() + (reduced ? 0 : CARD_MS) + TAP_GUARD_MS);
   }
 
   /** The game is no longer over (undo, a new game): everything of the ending goes. */
@@ -998,6 +1135,7 @@ export function createStage(app, deps) {
     dropHeld();
     chat.endAll('aborted');
     closeLines(false);
+    retireLinks();                                           // what the card and the questions after it say is about the final board
     dropTrialQuietly();
     cancelYours();
     stopRivalThinking();
@@ -1058,6 +1196,7 @@ export function createStage(app, deps) {
 
     async start(info) {
       const choice = await hud.showStart(info);
+      guardStartTaps();                                      // the taps that follow the choice never reach the board
       // The choice was a tap, so the audio context is on its way up: the first deal waits a moment for it.
       if (choice !== 'import') await Promise.race([audio.unlock(), new Promise((resolve) => { win.setTimeout(resolve, UNLOCK_WAIT_MS); })]);
       return choice;
@@ -1090,6 +1229,11 @@ export function createStage(app, deps) {
         board.setOrientation(v.bottom);
         const dealt = board.setPosition(v.board, { lastMove: v.lastMove, lastActor: actorOf(v.lastBy), deal });
         board.setCheck(v.check, v.checkers);
+        // the board takes no tap until the pieces of the deal have landed (they are shown at once under reduced motion)
+        if (deal && !reduced) {
+          burstEndsAt = Math.max(burstEndsAt, now() + TAP_BURST_MAX_MS);
+          holdBoard(now() + DEAL_LAND_MS);
+        }
         syncInteractive();
         return dealt;
       };
@@ -1097,6 +1241,8 @@ export function createStage(app, deps) {
     },
 
     phase(p) {
+      if (p.phase !== 'over') cardSettled();
+      else if (phase !== 'over') awaitCard();                // the game has just ended: its card comes after the celebration
       phase = p.phase;
       ply = p.ply;
       canUndo = p.canUndo;
@@ -1105,6 +1251,9 @@ export function createStage(app, deps) {
       app.dataset.phase = p.phase;
       app.dataset.ply = String(p.ply);
       hud.setPhase({ phase: p.phase, canUndo: p.canUndo, hintLevel: p.hintLevel, failed: p.failed });
+      // A game that is over shows the last round that was played, not the round that will never be (CONTRACT-NOTES 138).
+      // The view of the move that ended the game says the same; a resignation ends it with no move, so it is told here.
+      if (p.phase === 'over' && p.ply > 0) hud.setRound(Math.ceil(p.ply / 2));
       if (p.phase !== 'selected' && p.phase !== 'tentative') selection = null;
       if (p.phase !== 'childTurn') cancelYours();
       if (p.phase === 'opponentTurn' && !p.failed) buddy.bubble.status(TXT.status.rivalThinking);
@@ -1200,6 +1349,7 @@ export function createStage(app, deps) {
         staleTrialLine(TXT.stale.commit, true);
         chat.endAll('aborted');
         closeLines(false);
+        retireLinks();
         dropHeld(true);
         // Nothing was said about this move: what the bubble still shows is about the rival's move before it.
         if (captionLive && !(trial && bubbleLine && bubbleLine.trial === trial.seq)) clearBubble();
@@ -1278,6 +1428,7 @@ export function createStage(app, deps) {
         cancelYours();
         view = info.view;
         selection = null;
+        retireLinks();                                       // before the caption of this move: that one is about the board of now
         chat.addEvent(`第 ${round} 回合 · 对方 ${info.notation}`);       // the divider of the 回看 log (§4.28.6)
         if (info.caption.length) stage.caption(info.caption);
         hud.setRound(info.view.round);
@@ -1310,6 +1461,7 @@ export function createStage(app, deps) {
         dropHeld();
         chat.endAll('aborted');
         closeLines(false);
+        retireLinks();
         clearBubble();
         endTrial();
         cancelYours();
@@ -1627,7 +1779,13 @@ export function createStage(app, deps) {
       flushCues();                                           // board.cancelAnimations(), fx.clear(), then every waiting cue's final state
       audio.cancelScheduled();
       speech.cancel();
-      chat.endAll('aborted');
+      // Every line that is still coming in is cut to its whole sentences, but the one about the trial on the board: what
+      // follows in this run of calls (a retract, a commit) marks it 已换一步 / 已落子 and keeps its text as it stands
+      // (SPEC 7.7, 12.7). When nothing takes it up, it is cut like the others once the run is over.
+      const kept = trial && bubbleLine && bubbleLine.state !== 'ended' && bubbleLine.trial === trial.seq && bubbleLine.kind !== 'system'
+        ? bubbleLine.chatId : undefined;
+      chat.endAll('aborted', kept);
+      if (kept !== undefined) win.queueMicrotask(() => chat.end(kept, { reason: 'aborted', source: 'none' }));
       closeLines(true);
       if (bubbleLine && bubbleLine.state !== 'ended') {
         bubbleLine.state = 'ended';
@@ -1660,12 +1818,20 @@ export function createStage(app, deps) {
   // =========================================================================================================================
 
   app.addEventListener('hud:action', (event) => {
-    switch (detailOf(event).action) {
+    const detail = detailOf(event);
+    const fromCard = detail.card === true;                   // a button of the game-over card (the hud has closed the card)
+    switch (detail.action) {
       case 'undo': handlers.undo?.(); break;
       case 'hint': handlers.hint?.(); break;
       case 'confirm': handlers.confirm?.(); break;
       case 'retract': handlers.retract?.(); break;
-      case 'new-game': handlers.newGame?.(); break;
+      case 'new-game':
+        // The game is over and its card is still to come: the hud shows 再来一局 and 新对局 as not available meanwhile
+        // (holdNewGame), and whatever still sends the action is not taken. The card brings its own 再来一局.
+        if (cardDue) break;
+        handlers.newGame?.();
+        if (fromCard) guardCardTaps();                       // the second tap of a double tap reaches nothing under the card
+        break;
       case 'resign': handlers.resign?.(); break;
       case 'retry-opponent': handlers.retryOpponent?.(); break;
       case 'retry-engine': handlers.retryEngine?.(); break;
@@ -1674,6 +1840,7 @@ export function createStage(app, deps) {
       case 'mute': toggleMute(); break;
       case 'review': {                                       // "show me the board and the last move again"
         if (overCard) overCard.close();
+        if (fromCard) guardCardTaps();                       // 回看棋局: what the card covered takes no tap while it leaves
         if (!chipsShown) syncChips();                        // the card is going: the chips it covered come out
         const last = view ? view.lastMove : null;
         if (last && !replaying) {
@@ -1813,6 +1980,13 @@ export function createStage(app, deps) {
   };
   win.addEventListener('pointerdown', onGesture, true);
   win.addEventListener('keydown', onGesture, true);
+  // A burst of taps is not over while taps keep coming: a tap that arrives while the board is held after the start
+  // overlay or during a deal holds it TAP_BURST_MS longer, so the third tap of a slow triple tap does not land either.
+  // The burst has an end (burstEndsAt): taps that keep coming after it are meant, and the first of them is taken.
+  win.addEventListener('pointerdown', () => {
+    if (startLeaving) holdBoard(now() + TAP_BURST_MS);
+    else if (now() < boardFreeAt) holdBoard(Math.min(now() + TAP_BURST_MS, burstEndsAt));
+  }, true);
   // A finger's pointerdown is not a user activation (for touch the activating events are pointerup and touchend), so
   // the context is asked again when the finger lifts; unlock() is idempotent.
   win.addEventListener('pointerup', () => { void audio.unlock(); }, true);

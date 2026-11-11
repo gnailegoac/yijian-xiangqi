@@ -19,7 +19,7 @@ import {
   AREA, FOCUS, PIECE, QUALITY_NOTE, SIZE, TAG, balanceWords, effectClause, evalWords, gainWords, lineText, lossWords, matWords,
   motifTerm, netClause, pieceName, takeawayClause, threatClause,
 } from '../src/coach/lexicon.js';
-import { composeLocal } from '../src/coach/fallback.js';
+import { composeLocal, localLine } from '../src/coach/fallback.js';
 
 /** A constant. Section markers are ◆, never 【】 (reserved for moves). */
 export const SYSTEM_PROMPT = `你是诸葛亮，字孔明，在中国象棋游戏《弈间》里做军师。这里的你年轻、眼睛亮、脑子快，手摇白羽扇，头戴纶巾。和你说话的人是「小主公」——一位9到12岁、已经会下象棋的孩子。小主公执棋，你出主意；最后拿主意的永远是小主公。棋盘对面执棋的是司马懿，你敬他三分，可以带一点对手戏，但不贬低他。
@@ -115,6 +115,11 @@ const CIRCLED = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨'];
 /** Said of a side that has nothing left but its king (the material string of that side is empty). */
 const NO_PIECES = '无';
 
+/** A moment `{s: 'opp', tag: 'punished'}` in 本局回顾: the rival's move is the subject, and it caught the child's slip (CONTRACT-NOTES 133). */
+const PUNISHED_BY_RIVAL = '抓住了我方的疏漏';
+/** Said of a threat that does not stand yet (`Threat.prep`, CONTRACT-NOTES 131 b): the attack comes after the move. */
+const NOT_YET = '这个威胁现在还没有形成，要等这步走完才有';
+
 /** Appended after an event that got no reply; the next event's text then continues in the same user message. */
 const NOTE_SILENT = '〔注〕这一条军师没有出声，不必补答。';
 
@@ -135,16 +140,28 @@ const DIRECTIVE = {
   oppPunishes: '平静地点明这是上一步留下的空子，不责备。',
   oppOverlooked: '可以提一句对方刚才漏掉了什么，让小主公松一口气。',
   oppChance: '提醒小主公那一带有机会，让小主公自己找。',
+  oppChancePlain: '提醒小主公眼下有机会，让小主公自己找。',
   oppBack: '先用半句话接上悔棋或回到棋局这件事。',
   hint1: '只提一个帮小主公找方向的问题。不点名棋子和位置，不说着法。20字以内。',
   hint2: '点出该动哪个子、看哪一块。不说具体着法。20字以内。',
   hint3: '说出这步棋，并用一句话讲清为什么。36字以内。',
   tryFine: '点评这步试走：前六个字先说好不好，再用一个事实说清好在哪。24字以内。',
+  // A good verdict with nothing to praise (CONTRACT-NOTES 147): the best there was, yet its own line still costs material,
+  // or the child stays far behind and it wins nothing. 「说清好在哪」 would invite praise for a move that loses a piece.
+  tryGrim: '点评这步试走：局面吃紧，这已经是眼下最顽强的一步，照实这样说；不夸它漂亮，也不说它稳。24字以内。',
+  // the same about a move judged 稳健: it is not the best one, so 最顽强 is not asked for either (CONTRACT-NOTES 148)
+  tryGrimGood: '点评这步试走：局面吃紧，这步没有走错，照实这样说；不夸它漂亮，不说它稳，也不说它最好。24字以内。',
+  // The two where the child is not in trouble after the move (走后形势 is 均势, 占优 or 胜势): the move's line gives material
+  // back, and 局面吃紧 would be untrue next to 走后形势：胜势 (CONTRACT-NOTES 150). For 好棋 / 妙手, and for 稳健.
+  tryCostly: '点评这步试走：这已经是眼下最好的一步，但后面要丢子（见代价），照实这样说；不夸它漂亮，也不说它稳。24字以内。',
+  tryCostlyGood: '点评这步试走：这步没有走错，但后面要丢子（见代价），照实这样说；不夸它漂亮，也不说它稳。24字以内。',
   tryOk: '点评这步试走：说清它做到了什么；有「更好的方向」就提半句那一带还有更积极的走法，不说着法。24字以内。',
   tryBad: '点评这步试走：说清差在哪一点，不说着法。24字以内。',
   tryHeld: '这是危险着。只提一个指向明确的问题，引导小主公自己发现毛病；不说对方的反击着法，不说更好的走法。20字以内。',
   free: '回答小主公这句话，最多三句，70字以内。与这盘棋无关就用一句话带回棋局。',
-  over: '先用半句回应胜负（赢了一起高兴，输了先安慰），再讲「要点」里的那一条，引用本局那一步，这一句不超过30字；有「下一盘小目标」就用它收尾。一共80字以内。',
+  // The card shows the small goal of the next game in a row of its own, right under this reply (CONTRACT-NOTES 138): the
+  // reply does not say it a second time. A habit takeaway is worded as that goal, so of it only the quoted move is told.
+  over: '先用半句回应胜负（赢了一起高兴，输了先安慰），再讲「要点」里的那一条，引用本局那一步，这一句不超过30字。「下一盘小目标」界面已经单独显示给小主公了，回复里不要再说一遍；要点就是这个小目标时，只讲它引用的那一步。一共80字以内。',
 };
 
 /** @type {Record<Exclude<AskCode, 'free'>, string>} */
@@ -172,6 +189,9 @@ const WHY_LIMIT = '最多三句，90字以内。';
 /** @param {Color} color @returns {Color} */
 const otherColor = (color) => (color === 'red' ? 'black' : 'red');
 
+/** @param {string} area @returns {boolean} the child's own palace or back rows */
+const ownGround = (area) => area.startsWith('my_');
+
 /** @param {Effect[]} list @param {Color} me @returns {string} the clauses of a list of effects, joined by ； */
 const clauses = (list, me) => list.map((effect) => effectClause(effect, me, 'brief')).join('；');
 
@@ -189,7 +209,9 @@ const changesHands = (net) => net.gain.length > 0 || net.lose.length > 0;
 function tryLines(packet, me, label) {
   let head = `${label}评定：${CAT_LABEL[packet.cat]}（${lossWords(packet.loss)}）。`;
   if (packet.held) head += '危险着：是。';
-  if (packet.only) head += '这是唯一不吃亏的走法。';
+  // 不吃亏 is not said of a move whose own line leaves the child two points or more down (the 代价 line says so): it is
+  // the best there was, not a way out without loss (CONTRACT-NOTES 147)
+  if (packet.only && !(packet.cost && packet.cost.cp <= -200)) head += '这是唯一不吃亏的走法。';
   if (packet.sac) head += '这是一步算得清的弃子。';
   if (packet.self) head += '这步是小主公自己想出来的。';
   const lines = [head, `走后形势：${evalWords(packet.eval)}。`];
@@ -256,7 +278,9 @@ function overLines(over, me) {
     const term = over.proud.k ? motifTerm(over.proud.k) : '';
     lines.push(`最得意的一步：第${over.proud.n}回合【${over.proud.move}】${term ? `（${term}）` : ''}。`);
   }
-  if (over.goal) lines.push(`下一盘小目标：${HABIT_FIX[over.goal]}。`);
+  // the goal follows a dash, as on the game-over card and in the local line (CONTRACT-NOTES 133): the model copies this line,
+  // and a goal may hold a colon of its own
+  if (over.goal) lines.push(`下一盘小目标——${HABIT_FIX[over.goal]}。`);
   if (over.kept === true) lines.push('上盘约定的小目标：做到了，要夸这一点。');
   const rank = over.rank ? RANK_NAMES[over.rank.to - 1] : undefined;
   if (rank) lines.push(`兵法境界升到了「${rank}」。`);
@@ -313,14 +337,16 @@ function hintLines(hint, me) {
  * The 〔军情〕 block of a thread: one line per row of the table of contract section 8.4; a row is omitted when its data
  * is empty. A negative sentence (no threat, no chance) is printed only when its `known` flag is true.
  * @param {TurnBrief} turn
+ * @param {boolean} [over] the thread of a finished game (its first event is `over`): nobody is to move any more, so the
+ *        position line says neither 轮到小主公走 nor that a check must be answered (CONTRACT-NOTES 138)
  * @returns {string}
  */
-export function renderTurn(turn) {
+export function renderTurn(turn, over = false) {
   const { me } = turn;
   const lines = ['〔军情〕'];
 
-  let position = `局面：第${Math.floor(turn.ply / 2) + 1}回合，小主公执${COLOR_WORD[me]}，轮到小主公走。${PHASE_WORD[turn.phase]}阶段。`;
-  if (turn.check) position += `小主公正被将军，必须应将，共有${turn.n}种应法。`;
+  let position = `局面：第${Math.floor(turn.ply / 2) + 1}回合，小主公执${COLOR_WORD[me]}，${over ? '' : '轮到小主公走。'}${PHASE_WORD[turn.phase]}阶段。`;
+  if (turn.check && !over) position += `小主公正被将军，必须应将，共有${turn.n}种应法。`;
   lines.push(position);
 
   const mine = matWords(turn.mat.me, me) || NO_PIECES;
@@ -333,7 +359,9 @@ export function renderTurn(turn) {
   if (turn.moments.length > 0) {
     const items = turn.moments.map((m) => {
       const term = m.k ? motifTerm(m.k) : '';
-      return `第${m.n}回合${m.s === 'me' ? '我方' : '对方'}【${m.move}】${TAG[m.tag]}${term ? `（${term}）` : ''}`;
+      // a punished moment of the rival is his move catching the child's slip: 对方【M】被对方抓住了疏漏 would have the wrong subject
+      const tag = m.tag === 'punished' && m.s === 'opp' ? PUNISHED_BY_RIVAL : TAG[m.tag];
+      return `第${m.n}回合${m.s === 'me' ? '我方' : '对方'}【${m.move}】${tag}${term ? `（${term}）` : ''}`;
     });
     lines.push(`本局回顾：${items.join('；')}。`);
   }
@@ -362,7 +390,13 @@ export function renderTurn(turn) {
 
   if (turn.threats.length > 0) {
     const items = turn.threats.map((threat, k) => {
-      let item = `${CIRCLED[k] ?? ''}${threatClause(threat, me, 'brief')}，着法是对方【${threat.move}】`;
+      // a threat that does not stand yet (`prep`): the move comes first, and the model is told that the attack only follows
+      // it. An attack is told as a capture that then pays: the piece may aim at its target already, and the move only makes
+      // the capture worth it (瞄着 / 捉 would then describe the board as it is).
+      const pays = threat.prep && (threat.k === 'attack' || threat.k === 'cannon_mount') && threat.on;
+      const clause = pays ? `${pieceName(threat.by, me, 'brief')}就能吃掉${pieceName(pays, me, 'brief')}` : threatClause(threat, me, 'brief');
+      let item = threat.prep ? `${CIRCLED[k] ?? ''}对方想走【${threat.move}】，走完之后${clause}（${NOT_YET}）`
+        : `${CIRCLED[k] ?? ''}${clause}，着法是对方【${threat.move}】`;
       // what the threat takes; a threat in which nothing changes hands (a mate, a check) has no such clause
       if (changesHands(threat.net)) item += `，得手后${netClause(threat.net, me, 'brief')}`;
       return item;
@@ -374,7 +408,10 @@ export function renderTurn(turn) {
 
   if (turn.chance) {
     const { chance } = turn;
-    lines.push(`机会：对方阵中有破绽，在${AREA[chance.area]}，和「${motifTerm(chance.theme)}」有关，分量约${SIZE[chance.size]}。具体着法没有提供。`);
+    // the area is the square the child's move lands on: in the child's own palace or back rows it is not named (对方阵中有
+    // 破绽，在己方九宫 would have the model tell the child that their own palace holds a chance; CONTRACT-NOTES 138)
+    const where = ownGround(chance.area) ? '' : `在${AREA[chance.area]}，`;
+    lines.push(`机会：对方阵中有破绽，${where}和「${motifTerm(chance.theme)}」有关，分量约${SIZE[chance.size]}。具体着法没有提供。`);
   } else if (turn.known.chance) {
     lines.push('机会：没有现成的便宜可占。');
   }
@@ -439,7 +476,7 @@ function directiveFor(event, turn) {
         : turn.threats.length > 0 ? DIRECTIVE.oppThreat
         : turn.opp?.punishes ? DIRECTIVE.oppPunishes
         : turn.opp?.overlooked ? DIRECTIVE.oppOverlooked
-        : turn.chance ? DIRECTIVE.oppChance
+        : turn.chance ? (ownGround(turn.chance.area) ? DIRECTIVE.oppChancePlain : DIRECTIVE.oppChance)
         : turn.back ? DIRECTIVE.oppBack
         : '';
       return DIRECTIVE.opp + extra;
@@ -450,7 +487,16 @@ function directiveFor(event, turn) {
       const { held, cat } = event.try;
       if (held) return DIRECTIVE.tryHeld;
       if (cat === 'ok') return DIRECTIVE.tryOk;
-      return cat === 'mistake' || cat === 'blunder' ? DIRECTIVE.tryBad : DIRECTIVE.tryFine;
+      if (cat === 'mistake' || cat === 'blunder') return DIRECTIVE.tryBad;
+      // One rule for both narrators: when the local narrator would speak of this trial from its row `try.grim` (a good
+      // verdict with nothing to praise), the model is not asked what is good about the move either.
+      if (localLine(turn, [event], []).row !== 'try.grim') return DIRECTIVE.tryFine;
+      // The words follow the evaluation after the move, as the local narrator's do (fallback.js, inTrouble): 局面吃紧 only
+      // where 走后形势 reads 落了下风 or 很危险, or the child is being mated.
+      const { b, mate } = event.try.eval;
+      const trouble = b === 'worse' || b === 'lost' || (mate ?? 0) < 0;
+      if (cat === 'good') return trouble ? DIRECTIVE.tryGrimGood : DIRECTIVE.tryCostlyGood;
+      return trouble ? DIRECTIVE.tryGrim : DIRECTIVE.tryCostly;
     }
     case 'ask':
       if (event.ask === 'free') return event.say !== undefined ? DIRECTIVE.free : '';
@@ -558,7 +604,7 @@ export function buildMessages(req, legs) {
   /** @type {ReturnType<typeof buildMessages>} */
   const messages = [{ role: 'system', content: SYSTEM_PROMPT }];
 
-  let pending = renderTurn(turn);
+  let pending = renderTurn(turn, events[0]?.kind === 'over');
   events.forEach((event, k) => {
     pending += (pending ? '\n\n' : '') + renderEvent(event, turn);
     if (k === events.length - 1) return;

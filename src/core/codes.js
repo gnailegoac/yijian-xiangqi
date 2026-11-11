@@ -139,8 +139,8 @@ export const HABIT_CODES = Object.freeze(['hang_piece', 'miss_threat', 'greedy',
 export const HABIT_WORD = Object.freeze({ hang_piece: '走完没检查自己的子有没有保护', miss_threat: '没先看对方上一步的威胁', greedy: '吃子前没看对方能不能吃回',
                                           miss_capture: '能白吃的子没看见', bad_trade: '兑子时算亏了', miss_mate: '有杀棋没看出来' });
 /** @type {Readonly<Record<HabitCode, string>>} */
-export const HABIT_FIX = Object.freeze({ hang_piece: '走完先看一眼，这个子有没有人保护', miss_threat: '对方走完，先问自己：它想干什么', greedy: '吃子之前，先看它有没有保镖',
-                                         miss_capture: '每一步先扫一遍，有没有白吃的子', bad_trade: '兑子之前，数一数谁亏谁赚', miss_mate: '对方的将没路走时，多算一步' });
+export const HABIT_FIX = Object.freeze({ hang_piece: '走完先看一眼，这个子有没有人保护', miss_threat: '对方走完，先问自己：他想干什么', greedy: '吃子之前，先看它有没有保镖',
+                                         miss_capture: '每一步先扫一遍，有没有白吃的子', bad_trade: '兑子之前，数一数谁亏谁赚', miss_mate: '对方的老将没路走时，多算一步' });
 /**
  * danger of the first try -> habit; `hangs_moved_piece` maps to 'greedy' when the tried move was a capture.
  * @type {Readonly<Record<DangerCode, HabitCode|null>>}

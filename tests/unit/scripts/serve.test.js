@@ -622,7 +622,7 @@ test('a throwing handler gives 500 and the server keeps serving', async (t) => {
       assert.ok(!res.body.toString('utf8').includes('boom'), 'the error text stays on the server');
     }
     assert.equal(logged.mock.callCount(), 3);
-    assert.deepEqual(logged.mock.calls[0].arguments, ['[api]', 'boom from the fake handler']);
+    assert.deepEqual(logged.mock.calls[0].arguments, ['[api]', 'Error'], 'the log line names the class of the error, never its message');
     const page = await request(port, { path: '/index.html' });
     assert.equal(page.status, 200);
     assert.equal(page.body.toString('utf8'), FIXTURE['index.html']);
@@ -641,6 +641,31 @@ test('a throwing handler gives 500 and the server keeps serving', async (t) => {
       assert.deepEqual(JSON.parse(res.body.toString('utf8')), { error: { code: 'internal' } });
       assert.equal((await request(port, { path: '/index.html' })).status, 200);
     });
+  }
+});
+
+test('the [api] log line carries the class name of an error and nothing of its message', async (t) => {
+  // What an SDK error looks like when a gateway echoes the request: the bearer token is in the message.
+  const TOKEN = 'made-up-bearer-token-0123456789';
+  class AuthenticationError extends Error {}
+  const thrown = [
+    [new AuthenticationError(`401 Incorrect API key provided: Bearer ${TOKEN}`), 'AuthenticationError'],
+    [Object.assign(new TypeError(`fetch failed for a request with the header authorization: Bearer ${TOKEN}`), { code: TOKEN }), 'TypeError'],
+    [`a thrown string with ${TOKEN}`, 'String'],
+    [{ message: `a plain object with ${TOKEN}`, name: TOKEN }, 'Object'],
+    [Object.assign(Object.create(null), { message: TOKEN }), 'Error'],                    // no constructor at all
+    [Object.assign(new Error(TOKEN), { constructor: { name: `Bearer ${TOKEN}` } }), 'Error'],      // a class "name" that is no identifier
+    [null, 'Error'],
+  ];
+  const logged = t.mock.method(console, 'error', () => {});
+  for (const [error, name] of thrown) {
+    logged.mock.resetCalls();
+    await withServer({ handler: async () => { throw error; } }, async (port) => {
+      const res = await request(port, { path: '/api/coach', method: 'POST', body: '{}' });
+      assert.equal(res.status, 500);
+      assert.ok(!res.body.toString('utf8').includes(TOKEN));
+    });
+    assert.deepEqual(logged.mock.calls.map((call) => call.arguments), [['[api]', name]]);
   }
 });
 
@@ -721,6 +746,116 @@ test('a body over 64 KB is 413', async (t) => {
     assert.equal(coach.calls.length, 1, 'the handler never saw the refused upload');
 
     assert.equal((await request(port, { path: '/index.html' })).status, 200);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// the Host allowlist of /api/*
+// ---------------------------------------------------------------------------------------------------------------
+
+test('/api answers only under a Host that names this machine; a rebinding name is 403 before the handler runs, static files are not affected', async (t) => {
+  const logged = t.mock.method(console, 'error', () => {});
+  const own = os.hostname();
+  const env = { COACH_ALLOWED_HOSTS: ' chess.home.example , Other.Example:8080,203.0.113.7,[2001:db8::7]' };
+  await withServer({ env }, async (port, coach) => {
+    const api = (host, method = 'GET') => request(port, { path: '/api/empty', method, headers: { Host: host } });
+
+    const allowed = [
+      `127.0.0.1:${port}`, '127.0.0.1', '127.8.9.10:5173', `localhost:${port}`, 'localhost', 'LOCALHOST:5173', 'localhost.:5173',
+      `[::1]:${port}`, '[::1]', '[0:0:0:0:0:0:0:1]:5173',
+      // the iPad on the home network opens the PC's LAN address
+      '192.168.1.50:5173', '192.168.0.2', '10.0.0.7:5173', '10.255.255.254', '172.16.0.9:5173', '172.31.255.255', '169.254.10.20:5173',
+      '[fd12:3456:789a::1]:5173', '[fc00::1]', '[fe80::1c2d:3e4f:5a6b:7c8d]:5173', '[::ffff:192.168.1.50]:5173',
+      // the machine's own name, in any letter case, and its mDNS form
+      own, `${own}:${port}`, own.toUpperCase(), `${own.toLowerCase()}:5173`,
+      ...(own.includes('.') ? [] : [`${own}.local`, `${own}.local:5173`, `${own.toUpperCase()}.LOCAL`]),
+      // COACH_ALLOWED_HOSTS: exact names, a name with its port, an address literal
+      'chess.home.example', 'chess.home.example:5173', 'CHESS.Home.Example', 'other.example:8080', '203.0.113.7:5173', '[2001:db8::7]', '[2001:DB8::7]:5173',
+    ];
+    for (const host of allowed) {
+      const before = coach.calls.length;
+      const res = await api(host);
+      assert.equal(res.status, 204, `${host} is answered`);
+      assert.equal(res.headers['x-fake'], 'empty', host);
+      assert.equal(coach.calls.length, before + 1, `${host} reaches the handler`);
+      assert.equal(coach.calls[before].headers.host, host, 'the Host header is passed on unchanged');
+    }
+    assert.equal(logged.mock.callCount(), 0, 'nothing is logged for an allowed Host');
+
+    const refused = [
+      'evil.example', `evil.example:${port}`, 'attacker.invalid:5173', 'rebind.127.0.0.1.attacker.invalid',
+      // names that only look like this machine
+      'localhost.evil.example', '127.0.0.1.evil.example', '192.168.1.50.nip.io', 'xlocalhost', 'localhost.localdomain',
+      `${own}.evil.example`, `x${own}`, `${own}.local.evil.example`, 'chess.home.example.evil.example', 'xchess.home.example',
+      // a listed name with another port than the one it was listed with, an address next to a listed one
+      'other.example', 'other.example:9090', '203.0.113.8', '[2001:db8::8]',
+      // public address literals
+      '8.8.8.8', '8.8.8.8:5173', '11.0.0.1', '172.15.255.255', '172.32.0.1', '192.167.1.1', '192.169.1.1', '169.253.1.1', '169.255.0.1', '126.0.0.1', '128.0.0.1',
+      '[2001:db8::1]', '[2001:db8::1]:5173', '[fec0::1]', '[::ffff:8.8.8.8]', '[::2]',
+      // not a host at all
+      '127.0.0.1:999999', 'evil.example:80@127.0.0.1', '127.0.0.1@evil.example', 'http://127.0.0.1', '127.0.0.1/evil', '[::1', '::1', '127.0.0.1 evil.example', 'a,b',
+    ];
+    for (const method of ['GET', 'POST', 'OPTIONS']) {
+      for (const host of refused) {
+        const before = coach.calls.length;
+        const res = await api(host, method);
+        assert.equal(res.status, 403, `${method} with Host ${host}`);
+        assert.equal(res.headers['content-type'], 'application/json', host);
+        assert.deepEqual(JSON.parse(res.body.toString('utf8')), { error: { code: 'origin' } }, host);
+        assert.equal(coach.calls.length, before, `${host} never reaches the handler`);
+      }
+    }
+    // a streamed coach POST as a rebinding page would send it: Origin and Host agree, and both carry the attacker's name
+    const before = coach.calls.length;
+    const rebound = await request(port, {
+      path: '/api/coach', method: 'POST', body: '{"v":1}',
+      headers: { Host: `evil.example:${port}`, Origin: `http://evil.example:${port}`, 'Content-Type': 'application/json' },
+    });
+    assert.equal(rebound.status, 403);
+    assert.equal(coach.calls.length, before);
+
+    // an empty Host header, and none at all (HTTP/1.0)
+    const bare = (head) => new Promise((resolve, reject) => {
+      const parts = [];
+      const socket = net.connect(port, '127.0.0.1', () => socket.write(head, 'latin1'));
+      socket.setTimeout(5000, () => socket.destroy());        // only bounds a failing test
+      socket.on('data', (part) => parts.push(part));
+      socket.on('error', reject);
+      socket.on('close', () => resolve(Buffer.concat(parts).toString('latin1')));
+    });
+    assert.match(await bare('GET /api/empty HTTP/1.1\r\nHost:\r\nConnection: close\r\n\r\n'), /^HTTP\/1\.1 403 /);
+    assert.match(await bare('GET /api/empty HTTP/1.0\r\n\r\n'), /^HTTP\/1\.1 403 /);
+    assert.match(await bare('GET /index.html HTTP/1.0\r\n\r\n'), /^HTTP\/1\.1 200 /);
+    assert.equal(coach.calls.length, before);
+
+    // the page itself is served under any name: only the coach is restricted
+    for (const path of ['/index.html', '/src/app.js', '/config.json', '/icons/icon-192.png']) {
+      assert.equal((await request(port, { path, headers: { Host: 'evil.example' } })).status, 200, path);
+    }
+    assert.equal((await request(port, { path: '/.env.local', headers: { Host: 'evil.example' } })).status, 404);
+
+    // refused names are logged so that the owner can find out why the coach is off: one line each, the first three only
+    assert.equal(logged.mock.callCount(), 3);
+    const lines = logged.mock.calls.map((call) => call.arguments.join(' '));
+    assert.match(lines[0], /^\[api\] 403: .*"evil\.example".*COACH_ALLOWED_HOSTS/);
+    assert.equal(new Set(lines).size, 3);
+  });
+
+  // without COACH_ALLOWED_HOSTS the listed names are strangers too, and the handler of an `off` server is as unreachable as any
+  await withServer({ env: {} }, async (port, coach) => {
+    for (const host of ['chess.home.example', 'other.example:8080', '203.0.113.7', '[2001:db8::7]']) {
+      assert.equal((await request(port, { path: '/api/empty', headers: { Host: host } })).status, 403, host);
+    }
+    assert.equal(coach.calls.length, 0);
+    assert.equal((await request(port, { path: '/api/empty', headers: { Host: '192.168.1.50:5173' } })).status, 204);
+    // every LAN address the banner would print is answered (when the network is a private one, as at home)
+    for (const list of Object.values(os.networkInterfaces())) {
+      for (const info of list ?? []) {
+        if (info.family !== 'IPv4' || info.internal) continue;
+        const isHome = /^(?:10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(info.address);
+        assert.equal((await request(port, { path: '/api/empty', headers: { Host: `${info.address}:${port}` } })).status, isHome ? 204 : 403, info.address);
+      }
+    }
   });
 });
 
@@ -817,6 +952,42 @@ test('the CLI loads .env and .env.local (.env.local wins, the real environment w
   }
 });
 
+test('the CLI reads a .env.local that starts with a byte order mark, and says so when the file is UTF-16 (CONTRACT-NOTES 150)', async () => {
+  // "UTF-8 with BOM" and a variable on the first line: process.loadEnvFile kept the mark as part of the name, the
+  // variable never reached the handler and the banner said off
+  const marked = await cliProject('cli-env-bom', ECHO_HANDLER, {
+    '.env.local': `\uFEFFCOACH_BASE_URL=https://gateway.invalid/v1\r\nCOACH_API_KEY=${FAKE_KEY}\r\n`,
+    '.env': 'COACH_BASE_URL=https://other.invalid/v1\nCOACH_MODEL=from-env\n',
+  });
+  const cli = await runCli(marked, [], { env: { COACH_MODEL: 'from-the-shell' } });
+  try {
+    assert.deepEqual((await getJson(cli.port, '/api/echo')).env, {
+      COACH_BASE_URL: 'https://gateway.invalid/v1',        // .env.local wins over .env, with or without the mark
+      COACH_API_KEY: FAKE_KEY,
+      COACH_MODEL: 'from-the-shell',                       // the real environment wins over both files
+    });
+    assert.equal((await getJson(cli.port, '/config.json')).coach.mode, 'live');
+  } finally {
+    await cli.stop();
+  }
+  assert.match(cli.out.stdout, /军师模式：live/);
+  assert.ok(!cli.out.stderr.includes('[env]'), cli.out.stderr);
+
+  // UTF-16 LE (Windows PowerShell 5.1 writes it with `>`): the file cannot be used, and one line says why
+  const wide = await cliProject('cli-env-utf16', ECHO_HANDLER, {
+    '.env.local': Buffer.from(`\uFEFFCOACH_BASE_URL=https://gateway.invalid/v1\r\nCOACH_API_KEY=${FAKE_KEY}\r\n`, 'utf16le'),
+  });
+  const off = await runCli(wide);
+  try {
+    assert.deepEqual((await getJson(off.port, '/api/echo')).env, {});
+  } finally {
+    await off.stop();
+  }
+  assert.match(off.out.stderr, /\[env\] \.env\.local is not UTF-8 text/);
+  assert.match(off.out.stdout, /军师模式：off/);
+  assert.ok(!(off.out.stdout + off.out.stderr).includes(FAKE_KEY));
+});
+
 test('the CLI: --mock sets COACH_MOCK=1 for the handler; without key or mock the mode is off (no_key) and the handler still answers', async () => {
   const dir = await cliProject('cli-mock', ECHO_HANDLER);
   const mock = await runCli(dir, ['--mock']);
@@ -873,6 +1044,36 @@ test('the CLI keeps serving the page when the handler cannot be loaded or isConf
   } finally {
     await cli.stop();
   }
+});
+
+test('the CLI logs an error of the handler and a rejection nobody handled by their class name only, and keeps serving', async () => {
+  // What an SDK error looks like when a gateway echoes the request: its message carries the bearer token.
+  const leaky = `
+class GatewayAuthError extends Error {}
+export function isConfigured() { return true; }
+export async function handleRequest(request) {
+  const error = new GatewayAuthError('401 Incorrect API key provided: Bearer ' + process.env.COACH_API_KEY);
+  const path = new URL(request.url).pathname;
+  if (path.endsWith('/reject')) { Promise.reject(error); return new Response('answered'); }
+  if (path.endsWith('/throw')) throw error;
+  return new Response('ok');
+}
+`;
+  const cli = await runCli(await cliProject('cli-leaky', leaky), [], { env: { COACH_API_KEY: FAKE_KEY, COACH_BASE_URL: 'https://gateway.invalid/v1' } });
+  try {
+    assert.equal((await request(cli.port, { path: '/api/reject' })).body.toString('utf8'), 'answered');
+    await until(() => cli.out.stderr.includes('[unhandledRejection]'), 'the line of the rejection');
+    const thrown = await request(cli.port, { path: '/api/throw' });
+    assert.equal(thrown.status, 500);
+    assert.ok(!thrown.body.toString('utf8').includes(FAKE_KEY));
+    await until(() => cli.out.stderr.includes('[api]'), 'the line of the error');
+    assert.equal((await request(cli.port, { path: '/index.html' })).status, 200, 'the server lives on');
+    assert.equal((await request(cli.port, { path: '/api/fine' })).body.toString('utf8'), 'ok');
+  } finally {
+    await cli.stop();
+  }
+  assert.deepEqual(cli.out.stderr.trim().split(/\r?\n/), ['[unhandledRejection] GatewayAuthError', '[api] GatewayAuthError']);
+  assert.ok(!(cli.out.stdout + cli.out.stderr).includes(FAKE_KEY), 'the token is in no log line');
 });
 
 test('the banner of a server that is not on loopback lists every LAN URL, the coach mode and the iPad advice', async () => {

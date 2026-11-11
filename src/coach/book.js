@@ -17,6 +17,9 @@ import { moveCode, normalizeNotation, parseNotation } from '../core/notation.js'
  * @property {(notation:string) => MoveLink|null} lookup
  * @property {(notation:string, tryMove?:MoveRef) => MoveLink|null} resolveLoose
  * @property {() => number} size
+ * @property {(notations:string[]) => void} [past]
+ *           tells the book notations that are history (moves of earlier positions, whose squares are not known): `resolveLoose`
+ *           answers null for them. Every book of `createMoveBook` has it; a stand-in for a book need not.
  */
 
 const HANZI_NUMERALS = '一二三四五六七八九';
@@ -92,10 +95,18 @@ function writerOf(text) {
  *   position and of the rival in the position after the active try. The active try is `tryMove` when given, else the move most
  *   recently registered with `src: 'try'` (the markup stream passes none). One match is the answer. When both positions offer a
  *   match the numerals decide (汉字 are red's, digits are black's, as in the notation itself), and a text that is ambiguous for
- *   the side its numerals name is not resolved through the other side. A move of the child resolves to its playable entry when
+ *   the side its numerals name is not resolved through the other side. A text written in the rival's numerals that fits only a
+ *   move of the child is that move only when the book already holds it as playable (a sloppy spelling of a move that was
+ *   offered); otherwise it names a move of the rival that is not a move of this position, and is not resolved: the parser
+ *   reads both numeral scripts for both sides, so 【马8进7】 said of the rival would be drawn as the child's 马八进七
+ *   (CONTRACT-NOTES 150). A move of the child resolves to its playable entry when
  *   the book holds one, otherwise to a link built on the spot with `src: 'tool'`, playable, no predecessors. A rival's answer to
  *   the try resolves to a link with `src: 'reply'` and no predecessors: like the moves of a reply line it starts from the
  *   position after the try. A link built on the spot is not added to the book (it would go stale with the next try).
+ * - `past(notations)` tells the book notations that are history: moves of earlier positions (the moments of a brief), for
+ *   which no squares are known. `resolveLoose` answers null for them, whatever move of the present position fits the same
+ *   text, so they show as plain text and count as ungrounded. A notation that was registered with `add` is still found by
+ *   `lookup`, which is asked first.
  * - `size()` is the number of distinct notations the book can look up.
  *
  * @param {{board:Board, turn:Color}} base  the position the child faces (before any tentative move)
@@ -110,6 +121,8 @@ export function createMoveBook(base) {
   let packets = 0;
   /** @type {MoveRef|null} the move most recently registered as the child's try */
   let lastTry = null;
+  /** Normalised notations that are history: never resolved loosely. @type {Set<string>} */
+  const history = new Set();
   /** @type {string|undefined} */
   let baseKey;
 
@@ -204,7 +217,7 @@ export function createMoveBook(base) {
   /** @type {MoveBook['resolveLoose']} */
   function resolveLoose(notation, tryMove) {
     const text = normalizeNotation(notation);
-    if (text === '') return null;
+    if (text === '' || history.has(text)) return null;
     const child = base.turn;
     const rival = opposite(child);
 
@@ -227,7 +240,8 @@ export function createMoveBook(base) {
       if (writer === child) mine = ownHit;
       else if (writer === rival) theirs = answerHit;
     } else if (ownHit) {
-      if (!(answerAmbiguous && writer === rival)) mine = ownHit;
+      // Written in the rival's numerals, the text is the child's move only as another spelling of a move the book offers.
+      if (writer !== rival || (!answerAmbiguous && playableEntry(moveCode(ownHit)) !== null)) mine = ownHit;
     } else if (answerHit) {
       if (!(ownAmbiguous && writer === child)) theirs = answerHit;
     }
@@ -243,5 +257,13 @@ export function createMoveBook(base) {
     return null;
   }
 
-  return { base, add, lookup, resolveLoose, size: () => byNotation.size };
+  /** @type {NonNullable<MoveBook['past']>} */
+  function past(notations) {
+    for (const notation of Array.isArray(notations) ? notations : []) {
+      const text = typeof notation === 'string' ? normalizeNotation(notation) : '';
+      if (text !== '') history.add(text);
+    }
+  }
+
+  return { base, add, lookup, resolveLoose, size: () => byNotation.size, past };
 }

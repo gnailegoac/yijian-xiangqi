@@ -165,6 +165,21 @@ test('rejects: unknown key, bad enum, bad notation, 17 events, non-increasing i,
   rejects(body, 'events[1].try.does[0].by.note', 'unknown_key');
   body = fixture('opp.json'); body.turn.threats[0].on2 = { s: 'opp', t: 'P', f: 5 };          // a Threat has no on2 (section 3.6)
   rejects(body, 'turn.threats[0].on2', 'unknown_key');
+  // `prep` (CONTRACT-NOTES 131): a Threat may say that it does not stand yet. Only `true` travels; anything else is invalid.
+  body = fixture('opp.json'); body.turn.threats[0].prep = true;
+  assert.deepEqual(accepts(body).turn.threats[0], { ...fixture('opp.json').turn.threats[0], prep: true });
+  assert.deepEqual(Object.keys(accepts(body).turn.threats[0]), ['k', 'by', 'on', 'move', 'net', 'sev', 'prep']);
+  body.turn.threats[0].name = 'double_cannon';
+  assert.deepEqual(Object.keys(accepts(body).turn.threats[0]), ['k', 'by', 'on', 'move', 'net', 'sev', 'name', 'prep']);
+  assert.ok(!('prep' in accepts(fixture('opp.json')).turn.threats[0]), 'absent stays absent');
+  body = fixture('opp.json'); body.turn.threats[0].prep = false;
+  rejects(body, 'turn.threats[0].prep', 'enum');
+  for (const bad of [null, 1, 0, 'true', 'yes', [], {}]) {
+    body = fixture('opp.json'); body.turn.threats[0].prep = bad;
+    rejects(body, 'turn.threats[0].prep', 'type');
+  }
+  body = fixture('opp.json'); body.turn.opp.does[0].prep = true;                               // an effect has no such member
+  rejects(body, 'turn.opp.does[0].prep', 'unknown_key');
   body = fixture('opp.json'); body.events[0].first = true;                                    // `first` belongs to start events
   rejects(body, 'events[0].first', 'unknown_key');
   // the path of a rejection never echoes content (section 7.10): a key that is not a plain identifier is reported as `?`

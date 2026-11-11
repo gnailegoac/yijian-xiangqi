@@ -17,6 +17,49 @@
 <link rel="stylesheet" href="./styles/chat.css">
 <link rel="stylesheet" href="./styles/hud.css">
 <script type="module" src="./src/app.js"></script>
+<script>
+// The game is built by the module above. When it does not come up (a module request failed on the way, or the start
+// threw before anything was drawn), the empty board below would look like loading for ever: one line says so and
+// reloads the page. src/app.js calls window.__bootFailed for a fault before its stage exists.
+(function () {
+  var doc = document, line = null;
+  function up() {                                   // the stage has drawn its first nodes, or the game says it is ready
+    var overlays = doc.getElementById('overlays');
+    return doc.documentElement.hasAttribute('data-ready') || (overlays !== null && overlays.childElementCount > 0);
+  }
+  function tell() {
+    if (line) return;
+    if (!doc.body) { doc.addEventListener('DOMContentLoaded', tell); return; }
+    line = doc.createElement('div');
+    line.className = 'boot-fail';
+    line.setAttribute('role', 'alert');
+    var button = doc.createElement('button');
+    button.type = 'button';
+    button.className = 'boot-fail__reload';
+    button.textContent = '棋局没能打开，点这里重新加载';
+    button.addEventListener('click', function () { location.reload(); });
+    line.appendChild(button);
+    doc.body.appendChild(line);
+  }
+  window.__bootFailed = tell;
+  var entry = doc.querySelector('script[type="module"]');
+  if (entry) entry.addEventListener('error', tell);
+  // The backstop looks at what the page shows, not at the clock alone: a start that is slow but healthy has drawn the
+  // stage long before, and a page that comes up after all takes the line away again.
+  window.addEventListener('load', function () {
+    setTimeout(function () {
+      if (up()) return;
+      tell();
+      var watch = setInterval(function () {
+        if (!up()) return;
+        clearInterval(watch);
+        if (line) line.remove();
+        line = null;
+      }, 1000);
+    }, 8000);
+  });
+})();
+</script>
 </head>
 <body>
 <div id="app" class="app" data-layout="landscape" data-phase="boot" data-ply="0" data-kb="0" data-sheet="0" data-coach="local">

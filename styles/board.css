@@ -244,6 +244,16 @@ svg.bv-art, svg.bv-marks, svg.bv-over { display: block; width: 100%; height: 100
   box-shadow: 0 calc(.02 * var(--c)) calc(.05 * var(--c)) #0007, inset 0 0 0 calc(.018 * var(--c)) #fff4;
 }
 
+/* F6 on a small board: the step count of ghost play (1/2) rides on the ghost that has just moved, a pill in the colours
+   of the corner counter. The corner counter is 24 x 14 px on a phone and lay over the file labels there. */
+.piece__tag--step {
+  display: none; right: -30%; width: auto; min-width: calc(.40 * var(--c)); padding: 0 calc(.09 * var(--c));
+  border-radius: calc(.20 * var(--c)); background: var(--accent); color: var(--accent-ink);
+  font-size: calc(.26 * var(--c)); letter-spacing: -.02em; white-space: nowrap;
+}
+#app[data-layout="compact"] .piece__tag--step { display: grid; }
+#app[data-layout="compact"] .bv-counter { display: none; }
+
 /* D1: the ghost left on the origin square — a faded copy with a dashed outline */
 .piece.is-ghost { opacity: .35; filter: grayscale(.6); z-index: 0; }
 .piece.is-ghost::after {

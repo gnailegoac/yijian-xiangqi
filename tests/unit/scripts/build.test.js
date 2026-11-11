@@ -264,6 +264,22 @@ test('hashed folder exists and index.html references resolve', async () => {
   assert.ok(run.stdout.includes('abc123'), run.stdout);
 });
 
+test('the inline script of the real index.html (the line that tells a start that failed) passes the build and reaches dist/index.html', async () => {
+  // CONTRACT-NOTES 150: the page says so when its modules do not come up. The script is taken from the project's own
+  // index.html, so that the build's reference check reads the very text that ships.
+  const real = await readFile(join(dirname(BUILD), '..', 'index.html'), 'utf8');
+  const found = real.match(/<script type="module" src="\.\/src\/app\.js"><\/script>\n(<script>\n[\s\S]*?<\/script>\n)<\/head>/);
+  assert.ok(found, 'index.html has one inline classic script, after the module script');
+  const inline = found[1];
+  assert.ok(inline.includes('棋局没能打开，点这里重新加载'));
+  const dir = await project({ 'index.html': BASE['index.html'].replace('</head>', `${inline}</head>`) });
+  const run = build(dir, { BUILD_ID: 'abc123' });
+  assertBuilds(run);
+  const html = await readFile(join(run.dist, 'index.html'), 'utf8');
+  assert.ok(html.includes(inline), 'carried over byte for byte');
+  assert.ok(html.indexOf('<script type="module" src="./a/abc123/src/app.js"></script>') < html.indexOf(inline), 'still after the module script');
+});
+
 test('a <link rel="modulepreload"> is emitted for every module reachable from app.js, and for no other', async () => {
   const dir = await project();
   const run = build(dir, { BUILD_ID: 'abc123' });
@@ -638,6 +654,66 @@ test('a planted secret value fails', async () => {
   assertFails(build(page, { BUILD_ID: 'abc123', PLANTED_TOKEN: secret }), /dist\/index\.html contains the value/);
 });
 
+test('a key of .env or .env.local planted in src/ fails a local build; the failure names the file and the variable, never the value', async () => {
+  // Made-up values. The build loads neither file, and the developer's shell holds none of these variables.
+  const apiKey = 'gw-made-up-3f9a1c77e2b04d58';
+  const signingKey = 'made-up signing key 0123456789 abcdefghij';
+  const leak = (value) => `${BASE['src/game/strings.js']}export const leaked = '${value}';\n`;
+  const silent = (run, ...values) => {
+    for (const value of values) assert.ok(!(run.stdout + run.stderr).includes(value), 'the value itself is never printed');
+  };
+
+  // the gateway key of .env.local, pasted into a module
+  const local = await project({ '.env.local': `COACH_BASE_URL=https://gateway.example.com/v1\nCOACH_API_KEY=${apiKey}\n`, 'src/game/strings.js': leak(apiKey) });
+  const one = build(local, { BUILD_ID: 'abc123' });
+  assertFails(one, /^secret scan:$/m, /^dist\/a\/abc123\/src\/game\/strings\.js contains the value of COACH_API_KEY of \.env\.local$/m);
+  assert.equal(one.stderr.trim().split('\n').length, 3, one.stderr);
+  silent(one, apiKey);
+
+  // the signing key of .env (quoted there), in a stylesheet and in the page; both keys in one build
+  const both = await project({
+    '.env': `# a comment\nCOACH_SIGNING_KEY="${signingKey}"\nCOACH_MODEL=some/model\n`,
+    '.env.local': `export COACH_API_KEY=${apiKey}\n`,
+    'styles/tokens.css': `${BASE['styles/tokens.css']}/* ${signingKey} */\n`,
+    'index.html': BASE['index.html'].replace('</body>', `<!-- ${apiKey} --></body>`),
+  });
+  const two = build(both, { BUILD_ID: 'abc123' });
+  assertFails(two,
+    /^dist\/a\/abc123\/styles\/tokens\.css contains the value of COACH_SIGNING_KEY of \.env$/m,
+    /^dist\/index\.html contains the value of COACH_API_KEY of \.env\.local$/m);
+  silent(two, apiKey, signingKey);
+
+  // a file saved by an editor that puts a byte order mark first: its first variable is still read
+  const marked = await project({ '.env': null, '.env.local': `﻿COACH_API_KEY=${apiKey}\n`, 'src/game/strings.js': leak(apiKey) });
+  assertFails(build(marked, { BUILD_ID: 'abc123' }), /strings\.js contains the value of COACH_API_KEY of \.env\.local/);
+
+  // the same value in the environment and in a file is reported once, under the environment's name
+  const twice = build(local, { BUILD_ID: 'abc123', COACH_API_KEY: apiKey });
+  assertFails(twice, /strings\.js contains the value of the environment variable COACH_API_KEY$/m);
+  assert.ok(!twice.stderr.includes('.env.local'), twice.stderr);
+  silent(twice, apiKey);
+
+  // not looked for: other variables of the files, a value under 8 characters, a key that is in no built file
+  const others = await project({
+    '.env.local': `COACH_BASE_URL=https://gateway.example.com/v1\nCOACH_MODEL=${apiKey}\nOTHER_TOKEN=${signingKey}\nCOACH_API_KEY=abc1234\n`,
+    'src/game/strings.js': `${leak(apiKey)}export const more = ['${signingKey}', 'abc1234', 'https://gateway.example.com/v1'];\n`,
+  });
+  assertBuilds(build(others, { BUILD_ID: 'abc123' }));
+  const unused = await project({ '.env': `COACH_SIGNING_KEY=${signingKey}\n`, '.env.local': `COACH_API_KEY=${apiKey}\n` });
+  const clean = build(unused, { BUILD_ID: 'abc123' });
+  assertBuilds(clean);
+  silent(clean, apiKey, signingKey);
+  for (const name of (await tree(clean.dist)).files) {
+    const text = await readFile(join(clean.dist, ...name.split('/')), 'latin1');
+    assert.ok(!text.includes(apiKey) && !text.includes(signingKey), `${name} holds no key`);
+  }
+
+  // without the two files the build is what it was; a file that cannot be read fails it instead of passing unseen
+  assertBuilds(build(await project({ '.env': null, '.env.local': null }), { BUILD_ID: 'abc123' }));
+  const unreadable = await project({ '.env': null, '.env.local': null, '.env.local/inside.txt': 'a directory where the file should be\n' });
+  assertFails(build(unreadable, { BUILD_ID: 'abc123' }), /^\.env\.local could not be read \([A-Z]+\), so the build cannot look for its keys$/m);
+});
+
 test('the secret scan also refuses the name COACH_API_KEY and anything that looks like an sk- key', async () => {
   // BASE passes although src/ui/texts.js carries the sentence the contract itself puts in the settings sheet
   // (section 4.28.8: 服务器没有配置密钥（COACH_API_KEY）) and tokens.css uses mask-image ("sk-" inside a word).
@@ -712,4 +788,41 @@ test('dist contains no server/, scripts/, tests/, dev/, legacy/ or .env file', a
   // one of them alone is enough
   assertFails(build(await project({ 'src/.env.local': 'x\n' }), { BUILD_ID: 'abc123' }), cases['src/.env.local']);
   assertFails(build(await project({ 'src/tests/a.test.js': 'x\n' }), { BUILD_ID: 'abc123' }), cases['src/tests/a.test.js']);
+});
+
+test('a build that is not standing in the project removes nothing; in the project a failed build leaves no dist/ (CONTRACT-NOTES 150)', async () => {
+  // called from another folder (node path/to/build.js): that folder's dist/ is not the build's to remove
+  const other = join(tmp, `other${++counter}`);
+  await mkdir(join(other, 'dist'), { recursive: true });
+  await writeFile(join(other, 'dist', 'keep.txt'), 'keep\n');
+  const stray = build(other, { BUILD_ID: 'abc123' });
+  assert.equal(stray.status, 1, stray.stderr);
+  assert.match(stray.stderr, /index\.html is missing in/);
+  assert.equal(existsSync(join(other, 'dist', 'keep.txt')), true, 'the other folder keeps its dist/');
+
+  // ... and so is a project that has lost one of its five entries: nothing is removed there either
+  const broken = await project({ 'manifest.webmanifest': null });
+  await mkdir(join(broken, 'dist'), { recursive: true });
+  await writeFile(join(broken, 'dist', 'keep.txt'), 'keep\n');
+  const lost = build(broken, { BUILD_ID: 'abc123' });
+  assert.equal(lost.status, 1, lost.stderr);
+  assert.match(lost.stderr, /manifest\.webmanifest is missing in/);
+  assert.equal(existsSync(join(broken, 'dist', 'keep.txt')), true);
+
+  // in the project, a build that fails leaves no dist/ behind, also when one was there before: a stale dist/ must not
+  // pass for the output of the build that failed
+  const dir = await project();
+  assertBuilds(build(dir, { BUILD_ID: 'abc123' }));
+  assertFails(build(dir, { BUILD_ID: 'abc123', COACH_API_BASE: 'http://insecure.example/api' }), /COACH_API_BASE must be empty or an https URL/);
+  assertBuilds(build(dir, { BUILD_ID: 'abc123' }));
+  await writeFile(join(dir, 'src', '.env.local'), 'x\n');
+  assertFails(build(dir, { BUILD_ID: 'abc123' }), /src\/\.env\.local/);
+});
+
+test('a .env.local that is not UTF-8 text fails the build: its keys cannot be looked for (CONTRACT-NOTES 150)', async () => {
+  // UTF-16 LE, as Windows PowerShell 5.1 writes it with `>`: read as UTF-8 it gave garbage names and "no key found"
+  const wide = Buffer.from('\uFEFFCOACH_API_KEY=abcdefgh-12345678-never-printed\r\n', 'utf16le');
+  const run = build(await project({ '.env': null, '.env.local': wide }), { BUILD_ID: 'abc123' });
+  assertFails(run, /\.env\.local is not UTF-8 text/);
+  assert.ok(!run.stderr.includes('abcdefgh'), 'the value is not printed');
 });

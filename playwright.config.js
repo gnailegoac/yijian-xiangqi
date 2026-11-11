@@ -34,5 +34,18 @@ export default defineConfig({
     command: 'node scripts/serve.js --port 5173 --mock',
     url: 'http://127.0.0.1:5173/config.json',
     reuseExistingServer: !process.env.CI,
+    // The test server never needs the real gateway: a variable that is already set wins over .env.local
+    // (serve.js, loadEnvFiles), so with these two the key and the gateway address never enter its process.
+    // The proxy's rate limits count in mock mode as well: a run makes about 70 coach requests, so a test server that is
+    // kept running would answer 429 after a few runs in one day (600 per address) and every flow that expects the mock's
+    // text would fail. The four limits are lifted for the test server only.
+    env: {
+      COACH_API_KEY: 'mock-not-a-key',
+      COACH_BASE_URL: 'http://127.0.0.1:9/v1',
+      COACH_RATE_BURST: '1000',
+      COACH_RATE_PER_MIN: '6000',
+      COACH_IP_DAILY: '1000000',
+      COACH_GLOBAL_DAILY: '1000000',
+    },
   },
 });

@@ -8,13 +8,18 @@
 // allowlist is 404: any dot-segment (.env.local, .git), server/, scripts/, tests/, node_modules/, legacy/,
 // package.json, package-lock.json, every path-traversal form and every extension outside the list below.
 // The root is the current directory (dist/ under it with --dist), as `npm start` and the launcher set it.
+// /api/* is answered only when the Host header names this machine (a loopback, private or link-local address
+// literal, `localhost`, the machine's host name, or a name of COACH_ALLOWED_HOSTS); anything else is 403 before
+// the handler runs, so a page reached through DNS rebinding cannot use the coach.
 import { once } from 'node:events';
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { BlockList, isIP } from 'node:net';
 import { hostname, networkInterfaces } from 'node:os';
 import { extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseEnv } from 'node:util';
 import { makeIcon } from './make-icons.js';
 
 /** @import { IncomingMessage, IncomingHttpHeaders, ServerResponse } from 'node:http' */
@@ -152,13 +157,24 @@ function coachEnv(source) {
 
 /**
  * Loads `.env` and `.env.local` of the current directory into process.env. `.env.local` wins over `.env`, and a
- * variable that is already set in the real environment wins over both: `process.loadEnvFile` never replaces a
- * variable that exists, so the file that must win is read first. Values are never logged.
+ * variable that is already set in the real environment wins over both: a variable that exists is never replaced, so
+ * the file that must win is read first. Values are never logged.
+ * The files are read as scripts/build.js reads them, not with `process.loadEnvFile` (CONTRACT-NOTES 150): that one keeps
+ * a byte order mark as part of the first name, so a file saved as "UTF-8 with BOM" lost its first variable without a
+ * word and the strategist stayed off. A file that is not UTF-8 text at all (UTF-16, which Windows PowerShell 5.1 writes
+ * with `>`) is not used, and one line says so.
  */
 function loadEnvFiles() {
   for (const name of ['.env.local', '.env']) {
     try {
-      process.loadEnvFile(name);
+      const text = readFileSync(name, 'utf8');
+      if (text.includes('\0')) {
+        console.error(`[env] ${name} is not UTF-8 text (it looks like UTF-16): save it as UTF-8. It was not used.`);
+        continue;
+      }
+      for (const [key, value] of Object.entries(parseEnv(text.replace(/^\uFEFF/, '')))) {
+        if (process.env[key] === undefined && value !== undefined) process.env[key] = value;
+      }
     } catch (e) {
       const code = /** @type {{code?: unknown}|null|undefined} */ (e)?.code;
       if (code !== 'ENOENT') console.error(`[env] ${name} could not be read (${String(code ?? 'error')})`);
@@ -195,8 +211,83 @@ async function loadCoach(injected, env) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// The Host allowlist of /api/*
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Address literals that can only be this machine as the home network sees it: loopback, private, link-local. */
+const HOME_NETWORKS = new BlockList();
+HOME_NETWORKS.addSubnet('127.0.0.0', 8, 'ipv4');
+HOME_NETWORKS.addSubnet('10.0.0.0', 8, 'ipv4');
+HOME_NETWORKS.addSubnet('172.16.0.0', 12, 'ipv4');
+HOME_NETWORKS.addSubnet('192.168.0.0', 16, 'ipv4');
+HOME_NETWORKS.addSubnet('169.254.0.0', 16, 'ipv4');
+HOME_NETWORKS.addAddress('::1', 'ipv6');
+HOME_NETWORKS.addSubnet('fc00::', 7, 'ipv6');
+HOME_NETWORKS.addSubnet('fe80::', 10, 'ipv6');
+
+/** A Host header: a bracketed IPv6 literal (1), or a name or an IPv4 literal (2), then an optional port. */
+const HOST_HEADER = /^(?:\[([0-9A-Fa-f:.]+)\]|([A-Za-z0-9._-]+))(?::\d{1,5})?$/;
+/** A page that tries many names must not flood the log: this many refused Host values are logged per server run. */
+const REFUSED_HOSTS_LOGGED = 3;
+
+/**
+ * The names (lower case) under which /api/* answers besides address literals: `localhost`, this machine's host name
+ * (also in its mDNS form `<name>.local`, which is how an iPad finds a Windows PC by name) and the entries of
+ * COACH_ALLOWED_HOSTS (comma separated; a name, or a name with its port).
+ * @param {string|undefined} extra the value of COACH_ALLOWED_HOSTS
+ * @returns {Set<string>}
+ */
+function allowedHostNames(extra) {
+  const names = new Set(['localhost']);
+  const own = hostname().toLowerCase();
+  if (own) {
+    names.add(own);
+    if (!own.includes('.')) names.add(`${own}.local`);
+  }
+  for (const entry of (extra ?? '').split(',')) {
+    const name = entry.trim().toLowerCase();
+    if (name) names.add(name);
+  }
+  return names;
+}
+
+/**
+ * True when the Host header of a request names this machine. A page reached through DNS rebinding passes the
+ * same-origin rule of the handler, because its Origin and its Host both carry the attacker's name; that name is
+ * not on this list, so the request never reaches the handler. Allowed: a loopback, private or link-local address
+ * literal (an iPad on the home network uses the PC's LAN address) and the names of `allowedHostNames`, compared
+ * exactly and without regard to letter case; a listed entry may also be the whole header value (`name:port`).
+ * @param {string|undefined} header
+ * @param {Set<string>} names
+ * @returns {boolean}
+ */
+function hostAllowed(header, names) {
+  const match = HOST_HEADER.exec(header ?? '');
+  if (!match) return false;
+  const whole = match[0].toLowerCase();
+  if (match[1] !== undefined) {
+    if (isIP(match[1]) === 6 && HOME_NETWORKS.check(match[1], 'ipv6')) return true;
+    return names.has(`[${match[1].toLowerCase()}]`) || names.has(whole);
+  }
+  const name = match[2].toLowerCase().replace(/\.$/, '');
+  if (isIP(name) === 4 && HOME_NETWORKS.check(name, 'ipv4')) return true;
+  return names.has(name) || names.has(whole);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Node http -> fetch adapter
 // ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * What a log line says about an error: the name of its class, never its message. The message of an SDK error can
+ * carry the bearer token when a gateway echoes the request back.
+ * @param {unknown} e
+ * @returns {string}
+ */
+function errorName(e) {
+  const name = /** @type {{constructor?: {name?: unknown}}|null|undefined} */ (e)?.constructor?.name;
+  return typeof name === 'string' && /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/.test(name) ? name : 'Error';
+}
 
 /**
  * @param {IncomingHttpHeaders} headers
@@ -280,8 +371,8 @@ async function serveApi(req, res, handle, env, ctx) {
     }
     res.end();
   } catch (e) {
-    const err = /** @type {{message?: unknown, code?: unknown}|null|undefined} */ (e);
-    if (!ac.signal.aborted) console.error('[api]', err?.message);
+    const err = /** @type {{code?: unknown}|null|undefined} */ (e);
+    if (!ac.signal.aborted) console.error('[api]', errorName(e));
     if (res.headersSent) { res.end(); return; }
     const status = err?.code === 413 ? 413 : 500;
     res.writeHead(status, { 'content-type': 'application/json' });
@@ -353,7 +444,7 @@ function guardProcess() {
   if (processGuarded) return;
   processGuarded = true;
   process.on('unhandledRejection', (e) => {
-    console.error('[unhandledRejection]', /** @type {{message?: unknown}|null|undefined} */ (e)?.message);
+    console.error('[unhandledRejection]', errorName(e));
   });
 }
 
@@ -371,6 +462,9 @@ export async function startServer(options = {}) {
   if (mock) env.COACH_MOCK = '1';
   const coach = await loadCoach(options.handler, env);
   const loopbackListen = isLoopbackHost(host);
+  const apiHosts = allowedHostNames(env.COACH_ALLOWED_HOSTS);
+  /** The refused Host values that were logged: one line each, and only the first few of a server run. @type {Set<string>} */
+  const refusedHosts = new Set();
   const config = JSON.stringify(coach.mode === 'off'
     ? { apiBase: null, build: 'dev', coach: { mode: 'off', reason: coach.reason } }
     : { apiBase: '/api', build: 'dev', coach: { mode: coach.mode, reason: null } });
@@ -380,8 +474,19 @@ export async function startServer(options = {}) {
   /** @param {IncomingMessage} req @param {ServerResponse} res */
   async function route(req, res) {
     const path = (req.url ?? '/').split(/[?#]/, 1)[0];
-    // 1. the coach proxy
+    // 1. the coach proxy, only under a Host that names this machine (static files are not restricted)
     if (path.startsWith('/api/')) {
+      if (!hostAllowed(req.headers.host, apiHosts)) {
+        const header = req.headers.host ?? '';
+        const shown = header.length <= 80 && HOST_HEADER.test(header) ? `"${header}"` : 'that is missing or malformed';
+        if (refusedHosts.size < REFUSED_HOSTS_LOGGED && !refusedHosts.has(shown)) {
+          refusedHosts.add(shown);
+          console.error(`[api] 403: a request with a Host header ${shown} was refused, because it does not name this machine; `
+            + 'to use the coach under another name, list that name in COACH_ALLOWED_HOSTS');
+        }
+        send(req, res, 403, 'application/json', JSON.stringify({ error: { code: 'origin' } }));
+        return;
+      }
       if (!coach.handle) {
         send(req, res, 404, 'application/json', JSON.stringify({ error: { code: 'no_proxy' } }));
         return;
