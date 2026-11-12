@@ -32,73 +32,83 @@
 }
 .hud-ico__slash { display: none; }
 
-/* Buttons are thick and tactile: a darker bottom edge that collapses while pressed. */
+/* Buttons are chunky cartoon keys: a thick outline (--edge, var(--ol) wide), a gloss line along the top and a hard
+ * lower lip in the outline colour that collapses while pressed. The padding is what it was minus the outline, so
+ * every button keeps its size. Fills: sun (--accent) for the main action, jade for 确定, sky for a second choice,
+ * cream paper (--surface) for neutral ones. */
 .hud-btn {
+  --_lip: 0 3px 0 var(--edge);
+  --_gloss: inset 0 2px 0 color-mix(in srgb, #fff 42%, transparent);
   position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  min-width: 44px; min-height: 44px; margin: 0; padding: 0 18px;
-  border: 0; border-radius: var(--r-btn);
-  font: 700 var(--fs-button) / 1.2 var(--font-ui); letter-spacing: .04em; white-space: nowrap;
+  min-width: 44px; min-height: 44px; margin: 0; padding: 0 calc(18px - var(--ol));
+  border: var(--ol) solid var(--edge); border-radius: var(--r-btn);
+  font: 800 var(--fs-button) / 1.2 var(--font-ui); letter-spacing: .04em; white-space: nowrap;
   cursor: pointer; -webkit-user-select: none; user-select: none;
   transition: transform 60ms linear;
 }
 .hud-btn__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .hud-btn .hud-ico { width: 22px; height: 22px; }
+.hud-btn .hud-ico svg { stroke-width: 2.6; }
 
 .hud-btn--primary {
   background: var(--accent); color: var(--accent-ink);
-  box-shadow: 0 3px 0 color-mix(in srgb, var(--accent) 55%, #000);
+  box-shadow: var(--_gloss), var(--_lip);
 }
-.hud-btn--primary:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 55%, #000); }
+.hud-btn--primary:active:not(:disabled) { transform: translateY(2px); box-shadow: var(--_gloss), 0 1px 0 var(--edge); }
 .hud-btn--danger {
   background: var(--danger); color: var(--danger-ink);
-  box-shadow: 0 3px 0 color-mix(in srgb, var(--danger) 55%, #000);
+  box-shadow: var(--_gloss), var(--_lip);
 }
-.hud-btn--danger:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 color-mix(in srgb, var(--danger) 55%, #000); }
+.hud-btn--danger:active:not(:disabled) { transform: translateY(2px); box-shadow: var(--_gloss), 0 1px 0 var(--edge); }
 .hud-btn--secondary {
-  background: var(--surface-2); color: var(--ink);
-  border: 1px solid var(--edge);
-  box-shadow: 0 3px 0 color-mix(in srgb, var(--edge) 72%, #000);
+  background: var(--surface); color: var(--ink);
+  box-shadow: var(--_lip);
 }
-.hud-btn--secondary:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 color-mix(in srgb, var(--edge) 72%, #000); }
-.hud-btn--text { background: none; color: var(--ink-2); font-weight: 600; padding: 0 12px; }
+.hud-btn--secondary:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 var(--edge); }
+.hud-btn--text { border-color: transparent; background: none; color: var(--ink-2); font-weight: 700; padding: 0 calc(12px - var(--ol)); }
 .hud-btn--text:active { color: var(--ink); }
+/* 确定落子 is the jade key, whatever variant it was built with. */
+.hud-btn.hud-confirm:not(:disabled) { background: var(--jade); color: var(--jade-ink); }
 
 .hud-btn:disabled { cursor: default; }
 .hud-btn--primary:disabled {
   background: var(--surface-2); color: var(--ink-2);
-  box-shadow: inset 0 0 0 1px var(--edge), 0 3px 0 color-mix(in srgb, var(--edge) 72%, #000);
+  box-shadow: var(--_lip);
 }
-.hud-btn--secondary:disabled { color: color-mix(in srgb, var(--ink-2) 62%, var(--surface-2)); box-shadow: 0 3px 0 color-mix(in srgb, var(--edge) 45%, transparent); }
+.hud-btn--secondary:disabled { color: color-mix(in srgb, var(--ink-2) 62%, var(--surface)); border-color: color-mix(in srgb, var(--edge) 55%, var(--surface)); box-shadow: 0 3px 0 color-mix(in srgb, var(--edge) 55%, var(--surface)); }
 
-/* Icon-only buttons: a 44 x 44 target with a smaller drawn key. */
+/* Icon-only buttons: a 44 x 44 target with a smaller drawn key, a round-cornered wooden one. */
 .hud-iconbtn {
   position: relative; flex: none; display: grid; place-items: center;
   width: 44px; height: 44px; margin: 0; padding: 0;
-  border: 0; border-radius: 12px; background: none; color: var(--ink);
+  border: 0; border-radius: 14px; background: none; color: var(--wood-ink);
   cursor: pointer;
 }
 .hud-iconbtn::before {
-  content: ""; position: absolute; inset: 2px 0; border-radius: 12px;
-  background: var(--surface); border: 1px solid var(--edge);
-  box-shadow: 0 2px 0 color-mix(in srgb, var(--edge) 72%, #000);
+  content: ""; position: absolute; inset: 2px 0; border-radius: 14px;
+  background: var(--wood); border: var(--ol) solid var(--edge);
+  box-shadow: inset 0 2px 0 color-mix(in srgb, #fff 34%, transparent), 0 2px 0 var(--edge);
 }
-.hud-iconbtn:active::before { transform: translateY(1px); box-shadow: 0 1px 0 color-mix(in srgb, var(--edge) 72%, #000); background: var(--surface-2); }
+.hud-iconbtn:active::before { transform: translateY(1px); box-shadow: 0 1px 0 var(--edge); background: var(--wood-lo); }
 .hud-iconbtn > .hud-ico { position: relative; }
+.hud-iconbtn > .hud-ico svg { stroke-width: 2.6; }
 
-/* A piece as a micro-disc (trophies, pickers, headings). --d = diameter. */
+/* A piece as a micro-shield (trophies, pickers, headings). --d = diameter. The child's side carries a round cream
+ * shield with a red glyph, the rival's a blue one with cut corners, as the soldiers on the table do. */
 .hud-disc {
   --d: 20px;
   display: inline-grid; place-items: center; flex: none;
   width: var(--d); height: var(--d); border-radius: 50%;
   font: 700 calc(var(--d) * .6) / 1 var(--font-kai); text-indent: 0; letter-spacing: 0;
-  background: radial-gradient(circle at 36% 30%, var(--red-a), var(--red-b) 58%, var(--red-c));
-  color: var(--red-glyph);
-  box-shadow: inset 0 0 0 max(1.5px, var(--d) * .07) var(--red-rim), 0 max(1px, var(--d) * .06) 0 var(--piece-edge);
+  background: var(--red-glyph);
+  color: var(--red-c);
+  box-shadow: inset 0 0 0 max(2px, var(--d) * .09) var(--red-b), 0 0 0 max(1px, var(--d) * .05) var(--piece-edge), 0 max(1.5px, var(--d) * .08) 0 max(1px, var(--d) * .05) var(--piece-edge);
 }
 .hud-disc[data-color="black"] {
-  background: radial-gradient(circle at 36% 30%, var(--blk-a), var(--blk-b) 58%, var(--blk-c));
+  border-radius: 32%;
+  background: var(--blk-b);
   color: var(--blk-glyph);
-  box-shadow: inset 0 0 0 max(1.5px, var(--d) * .07) var(--blk-rim), 0 max(1px, var(--d) * .06) 0 var(--piece-edge);
+  box-shadow: inset 0 0 0 max(2px, var(--d) * .09) var(--blk-rim), 0 0 0 max(1px, var(--d) * .05) var(--piece-edge), 0 max(1.5px, var(--d) * .08) 0 max(1px, var(--d) * .05) var(--piece-edge);
 }
 
 /* ===== top bar ========================================================================================================== */
@@ -106,8 +116,9 @@
 .hud-top { display: flex; align-items: center; gap: 8px; }
 .hud-top .hud-iconbtn::before { inset: max(0px, (44px - (var(--top, 48px) - 8px)) / 2) 0; }
 
+#mute-button[aria-pressed="true"]::before { background: var(--surface-2); }
 #mute-button[aria-pressed="true"] { color: var(--ink-2); }
-#mute-button[aria-pressed="true"] .hud-ico__slash { display: inline; stroke: var(--danger); stroke-width: 2.4; }
+#mute-button[aria-pressed="true"] .hud-ico__slash { display: inline; stroke: var(--danger); stroke-width: 3; }
 
 /* The plate (rival-view.js) is as high as the bar and hangs its disc from the bar's top edge; its host is made a
  * flex box so that no line box can push it off that edge. */
@@ -118,28 +129,37 @@
   display: flex; align-items: center; justify-content: flex-end; gap: 8px;
 }
 
+/* The round counter and the two trays are little paper signs. Their borders were 1 px: the padding gives the
+ * difference back, so the signs keep their size. */
 .hud-round {
-  flex: none; padding: 6px 12px; border-radius: 999px;
-  border: 1px solid var(--edge); background: color-mix(in srgb, var(--surface) 72%, transparent);
-  font: 600 13px / 16px var(--font-ui); color: var(--ink-2); white-space: nowrap;
+  flex: none; padding: 5px 11px; border-radius: 999px;
+  border: 2px solid var(--edge); background: var(--surface);
+  box-shadow: 0 2px 0 var(--edge);
+  font: 700 13px / 16px var(--font-ui); color: var(--ink-2); white-space: nowrap;
 }
-.hud-round b { color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+.hud-round b { color: var(--ink); font-weight: 800; font-variant-numeric: tabular-nums; }
 
 .hud-tray {
   flex: none; display: inline-flex; align-items: center; gap: 3px;
-  padding: 3px 7px; border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--edge));
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  padding: 2px 6px; border-radius: 999px;
+  border: 2px solid var(--edge);
+  background: var(--surface);
+  box-shadow: 0 2px 0 var(--edge);
 }
-.hud-tray--lost { display: none; border-color: var(--edge); background: color-mix(in srgb, var(--surface) 72%, transparent); }
-.hud-tray--lost .hud-disc { opacity: .5; }
+.hud-tray--lost { display: none; background: var(--surface-2); }
+.hud-tray--lost .hud-disc { opacity: .6; }
 #app[data-layout="landscape"] .hud-tray--lost { display: inline-flex; }
-.hud-tray__more { padding: 0 1px 0 2px; font: 700 12px / 1 var(--font-ui); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.hud-tray__more { padding: 0 1px 0 2px; font: 800 12px / 1 var(--font-ui); color: var(--ink-2); font-variant-numeric: tabular-nums; }
 
 #app[data-layout="compact"] .hud-top { gap: 4px; }
 #app[data-layout="compact"] .hud-top__info { flex-direction: column; align-items: flex-end; gap: 2px; }
-#app[data-layout="compact"] .hud-round { padding: 0; border: 0; background: none; font-size: 11px; line-height: 12px; }
-#app[data-layout="compact"] .hud-tray { padding: 0; border: 0; background: none; gap: 2px; }
+/* Compact: no room for signs. The counter is plain text on the scene, so it takes the ink, with a paper-coloured
+ * edge that keeps it readable on grass, sky or night alike. */
+#app[data-layout="compact"] .hud-round {
+  padding: 0; border: 0; background: none; box-shadow: none; font-size: 11px; line-height: 12px; color: var(--ink);
+  text-shadow: 1px 0 0 var(--surface), -1px 0 0 var(--surface), 0 1px 0 var(--surface), 0 -1px 0 var(--surface);
+}
+#app[data-layout="compact"] .hud-tray { padding: 0; border: 0; background: none; box-shadow: none; gap: 2px; }
 #app[data-layout="compact"] .hud-tray .hud-disc { --d: 16px; }
 #app[data-layout="compact"] .hud-tray__more { font-size: 11px; }
 
@@ -162,17 +182,23 @@
 .hud-under { display: flex; align-items: center; gap: 12px; container-type: inline-size; }
 .hud-undo { flex: none; min-width: 120px; height: 48px; margin-bottom: 3px; }
 .hud-under .hud-retry { flex: none; height: 48px; margin-bottom: 3px; }
-.hud-status { flex: 1 1 0; min-width: 0; margin: 0; font-size: 14px; line-height: 20px; color: var(--ink); }
+/* Text that stands on the scene itself gets a paper-coloured edge, so it reads on any backdrop. */
+.hud-status {
+  flex: 1 1 0; min-width: 0; margin: 0; font-size: 14px; font-weight: 700; line-height: 20px; color: var(--ink);
+  text-shadow: 1px 0 0 var(--surface), -1px 0 0 var(--surface), 0 1px 0 var(--surface), 0 -1px 0 var(--surface);
+}
 
+/* The last move: a paper tag (the box is the old one, the padding gives the wider outline back). */
 .hud-last {
-  flex: 0 1 auto; min-width: 0; height: 44px; margin: 0 0 0 auto; padding: 0 14px;
+  flex: 0 1 auto; min-width: 0; height: 44px; margin: 0 0 0 auto; padding: 0 13px;
   display: inline-flex; align-items: center; gap: 2px;
-  border: 1px solid transparent; border-radius: 999px; background: none;
-  font: 500 14px / 1 var(--font-ui); color: var(--ink-2); white-space: nowrap;
+  border: 2px solid var(--edge); border-radius: 999px; background: var(--surface);
+  box-shadow: 0 2px 0 var(--edge);
+  font: 700 14px / 1 var(--font-ui); color: var(--ink-2); white-space: nowrap;
   cursor: pointer;
 }
-.hud-last b { color: var(--ink); font-weight: 700; font-size: 16px; letter-spacing: .04em; }
-.hud-last:active { background: var(--surface); border-color: var(--edge); }
+.hud-last b { color: var(--ink); font-weight: 800; font-size: 16px; letter-spacing: .04em; }
+.hud-last:active { background: var(--surface-2); }
 
 /* a narrow board (a landscape phone, the keyboard up): first the status line goes, then the last move */
 @container (max-width: 439.98px) {
@@ -214,13 +240,13 @@
 .hud-pouches { display: inline-flex; align-items: center; gap: 5px; flex: none; }
 .hud-pouch { display: block; width: 28px; height: 28px; }
 .hud-pouch svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.hud-pouch .p-bag { fill: var(--shu); stroke: var(--accent-ink); stroke-width: 1.3; stroke-linejoin: round; }
-.hud-pouch .p-in { fill: color-mix(in srgb, var(--shu) 40%, #000); stroke: var(--accent-ink); stroke-width: 1.3; }
-.hud-pouch .p-mark, .hud-pouch .p-knot { fill: #ffe7a6; }
-.hud-pouch .p-knot { stroke: var(--accent-ink); stroke-width: .8; }
-.hud-pouch .p-cord { fill: none; stroke: #ffe7a6; stroke-width: 2.4; stroke-linecap: round; }
-.hud-pouch .p-tassel { fill: none; stroke: #ffe7a6; stroke-width: 1.4; stroke-linecap: round; }
-.hud-pouch .p-slip { fill: #fffaf0; stroke: var(--accent-ink); stroke-width: 1.1; stroke-linejoin: round; }
+.hud-pouch .p-bag { fill: var(--shu); stroke: var(--accent-ink); stroke-width: 1.8; stroke-linejoin: round; }
+.hud-pouch .p-in { fill: color-mix(in srgb, var(--shu) 40%, #000); stroke: var(--accent-ink); stroke-width: 1.8; }
+.hud-pouch .p-mark, .hud-pouch .p-knot { fill: #fff5dc; }
+.hud-pouch .p-knot { stroke: var(--accent-ink); stroke-width: 1; }
+.hud-pouch .p-cord { fill: none; stroke: #fff5dc; stroke-width: 2.4; stroke-linecap: round; }
+.hud-pouch .p-tassel { fill: none; stroke: #fff5dc; stroke-width: 1.4; stroke-linecap: round; }
+.hud-pouch .p-slip { fill: #fffaf0; stroke: var(--accent-ink); stroke-width: 1.4; stroke-linejoin: round; }
 .hud-pouch .p-ink { fill: none; stroke: #8a5a24; stroke-width: 1.1; stroke-linecap: round; }
 .hud-pouch__open { display: none; }
 .hud-pouch[data-open="1"] .hud-pouch__open { display: inline; }
@@ -242,7 +268,7 @@
   position: absolute; inset: 0; display: grid;
   padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
 }
-.hud-layer__scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--page) 66%, transparent); opacity: 0; }
+.hud-layer__scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--piece-edge) 55%, transparent); opacity: 0; }
 .hud-layer.is-open > .hud-layer__scrim { opacity: 1; }
 /* The panels are <dialog open> elements that never enter the top layer: undo the browser's dialog box (no
  * specificity, so each panel's own class decides its box). */
@@ -255,12 +281,12 @@
 /* ----- menu ----- */
 
 .hud-layer--menu { z-index: calc(var(--z-sheet) + 4); }
-.hud-layer--menu > .hud-layer__scrim { background: color-mix(in srgb, var(--page) 40%, transparent); }
+.hud-layer--menu > .hud-layer__scrim { background: color-mix(in srgb, var(--piece-edge) 30%, transparent); }
 .hud-menu {
   position: absolute; left: var(--menu-x, 8px); top: var(--menu-y, 52px);
-  display: grid; gap: 2px; min-width: 216px; padding: 6px;
-  border: 1.5px solid var(--edge); border-radius: 18px; background: var(--surface);
-  box-shadow: 0 18px 44px #0009;
+  display: grid; gap: 2px; min-width: 216px; padding: 4.5px;
+  border: var(--ol) solid var(--edge); border-radius: 18px; background: var(--surface);
+  box-shadow: 0 var(--drop) 0 var(--edge);
   transform-origin: 22px 0; transform: scale(.9) translateY(-6px); opacity: 0;
 }
 .hud-layer.is-open > .hud-menu { transform: none; opacity: 1; }
@@ -268,16 +294,18 @@
   display: flex; align-items: center; gap: 12px;
   min-height: 50px; margin: 0; padding: 0 18px 0 12px;
   border: 0; border-radius: 12px; background: none; color: var(--ink);
-  font: 600 17px / 1.2 var(--font-ui); text-align: left; white-space: nowrap;
+  font: 700 17px / 1.2 var(--font-ui); text-align: left; white-space: nowrap;
   cursor: pointer;
 }
 .hud-menu__item .hud-ico { color: var(--ink-2); }
+.hud-menu__item .hud-ico svg { stroke-width: 2.4; }
 .hud-menu__item:active:not(:disabled), .hud-menu__item:focus-visible { background: var(--surface-2); }
 .hud-menu__item:focus-visible { outline-offset: -3px; }
 .hud-menu__item[data-menu="resign"], .hud-menu__item[data-menu="resign"] .hud-ico { color: var(--danger); }
 .hud-menu__item[data-menu="resign"] { position: relative; margin-top: 7px; }
 .hud-menu__item[data-menu="resign"]::before {
-  content: ""; position: absolute; left: 8px; right: 8px; top: -4px; height: 1px; background: var(--edge);
+  content: ""; position: absolute; left: 8px; right: 8px; top: -5px; height: 2px; border-radius: 1px;
+  background: color-mix(in srgb, var(--edge) 35%, var(--surface));
 }
 .hud-menu__item:disabled { opacity: .4; cursor: default; }
 
@@ -287,31 +315,37 @@
 .hud-sheet {
   display: flex; flex-direction: column;
   width: min(560px, 100%); max-height: min(740px, 100%);
-  border: 1.5px solid var(--edge); border-radius: 22px; background: var(--surface);
-  box-shadow: 0 24px 60px #0009;
+  border: var(--ol) solid var(--edge); border-radius: 22px; background: var(--surface);
+  box-shadow: 0 var(--drop) 0 var(--edge);
   overflow: hidden;
   transform: translateY(40px); opacity: 0;
 }
 .hud-layer.is-open > .hud-sheet { transform: none; opacity: 1; }
+/* The head is a wooden board with the title painted on it. */
 .hud-sheet__head {
   flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 10px 12px 8px 22px; border-bottom: 1px solid var(--edge);
+  padding: 10px 12px 7px 22px; border-bottom: 2px solid var(--edge);
+  background: var(--wood); color: var(--wood-ink);
+  box-shadow: inset 0 2px 0 color-mix(in srgb, #fff 34%, transparent);
 }
 .hud-sheet__title { margin: 0; font: 700 26px / 1.2 var(--font-kai); letter-spacing: .08em; }
-.hud-sheet__close::before { inset: 4px; border-radius: 50%; box-shadow: none; background: var(--surface-2); }
+.hud-sheet__close { color: var(--ink); }
+.hud-sheet__close::before { inset: 4px; border-radius: 50%; box-shadow: 0 2px 0 var(--edge); background: var(--surface); }
+.hud-sheet__close:active::before { background: var(--surface-2); }
 .hud-sheet__body {
   flex: 1 1 auto; min-height: 0; padding: 8px 22px 20px;
   overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
 }
 .hud-sheet__foot {
   flex: none; display: flex; justify-content: flex-end;
-  padding: 12px 22px calc(15px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--edge);
+  padding: 11px 22px calc(15px + env(safe-area-inset-bottom, 0px)); border-top: 2px solid var(--edge);
+  background: var(--surface-2);
 }
 
 #app[data-layout="compact"] .hud-layer--sheet { place-items: end stretch; padding: 0; }
 #app[data-layout="compact"] .hud-sheet {
   width: 100%; max-height: 88%;
-  border-radius: 22px 22px 0 0; border-width: 1.5px 0 0;
+  border-radius: 22px 22px 0 0; border-width: var(--ol) 0 0; box-shadow: none;
   transform: translateY(100%); opacity: 1;
 }
 #app[data-layout="compact"] .hud-layer.is-open > .hud-sheet { transform: none; }
@@ -324,16 +358,17 @@
 
 .hud-rank {
   display: flex; align-items: center; gap: 8px;
-  margin: 6px 0 4px; padding: 10px 16px; border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--edge));
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  margin: 6px 0 4px; padding: 9px 15px; border-radius: 14px;
+  border: 2px solid var(--edge);
+  background: var(--accent); color: var(--accent-ink);
+  box-shadow: 0 2px 0 var(--edge);
 }
-.hud-rank .hud-ico { color: var(--accent); }
+.hud-rank .hud-ico { color: var(--accent-ink); }
 .hud-rank .hud-ico svg { fill: currentColor; }
-.hud-rank__label { font-size: 15px; font-weight: 600; color: var(--ink-2); }
-.hud-rank__name { margin-left: auto; font: 700 24px / 1.2 var(--font-kai); letter-spacing: .08em; color: var(--ink); }
+.hud-rank__label { font-size: 15px; font-weight: 700; color: var(--accent-ink); }
+.hud-rank__name { margin-left: auto; font: 700 24px / 1.2 var(--font-kai); letter-spacing: .08em; color: var(--accent-ink); }
 
-.hud-set__group { padding: 6px 0; border-top: 1px solid var(--edge); }
+.hud-set__group { padding: 6px 0; border-top: 2px dashed color-mix(in srgb, var(--edge) 35%, var(--surface)); }
 .hud-set__group:first-of-type, .hud-rank[hidden] + .hud-set__group { border-top: 0; }
 .hud-set__row { display: flex; align-items: center; justify-content: space-between; gap: 6px 16px; min-height: 52px; }
 .hud-set__row--stack { flex-direction: column; align-items: stretch; padding: 8px 0 10px; }
@@ -350,56 +385,57 @@
 }
 .hud-switch::before {
   content: ""; position: absolute; inset: 6px 2px; border-radius: 16px;
-  border: 1px solid var(--edge); background: var(--surface-2);
+  border: var(--ol) solid var(--edge); background: var(--surface-2);
 }
 .hud-switch__knob {
   position: absolute; left: 7px; top: 11px; width: 22px; height: 22px; border-radius: 50%;
-  background: var(--ink-2);
+  background: var(--surface); box-shadow: inset 0 0 0 2.5px var(--edge);
 }
-.hud-switch[aria-checked="true"]::before { border-color: transparent; background: var(--accent); }
-.hud-switch[aria-checked="true"] .hud-switch__knob { transform: translateX(24px); background: var(--accent-ink); }
+.hud-switch[aria-checked="true"]::before { background: var(--jade); }
+.hud-switch[aria-checked="true"] .hud-switch__knob { transform: translateX(24px); }
 
+/* (the box is the old one: 2 px of outline, 2 px of padding) */
 .hud-seg {
-  display: inline-flex; flex: 0 1 auto; min-width: 0; gap: 3px; padding: 3px;
-  border: 1px solid var(--edge); border-radius: 15px; background: var(--surface-2);
+  display: inline-flex; flex: 0 1 auto; min-width: 0; gap: 3px; padding: 2px;
+  border: 2px solid var(--edge); border-radius: 15px; background: var(--surface-2);
 }
 .hud-seg__opt {
   flex: 1 1 auto; min-width: 0; min-height: 44px; margin: 0; padding: 0 14px;
   border: 0; border-radius: 11px; background: none; color: var(--ink-2);
-  font: 600 15px / 1.2 var(--font-ui); white-space: nowrap;
+  font: 700 15px / 1.2 var(--font-ui); white-space: nowrap;
   cursor: pointer;
 }
-.hud-seg__opt[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); box-shadow: 0 1px 3px #0004; }
+.hud-seg__opt[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); box-shadow: inset 0 0 0 2px var(--edge); }
 
 .hud-range {
   flex: 0 1 240px; min-width: 120px; height: 44px; margin: 0; padding: 0;
   -webkit-appearance: none; appearance: none; background: none; cursor: pointer;
 }
 .hud-range::-webkit-slider-runnable-track {
-  height: 10px; border-radius: 5px; border: 1px solid var(--edge);
-  background: linear-gradient(to right, var(--accent) var(--fill, 100%), var(--surface-2) var(--fill, 100%));
+  height: 12px; border-radius: 6px; border: 2px solid var(--edge);
+  background: linear-gradient(to right, var(--jade) var(--fill, 100%), var(--surface-2) var(--fill, 100%));
 }
 .hud-range::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
   width: 28px; height: 28px; margin-top: -10px; border-radius: 50%;
-  border: 3px solid var(--accent); background: var(--surface); box-shadow: 0 2px 4px #0005;
+  border: 3px solid var(--edge); background: var(--accent); box-shadow: 0 2px 0 var(--edge);
 }
-.hud-range::-moz-range-track { height: 8px; border-radius: 5px; border: 1px solid var(--edge); background: var(--surface-2); }
-.hud-range::-moz-range-progress { height: 8px; border-radius: 5px; background: var(--accent); }
+.hud-range::-moz-range-track { height: 8px; border-radius: 6px; border: 2px solid var(--edge); background: var(--surface-2); }
+.hud-range::-moz-range-progress { height: 8px; border-radius: 6px; background: var(--jade); }
 .hud-range::-moz-range-thumb {
   width: 22px; height: 22px; border-radius: 50%;
-  border: 3px solid var(--accent); background: var(--surface); box-shadow: 0 2px 4px #0005;
+  border: 3px solid var(--edge); background: var(--accent); box-shadow: 0 2px 0 var(--edge);
 }
 
 .hud-themes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .hud-theme {
   display: flex; flex-direction: column; align-items: stretch; gap: 6px;
   min-height: 44px; margin: 0; padding: 6px 6px 8px;
-  border: 2px solid var(--edge); border-radius: 16px; background: var(--surface-2); color: var(--ink-2);
-  font: 600 15px / 1.2 var(--font-ui); text-align: center;
+  border: 2px solid var(--edge); border-radius: 16px; background: var(--surface); color: var(--ink-2);
+  font: 700 15px / 1.2 var(--font-ui); text-align: center;
   cursor: pointer;
 }
-.hud-theme[aria-pressed="true"] { border-color: var(--accent); color: var(--ink); box-shadow: 0 0 0 2px var(--accent); }
+.hud-theme[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 1px var(--edge), 0 3px 0 1px var(--edge); }
 .hud-theme__art {
   position: relative; display: flex; align-items: center; justify-content: center; gap: 12px;
   height: 58px; border-radius: 10px; overflow: hidden;
@@ -416,12 +452,12 @@
 .hud-theme__name { letter-spacing: .1em; }
 
 .hud-coach {
-  margin: 8px 0 4px; padding: 10px 14px; border-radius: 14px;
-  border: 1px solid var(--edge); background: var(--surface-2);
+  margin: 8px 0 4px; padding: 9px 13px; border-radius: 14px;
+  border: 2px solid var(--edge); background: var(--surface-2);
 }
 .hud-coach__line { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 700; line-height: 22px; }
-.hud-coach__line::before { content: ""; flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--ink-2); }
-.hud-coach[data-mode="llm"] .hud-coach__line::before { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+.hud-coach__line::before { content: ""; flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--ink-2); box-shadow: 0 0 0 2px var(--edge); }
+.hud-coach[data-mode="llm"] .hud-coach__line::before { background: var(--jade); }
 .hud-coach__why { margin: 4px 0 0 18px; font-size: 13px; line-height: 19px; color: var(--ink-2); }
 
 #app[data-layout="compact"] .hud-seg__opt { padding: 0 10px; font-size: 14px; }
@@ -433,8 +469,8 @@
   display: grid; grid-template-columns: 52px minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 8px;
 }
 .hud-moves__head {
-  position: sticky; top: -8px; z-index: 1; margin: -8px 0 0; padding: 10px 8px 8px;
-  border-bottom: 1px solid var(--edge); background: var(--surface);
+  position: sticky; top: -8px; z-index: 1; margin: -8px 0 0; padding: 10px 8px 7px;
+  border-bottom: 2px solid var(--edge); background: var(--surface);
 }
 .hud-moves__head .hud-disc { --d: 26px; margin-left: 8px; }
 .hud-moves { margin: 0; padding: 6px 0 0; list-style: none; min-height: 120px; }
@@ -442,7 +478,7 @@
 .hud-moves__row:nth-child(even) { background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
 .hud-moves__no { padding-right: 6px; text-align: right; font-size: 14px; color: var(--ink-2); }
 .hud-moves__move { justify-self: start; padding: 4px 10px; border-radius: 9px; letter-spacing: .06em; }
-.hud-moves__move.is-current { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.hud-moves__move.is-current { background: var(--accent); color: var(--accent-ink); font-weight: 700; box-shadow: inset 0 0 0 2px var(--edge); }
 .hud-moves__move:empty { display: none; }
 
 /* ----- rules, about ----- */
@@ -450,25 +486,27 @@
 .hud-rules { display: grid; gap: 10px; margin: 0; padding: 6px 0 0; list-style: none; }
 .hud-rules__item {
   display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: start; gap: 12px;
-  padding: 10px 14px 10px 10px; border: 1px solid var(--edge); border-radius: 16px; background: var(--surface-2);
+  padding: 9px 13px 9px 9px; border: 2px solid var(--edge); border-radius: 16px; background: var(--surface-2);
 }
 .hud-rules__no {
   display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%;
-  font: 700 17px / 1 var(--font-ui); font-variant-numeric: tabular-nums;
-  background: radial-gradient(circle at 36% 30%, var(--red-a), var(--red-b) 58%, var(--red-c));
-  color: var(--red-glyph);
-  box-shadow: inset 0 0 0 2px var(--red-rim), 0 2px 0 var(--piece-edge);
+  font: 800 17px / 1 var(--font-ui); font-variant-numeric: tabular-nums;
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: inset 0 0 0 2.5px var(--edge), 0 2px 0 var(--edge);
 }
 .hud-rules__text { padding-top: 4px; font-size: 16px; line-height: 26px; }
 
+/* The word mark: chunky outlined letters, as on the banners. */
 .hud-about__mark {
   margin: 14px 0 16px; text-align: center;
-  font: 700 52px / 1.1 var(--font-kai); letter-spacing: .16em; text-indent: .16em; color: var(--accent);
-  text-shadow: 0 2px 0 color-mix(in srgb, var(--accent) 45%, #000);
+  font: 700 52px / 1.1 var(--font-kai); letter-spacing: .16em; text-indent: .16em; color: var(--shu);
+  text-shadow: 2px 0 0 var(--edge), -2px 0 0 var(--edge), 0 2px 0 var(--edge), 0 -2px 0 var(--edge),
+    1.5px 1.5px 0 var(--edge), -1.5px 1.5px 0 var(--edge), 1.5px -1.5px 0 var(--edge), -1.5px -1.5px 0 var(--edge), 0 5px 0 var(--edge);
 }
 .hud-about__text { margin: 0 0 12px; font-size: 16px; line-height: 27px; }
 .hud-about__privacy {
-  margin: 18px 0 0; padding: 12px 14px; border: 1px solid var(--edge); border-radius: 14px; background: var(--surface-2);
+  margin: 18px 0 0; padding: 11px 13px; border: 2px solid var(--edge); border-radius: 14px; background: var(--surface-2);
   font-size: 14px; line-height: 22px; color: var(--ink-2);
 }
 
@@ -476,9 +514,9 @@
 
 .hud-layer--dialog { z-index: var(--z-dialog); place-items: center; padding: 24px; }
 .hud-dialog {
-  width: min(430px, 100%); max-height: 100%; padding: 26px 22px 20px; overflow-y: auto;
-  border: 1.5px solid var(--edge); border-radius: 24px; background: var(--surface);
-  box-shadow: 0 24px 60px #000a; text-align: center;
+  width: min(430px, 100%); max-height: 100%; padding: 24.5px 20.5px 18.5px; overflow-y: auto;
+  border: var(--ol) solid var(--edge); border-radius: 24px; background: var(--surface);
+  box-shadow: 0 var(--drop) 0 var(--edge); text-align: center;
   transform: scale(.92); opacity: 0;
 }
 .hud-layer.is-open > .hud-dialog { transform: none; opacity: 1; }
@@ -492,25 +530,35 @@
 .hud-side {
   display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 56px; margin: 0; padding: 6px 8px;
   border: 2px solid var(--edge); border-radius: 16px; background: var(--surface-2); color: var(--ink-2);
-  font: 600 15px / 1.25 var(--font-ui); text-align: left;
+  font: 700 15px / 1.25 var(--font-ui); text-align: left;
   cursor: pointer;
 }
 .hud-side .hud-disc { --d: 34px; }
 .hud-side[aria-pressed="true"] {
-  border-color: var(--accent); color: var(--ink);
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2)); box-shadow: 0 0 0 2px var(--accent);
+  color: var(--accent-ink);
+  background: var(--accent); box-shadow: 0 0 0 1px var(--edge), 0 3px 0 1px var(--edge);
 }
 #app[data-layout="compact"] .hud-dialog__side { grid-template-columns: minmax(0, 1fr); }
 #app[data-layout="compact"] .hud-layer--dialog { padding: 16px; }
 
 /* ===== start overlay (§12.5) ============================================================================================ */
 
+/* The title card is a poster: an opaque sky over the meadow (night sky in 赤壁, mist in 隆中), with a soft sun
+ * behind the card. */
 .hud-layer--start {
+  --_sky-a: #5cc0ff; --_sky-b: #c4ecff;
   z-index: calc(var(--z-sheet) + 2); place-items: center; overflow: hidden;
   background:
-    radial-gradient(46% 40% at 50% 44%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 100%),
-    color-mix(in srgb, var(--page) 88%, transparent);
+    radial-gradient(46% 40% at 50% 44%, color-mix(in srgb, #fff 45%, transparent), transparent 100%),
+    linear-gradient(var(--_sky-a), var(--_sky-b) 64%, var(--page) 64%);
 }
+[data-theme="chibi"] .hud-layer--start { --_sky-a: #0a1024; --_sky-b: #2a3f7a; }
+[data-theme="chibi"] .hud-layer--start {
+  background:
+    radial-gradient(46% 40% at 50% 44%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 100%),
+    linear-gradient(var(--_sky-a), var(--_sky-b) 64%, var(--page) 64%);
+}
+[data-theme="longzhong"] .hud-layer--start { --_sky-a: #dfeedd; --_sky-b: #f4f8e6; }
 .hud-layer--start.is-closing { opacity: 0; }      /* it still takes the taps while it fades (a double tap on 开战！) */
 .hud-start { display: grid; place-items: center; width: 100%; max-height: 100%; padding: 16px; overflow: auto; }
 /* The text column is as wide as what it holds (440 px at most: the longest greeting on one line), so the bubble ends
@@ -523,30 +571,46 @@
 .hud-start__word {
   position: relative; isolation: isolate; padding: .06em .3em .1em .46em;
   color: var(--red-glyph); letter-spacing: .16em;
-  text-shadow: 0 .05em 0 color-mix(in srgb, var(--shu) 45%, #000), 0 0 .1em color-mix(in srgb, var(--shu) 45%, #000);
+  text-shadow: .04em 0 0 var(--piece-edge), -.04em 0 0 var(--piece-edge), 0 .04em 0 var(--piece-edge), 0 -.04em 0 var(--piece-edge),
+    .03em .03em 0 var(--piece-edge), -.03em .03em 0 var(--piece-edge), .03em -.03em 0 var(--piece-edge), -.03em -.03em 0 var(--piece-edge),
+    0 .09em 0 var(--piece-edge);
 }
 .hud-brush { position: absolute; inset: -4% -3% -6%; z-index: -1; width: 106%; height: 110%; overflow: visible; }
-.hud-brush path { fill: var(--shu); }
+.hud-brush path { fill: var(--red-b); stroke: var(--piece-edge); stroke-width: 3px; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .hud-start__mark .hud-disc { --d: 48px; }
 .hud-start__mark .hud-disc:first-child { transform: rotate(-10deg); }
 .hud-start__mark .hud-disc:last-child { transform: rotate(10deg); }
 
 .hud-start__line {
-  position: relative; margin: 0 0 24px; padding: 13px 18px;
-  border: 1.5px solid var(--edge); border-radius: 18px; background: var(--surface);
-  font-size: 18px; line-height: 28px; box-shadow: 0 8px 24px #0004;
+  position: relative; margin: 0 0 24px; padding: 11.5px 16.5px;
+  border: var(--ol) solid var(--edge); border-radius: 22px; background: var(--surface);
+  font-size: 18px; line-height: 28px; box-shadow: 0 var(--drop) 0 var(--edge);
   text-wrap: balance;                                  /* where it needs two lines: two even ones, not a line and a stub */
 }
 .hud-start.has-figure .hud-start__line::after {
-  content: ""; position: absolute; right: -8.5px; top: 50%; width: 15px; height: 15px; margin-top: -8px;
-  border: solid var(--edge); border-width: 1.5px 1.5px 0 0; background: var(--surface);
+  content: ""; position: absolute; right: -10.5px; top: 50%; width: 16px; height: 16px; margin-top: -8px;
+  border: solid var(--edge); border-width: var(--ol) var(--ol) 0 0; background: var(--surface);
   transform: rotate(45deg);
 }
 .hud-start__buttons { display: flex; flex-wrap: wrap; gap: 12px; padding-bottom: 3px; }
-.hud-start__buttons .hud-btn { height: 64px; padding: 0 26px; border-radius: 18px; font-size: 18px; }
-.hud-start__buttons .hud-start__go { min-width: 240px; font: 700 28px / 1.1 var(--font-kai); letter-spacing: .12em; }
+.hud-start__buttons .hud-btn { height: 64px; padding: 0 calc(26px - var(--ol)); border-radius: 20px; font-size: 18px; }
+/* 开战！ is the big red key of the poster: cream letters with a chunky outline. */
+.hud-start__buttons .hud-start__go {
+  min-width: 240px; font: 700 28px / 1.1 var(--font-kai); letter-spacing: .12em;
+  background: var(--red-b); color: var(--red-glyph);
+  text-shadow: 2px 0 0 var(--piece-edge), -2px 0 0 var(--piece-edge), 0 2px 0 var(--piece-edge), 0 -2px 0 var(--piece-edge),
+    1.5px 1.5px 0 var(--piece-edge), -1.5px 1.5px 0 var(--piece-edge), 1.5px -1.5px 0 var(--piece-edge), -1.5px -1.5px 0 var(--piece-edge),
+    0 4px 0 var(--piece-edge);
+}
+.hud-start__buttons .hud-btn--secondary { background: var(--sky); color: var(--sky-ink); box-shadow: var(--_gloss), var(--_lip); }
+.hud-start__buttons .hud-btn--secondary:active:not(:disabled) { box-shadow: var(--_gloss), 0 1px 0 var(--edge); }
+/* The links stand on the poster: each one is a small paper tag (same box as before). */
 .hud-start__links { display: flex; flex-wrap: wrap; gap: 4px; margin: 12px 0 0 -12px; }
 .hud-start__links .hud-btn { font-size: 15px; }
+.hud-start__links .hud-btn--text {
+  padding: 0 10px; border: 2px solid var(--edge); border-radius: 14px;
+  color: var(--ink); background: var(--surface);
+}
 .hud-start__links .hud-ico { width: 18px; height: 18px; }
 
 /* The greeter. buddy.js fills the host (figure + bubble) for the coach column; here only the figure stands.
@@ -557,7 +621,7 @@
  * and his eyes go down to it. The glance of buddy.js is then a look up at the child. */
 #overlays .hud-start__figure {
   display: block; width: auto; height: auto;
-  --buddy-h: clamp(280px, 44vh, 460px); --buddy-face: 1; --_gaze: -1.8px .3px; --_lean: -5deg;
+  --buddy-h: clamp(280px, 44vh, 460px); --buddy-face: 1; --_gaze: 5px 1px; --_lean: 5deg;   /* the new figure is drawn mirrored and 404 units high */
   /* The drawing leaves a fifth of his height free on each side of the head (room for a raised arm and the ♪): he
    * steps half of that closer to the text, so the bubble's tail ends near his face and not in front of a gap. */
   margin-left: calc(var(--buddy-h) * -.1);
@@ -567,15 +631,6 @@
 #overlays .hud-start__figure .buddy:not([data-mood="cheering"]) .b-head-act { rotate: var(--_lean); }      /* cheering: head up, as the pose is drawn */
 #overlays .hud-start__figure .buddy .b-eyes { translate: var(--_gaze); }
 #overlays .hud-start__figure .buddy.is-glance .b-eyes { translate: 0 0; }
-/* The pool of light at his feet (.buddy-fig::before, styles/buddy.css). In the coach column it has to end inside the
- * figure's box, because the chips follow right under it. The title card has room below him, so here the pool is the
- * fuller one, centred on his feet, in a box 4.5 % higher to fade out in (centres and radii are stated for that box). */
-#overlays .hud-start__figure .buddy-fig::before {
-  inset: 4% -6% -4.5% -6%;
-  background:
-    radial-gradient(50% 8.6% at 50% 91.2%, color-mix(in srgb, var(--accent) 30%, transparent), transparent 100%),
-    radial-gradient(50% 47.8% at 50% 53.5%, color-mix(in srgb, var(--wei) 26%, transparent), transparent 100%);
-}
 /* While the title card is up he stands on it. His figure in the coach column would show through the 88 % backdrop
  * as a pale double right behind the greeter (the two overlap in landscape), so it waits until the card starts to fade. */
 #app:has(> #overlays > .hud-layer--start:not(.is-closing)) .coach__buddy .buddy-fig { opacity: 0; }
@@ -587,7 +642,7 @@
 #app[data-layout="portrait"] .hud-start__mark,
 #app[data-layout="compact"] .hud-start__mark { order: 1; margin-bottom: 10px; }
 #app[data-layout="portrait"] .hud-start__figure,
-#app[data-layout="compact"] .hud-start__figure { order: 2; margin: 0 0 14px; --_gaze: 0 1.6px; --_lean: 0deg; }
+#app[data-layout="compact"] .hud-start__figure { order: 2; margin: 0 0 14px; --_gaze: 0 4.5px; --_lean: 0deg; }
 #app[data-layout="portrait"] .hud-start__line,
 #app[data-layout="compact"] .hud-start__line { order: 3; }
 #app[data-layout="portrait"] .hud-start__buttons,
@@ -596,7 +651,7 @@
 #app[data-layout="compact"] .hud-start__links { order: 5; justify-content: center; margin-left: 0; }
 #app[data-layout="portrait"] .hud-start.has-figure .hud-start__line::after,
 #app[data-layout="compact"] .hud-start.has-figure .hud-start__line::after {
-  right: auto; left: 50%; top: -8.5px; margin: 0 0 0 -8px; border-width: 1.5px 0 0 1.5px;
+  right: auto; left: 50%; top: -10.5px; margin: 0 0 0 -8px; border-width: var(--ol) 0 0 var(--ol);
 }
 /* portrait: the longest greeting (22 characters at 20 px) still fits on one line */
 #app[data-layout="portrait"] .hud-start__card { grid-template-columns: minmax(0, 500px); }
@@ -636,14 +691,14 @@
   display: flex; flex-direction: column; gap: 12px;
   width: min(640px, 100%); max-height: 66%; padding: 16px 20px calc(16px + env(safe-area-inset-bottom, 0px));
   overflow-y: auto; overscroll-behavior: contain;
-  border: solid var(--edge); border-width: 1.5px 1.5px 0; border-radius: 24px 24px 0 0;
-  background: var(--surface); box-shadow: 0 -12px 44px #0008;
+  border: solid var(--edge); border-width: var(--ol) var(--ol) 0; border-radius: 24px 24px 0 0;
+  background: var(--surface);
   transform: translateY(100%);
 }
 .hud-layer.is-open > .hud-over { transform: none; }
+/* A win: sunshine falls on the top of the card (the card stays opaque). */
 .hud-over[data-result="win"] {
-  border-color: color-mix(in srgb, var(--accent) 62%, var(--edge));
-  background: radial-gradient(120% 220px at 50% 0, color-mix(in srgb, var(--accent) 24%, transparent), transparent 100%), var(--surface);
+  background: radial-gradient(120% 220px at 50% 0, color-mix(in srgb, var(--accent) 50%, transparent), transparent 100%), var(--surface);
 }
 
 /* landscape: a centred card over the coach column, wherever the shell has put the column (--group-x, --group-y) */
@@ -655,8 +710,8 @@
   width: var(--panel-w, 480px); place-items: center; padding: 8px 0;
 }
 #app[data-layout="landscape"] .hud-over {
-  width: min(460px, 100%); max-height: 100%; padding: 18px 20px;
-  border-width: 1.5px; border-radius: 24px; box-shadow: 0 22px 54px #0009;
+  width: min(460px, 100%); max-height: 100%; padding: 16.5px 18.5px;
+  border-width: var(--ol); border-radius: 24px; box-shadow: 0 var(--drop) 0 var(--edge);
   transform: translateY(36px); opacity: 0;
 }
 #app[data-layout="landscape"] .hud-layer.is-open > .hud-over { transform: none; opacity: 1; }
@@ -671,39 +726,46 @@
 .hud-over__head { display: grid; justify-items: center; gap: 2px; text-align: center; }
 .hud-over__crest { width: 112px; height: 78px; }
 .hud-over__crest svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.hud-over__crest .c-leaf path { fill: var(--accent); }
-.hud-over__crest .c-stem { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
-.hud-over__crest .c-star { fill: var(--accent); stroke: color-mix(in srgb, var(--accent) 50%, #000); stroke-width: 1.4; stroke-linejoin: round; }
-.hud-over__crest .c-ground { fill: var(--edge); }
-.hud-over__crest .c-pole { fill: none; stroke: var(--ink-2); stroke-width: 4; stroke-linecap: round; }
-.hud-over__crest .c-knob { fill: var(--accent); }
-.hud-over__crest .c-flag { fill: var(--shu); stroke: color-mix(in srgb, var(--shu) 55%, #000); stroke-width: 1.5; stroke-linejoin: round; }
+.hud-over__crest .c-leaf path { fill: var(--jade); stroke: var(--ink); stroke-width: 1.5; stroke-linejoin: round; paint-order: stroke; }
+.hud-over__crest .c-stem { fill: none; stroke: var(--ink); stroke-width: 3; stroke-linecap: round; }
+.hud-over__crest .c-star { fill: var(--accent); stroke: var(--ink); stroke-width: 2.4; stroke-linejoin: round; paint-order: stroke; }
+.hud-over__crest .c-ground { fill: var(--ink-2); }
+.hud-over__crest .c-pole { fill: none; stroke: var(--ink); stroke-width: 4; stroke-linecap: round; }
+.hud-over__crest .c-knob { fill: var(--accent); stroke: var(--ink); stroke-width: 1.5; }
+.hud-over__crest .c-flag { fill: var(--shu); stroke: var(--ink); stroke-width: 2.4; stroke-linejoin: round; }
 .hud-over__crest .c-fold { fill: none; stroke: #ffffff55; stroke-width: 2; stroke-linecap: round; }
 .hud-over__crest .c-ring { fill: none; stroke-width: 8; }
 .hud-over__crest .c-ring--shu { stroke: var(--shu); }
 .hud-over__crest .c-ring--wei { stroke: var(--wei); }
 
 .hud-over__title { margin: 0; font: 700 40px / 1.2 var(--font-kai); letter-spacing: .08em; text-indent: .08em; }
-.hud-over[data-result="win"] .hud-over__title { color: var(--accent); text-shadow: 0 2px 0 color-mix(in srgb, var(--accent) 42%, #000); }
+/* A win is written in sun letters with a chunky outline. */
+.hud-over[data-result="win"] .hud-over__title {
+  color: var(--accent);
+  text-shadow: 2px 0 0 var(--ink), -2px 0 0 var(--ink), 0 2px 0 var(--ink), 0 -2px 0 var(--ink),
+    1.5px 1.5px 0 var(--ink), -1.5px 1.5px 0 var(--ink), 1.5px -1.5px 0 var(--ink), -1.5px -1.5px 0 var(--ink), 0 4px 0 var(--ink);
+}
+[data-theme="chibi"] .hud-over[data-result="win"] .hud-over__title, [data-theme="longzhong"] .hud-over[data-result="win"] .hud-over__title { text-shadow: 0 2px 0 color-mix(in srgb, var(--accent) 42%, #000); }
 .hud-over__sub { margin: 2px 0 0; font-size: 16px; line-height: 24px; color: var(--ink-2); }
 .hud-over__reason {
-  margin: 6px 0 0; padding: 2px 12px; border: 1px solid var(--edge); border-radius: 999px; background: var(--surface-2);
-  font-size: 13px; line-height: 20px; color: var(--ink-2);
+  margin: 6px 0 0; padding: 1px 11px; border: 2px solid var(--edge); border-radius: 999px; background: var(--surface-2);
+  font-size: 13px; font-weight: 700; line-height: 20px; color: var(--ink-2);
 }
 
 .hud-over__body { display: grid; gap: 10px; }
 .hud-over__best { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 10px; margin: 0; }
-.hud-over__tag { padding: 3px 11px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font: 700 13px / 18px var(--font-ui); letter-spacing: .08em; }
+.hud-over__tag { padding: 3px 11px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); box-shadow: inset 0 0 0 2px var(--edge); font: 800 13px / 18px var(--font-ui); letter-spacing: .08em; }
 .hud-over__move { font: 700 22px / 1.2 var(--font-kai); letter-spacing: .08em; }
 .hud-over__self { padding: 1px 9px; border: 1px dashed var(--ink-2); border-radius: 999px; font-size: 13px; line-height: 18px; color: var(--ink-2); }
 
-.hud-over__gains { padding: 10px 14px 12px; border: 1px solid var(--edge); border-radius: 16px; background: var(--surface-2); }
+.hud-over__gains { padding: 9px 13px 11px; border: 2px solid var(--edge); border-radius: 16px; background: var(--surface-2); }
 .hud-over__heading { margin: 0 0 4px; font: 700 13px / 20px var(--font-ui); letter-spacing: .12em; color: var(--ink-2); }
 .hud-over__takeaway { position: relative; min-height: 78px; font-size: 17px; line-height: 26px; }
 /* Until the strategist's line arrives: one skeleton line; with full motion a highlight sweeps across it (transform only). */
 .hud-over__takeaway:empty { clip-path: inset(6px 0 calc(100% - 20px) 0 round 7px); }      /* the line's own rounded box */
 .hud-over__takeaway:empty::before {
-  content: ""; position: absolute; left: 0; right: 0; top: 6px; height: 14px; border-radius: 7px; background: var(--edge);
+  content: ""; position: absolute; left: 0; right: 0; top: 6px; height: 14px; border-radius: 7px;
+  background: color-mix(in srgb, var(--ink-2) 35%, var(--surface-2));
 }
 .hud-over__takeaway:empty::after {
   content: ""; position: absolute; left: 0; top: 6px; width: 45%; height: 14px; border-radius: 7px;
@@ -714,7 +776,7 @@
 .hud-over__facts { display: grid; gap: 6px; }
 .hud-over__stats { margin: 0; text-align: center; font-size: 15px; line-height: 22px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .hud-over__goal, .hud-over__rank { display: flex; align-items: flex-start; gap: 8px; margin: 0; font-size: 15px; line-height: 22px; }
-.hud-over__goal .hud-ico, .hud-over__rank .hud-ico { width: 20px; height: 20px; margin-top: 1px; color: var(--accent); }
+.hud-over__goal .hud-ico, .hud-over__rank .hud-ico { width: 20px; height: 20px; margin-top: 1px; color: var(--accent-text); }
 .hud-over__rank .hud-ico svg { fill: currentColor; }
 .hud-over__rank { align-items: center; color: var(--ink-2); }
 .hud-over__rank strong { font: 700 20px / 22px var(--font-kai); letter-spacing: .08em; color: var(--ink); }
@@ -750,39 +812,40 @@
 /* ===== blocking notice, toast, landscape-phone card ====================================================================== */
 
 .hud-layer--blocking { z-index: calc(var(--z-dialog) + 4); place-items: center; padding: 24px; }
-.hud-layer--blocking > .hud-layer__scrim { background: color-mix(in srgb, var(--page) 82%, transparent); }
+.hud-layer--blocking > .hud-layer__scrim { background: color-mix(in srgb, var(--piece-edge) 70%, transparent); }
 .hud-blocking { width: min(440px, 100%); transform: scale(.92); opacity: 0; }
 .hud-layer.is-open > .hud-blocking { transform: none; opacity: 1; }
 .hud-blocking__retry {
-  display: grid; justify-items: center; gap: 16px; width: 100%; margin: 0; padding: 28px 24px 24px;
-  border: 1.5px solid var(--edge); border-radius: 24px; background: var(--surface); color: var(--ink);
-  font: 600 17px / 28px var(--font-ui); text-align: center;
-  box-shadow: 0 24px 60px #000a; cursor: pointer;
+  display: grid; justify-items: center; gap: 16px; width: 100%; margin: 0; padding: 26.5px 22.5px 22.5px;
+  border: var(--ol) solid var(--edge); border-radius: 24px; background: var(--surface); color: var(--ink);
+  font: 700 17px / 28px var(--font-ui); text-align: center;
+  box-shadow: 0 var(--drop) 0 var(--edge); cursor: pointer;
 }
 .hud-blocking__retry .hud-ico {
   width: 64px; height: 64px; padding: 15px; border-radius: 50%;
   background: var(--accent); color: var(--accent-ink);
-  box-shadow: 0 3px 0 color-mix(in srgb, var(--accent) 55%, #000);
+  box-shadow: inset 0 0 0 var(--ol) var(--edge), 0 3px 0 var(--edge);
 }
-.hud-blocking__retry .hud-ico svg { stroke-width: 2.4; }
-.hud-blocking__retry:active .hud-ico { transform: translateY(2px); box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 55%, #000); }
+.hud-blocking__retry .hud-ico svg { stroke-width: 2.6; }
+.hud-blocking__retry:active .hud-ico { transform: translateY(2px); box-shadow: inset 0 0 0 var(--ol) var(--edge), 0 1px 0 var(--edge); }
 
+/* The toast is a sun-coloured sign (the box is the old one: the padding gives the outline back). */
 :where(#overlays) > .hud-toast { pointer-events: none; }
 .hud-toast {
   position: absolute; left: 50%; top: calc(env(safe-area-inset-top, 0px) + var(--group-y, 0px) + var(--top, 48px) + 12px); z-index: var(--z-toast);
-  width: max-content; max-width: min(480px, 100% - 32px); padding: 10px 20px;
-  border-radius: 22px; background: var(--ink); color: var(--page);
-  font: 600 15px / 23px var(--font-ui); text-align: center;
-  box-shadow: 0 10px 30px #0008;
+  width: max-content; max-width: min(480px, 100% - 32px); padding: 7px 17px;
+  border: var(--ol) solid var(--edge); border-radius: 22px; background: var(--accent); color: var(--accent-ink);
+  font: 700 15px / 23px var(--font-ui); text-align: center;
+  box-shadow: 0 var(--drop) 0 var(--edge);
   transform: translate(-50%, -10px); opacity: 0;
 }
 .hud-toast.is-on { transform: translate(-50%, 0); opacity: 1; }
 
 .hud-rotate {
   position: absolute; left: 50%; top: calc(env(safe-area-inset-top, 0px) + var(--top, 36px) + 6px); z-index: calc(var(--z-sheet) + 1);
-  display: flex; align-items: center; gap: 12px; max-width: calc(100% - 16px); padding: 6px 8px 9px 16px;
-  border: 1.5px solid var(--edge); border-radius: 18px; background: var(--surface);
-  box-shadow: 0 12px 32px #0008;
+  display: flex; align-items: center; gap: 12px; max-width: calc(100% - 16px); padding: 4.5px 6.5px 7.5px 14.5px;
+  border: var(--ol) solid var(--edge); border-radius: 18px; background: var(--surface);
+  box-shadow: 0 var(--drop) 0 var(--edge);
   transform: translateX(-50%);
 }
 .hud-rotate__text { margin: 0; font-size: 15px; line-height: 22px; white-space: nowrap; }

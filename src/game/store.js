@@ -195,13 +195,17 @@ function unit(v) {
   return n === null ? undefined : Math.min(1, Math.max(0, n));
 }
 
+/** The look the settings were saved under: 2 is the sand table (the first look had no number). */
+const LOOK = 2;
+
 /**
  * One row per setting: [default, validate]. validate returns the accepted (possibly clamped) value, or undefined to refuse.
  * Adding a setting is one row here and one property in the Settings typedef; no schema bump.
  * @type {{ readonly [K in SettingKey]: readonly [Settings[K], (v:unknown) => Settings[K]|undefined] }}
  */
 const SETTINGS_SPEC = {
-  theme: ['chibi', oneOf(['chibi', 'longzhong', 'shachang'])],
+  theme: ['shachang', oneOf(['chibi', 'longzhong', 'shachang'])],
+  look: [LOOK, (v) => (v === LOOK ? LOOK : undefined)],
   sfx: [true, flag],
   music: [true, flag],
   volume: [1.0, unit],
@@ -251,7 +255,12 @@ function defaultSettings() {
  */
 export function sanitizeSettings(raw) {
   const out = defaultSettings();
-  if (isRecord(raw)) for (const key of SETTING_KEYS) applySetting(out, key, raw[key]);
+  if (isRecord(raw)) {
+    for (const key of SETTING_KEYS) applySetting(out, key, raw[key]);
+    // A record saved under an older look chose its theme among pictures that no longer exist: it gets the new
+    // default once. The record is written back with the current `look`, so a theme picked after that stays.
+    if (raw.look !== LOOK) resetSetting(out, 'theme');
+  }
   return out;
 }
 

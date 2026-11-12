@@ -61,22 +61,24 @@
   font-size: var(--fs); line-height: 1;
   white-space: nowrap;
   color: var(--band-ink);
-  /* tone "mine" */
-  --band: color-mix(in srgb, var(--accent) 92%, transparent);
-  --band-ink: var(--accent-ink);
-  --band-line: transparent;
-  --band-ink-edge: color-mix(in srgb, var(--band-ink) 34%, transparent);     /* the ink bleeding into the band */
+  /* A cartoon ribbon: an opaque band with a dark outline, cream letters with a chunky dark outline (the same in
+   * every theme: the ribbon brings its own ground). Tone "mine": the sun ribbon. */
+  --band: var(--accent);
+  --band-ink: #fff5dc;
+  --band-rim: #3a1f0c;                               /* the outline of the letters */
+  --band-line: #3a1f0c;                              /* the outline of the ribbon */
+  --band-ink-edge: var(--band-rim);
 }
 .fx-banner[data-tone="danger"] {
-  --band: var(--danger);
-  --band-ink: var(--danger-ink);
+  --band: var(--red-b);
 }
 .fx-banner[data-tone="calm"] {
-  --band: color-mix(in srgb, var(--surface) 92%, transparent);
+  --band: var(--surface);
   --band-ink: var(--ink);
+  --band-rim: var(--surface);
   --band-line: var(--edge);
 }
-.fx-banner[data-kind="river"] { --band-ink: var(--fx-cool); }
+.fx-banner[data-kind="river"] { --band-ink: #bfeaff; --band-rim: #0c3b6b; }
 
 .fx-banner__band,
 .fx-popup__band {
@@ -84,17 +86,20 @@
   width: 100%; height: 100%;
   overflow: visible;
 }
-.fx-brush--shade { fill: #000; fill-opacity: .28; transform: translate(0, 4px); }
+.fx-brush--shade { fill: #3a1f0c; fill-opacity: .55; transform: translate(0, 4px); }
 .fx-banner .fx-brush--fill {
   fill: var(--band);
-  stroke: var(--band-line); stroke-width: 1px; vector-effect: non-scaling-stroke;
+  stroke: var(--band-line); stroke-width: 3px; stroke-linejoin: round; vector-effect: non-scaling-stroke;
 }
 
 .fx-banner__text {
   position: relative;
   padding-left: .06em;                               /* balances the letter-spacing after the last glyph */
   letter-spacing: .06em;
-  text-shadow: 0 0 .08em var(--band-ink-edge), 0 .06em 0 #0008;
+  text-shadow:
+    .06em 0 0 var(--band-rim), -.06em 0 0 var(--band-rim), 0 .06em 0 var(--band-rim), 0 -.06em 0 var(--band-rim),
+    .045em .045em 0 var(--band-rim), -.045em .045em 0 var(--band-rim), .045em -.045em 0 var(--band-rim), -.045em -.045em 0 var(--band-rim),
+    0 .12em 0 var(--band-rim);
 }
 /* A full-width ！ draws in the left third of its box: shift the label so the glyphs look centred. */
 .fx-banner__text[data-tail="mark"] { padding-left: .36em; }
@@ -105,11 +110,11 @@
   position: absolute; left: 0; top: 0;
   font-size: var(--fs); line-height: 1.15;
   white-space: nowrap; text-align: center;
-  --rim: #0b0f1d;                                    /* outline colour */
-  --rim-w: .055em;
+  --rim: #3a1f0c;                                    /* outline colour: the dark brown of every cartoon outline */
+  --rim-w: .07em;
   --rim-2: transparent;                              /* a second, outer line (only where the first is light) */
   --rim-2w: calc(1.9 * var(--rim-w));
-  color: #ffd166;
+  color: #ffd43b;
 }
 .fx-popup__text {
   position: relative; display: block;
@@ -122,27 +127,27 @@
     0 var(--rim-2w) 0 var(--rim-2), 0 calc(-1 * var(--rim-2w)) 0 var(--rim-2),
     calc(.7 * var(--rim-2w)) calc(.7 * var(--rim-2w)) 0 var(--rim-2), calc(-.7 * var(--rim-2w)) calc(.7 * var(--rim-2w)) 0 var(--rim-2),
     calc(.7 * var(--rim-2w)) calc(-.7 * var(--rim-2w)) 0 var(--rim-2), calc(-.7 * var(--rim-2w)) calc(-.7 * var(--rim-2w)) 0 var(--rim-2),
-    0 .1em .08em #000a;
+    0 .14em 0 var(--rim);
 }
 .fx-popup__text[data-tail="mark"] { padding-left: .3em; }      /* centres the glyphs over the square (see the banner) */
-.fx-popup[data-tone="good"] { color: var(--sel); --rim: var(--field-b); --rim-w: .05em; }
-.fx-popup[data-tone="great"] { --rim: #2a1600; --rim-w: .06em; }                        /* gold, dark outline */
-/* gold, white outline; a dark hairline inside and a dark line outside keep both apart from a light board */
-.fx-popup[data-tone="brilliant"] { --rim: #ffffff; --rim-w: .045em; --rim-2: #3a1c00; }
+.fx-popup[data-tone="good"] { color: #ffffff; --rim: #0a6b41; --rim-w: .06em; }          /* white, jade outline */
+.fx-popup[data-tone="great"] { --rim: #3a1f0c; --rim-w: .07em; }                        /* sun, dark outline */
+/* sun, white outline; a dark hairline inside and a dark line outside keep both apart from a light board */
+.fx-popup[data-tone="brilliant"] { --rim: #ffffff; --rim-w: .05em; --rim-2: #3a1f0c; }
 .fx-popup[data-tone="brilliant"] .fx-popup__text { -webkit-text-stroke: .012em #6b3a00; }
-.fx-popup[data-tone="lord"] { padding: .22em .8em .26em; --rim: #2a0a06; --rim-w: .04em; }    /* gold on a small brushed band */
-.fx-popup[data-tone="lord"] .fx-brush--fill { fill: color-mix(in srgb, var(--shu) 82%, #000); }
+.fx-popup[data-tone="lord"] { padding: .22em .8em .26em; --rim: #3a1f0c; --rim-w: .05em; }    /* sun on a small red ribbon */
+.fx-popup[data-tone="lord"] .fx-brush--fill { fill: var(--red-b); stroke: #3a1f0c; stroke-width: 2.5px; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 
 /* 自己想的: the popup's Kai face, small and quiet, on its own plate so it reads on every board. Alone, or hanging under a
  * praise popup. */
 .fx-popup[data-tone="mark"],
 .fx-popup__mark {
   font-size: calc(.42 * var(--c)); line-height: 1.25;
-  color: var(--ink-2);
+  color: var(--ink);
   padding: .14em .6em;
   border-radius: 1em;
-  background: color-mix(in srgb, var(--surface) 90%, transparent);
-  box-shadow: 0 0 0 1px var(--edge);
+  background: var(--surface);
+  box-shadow: 0 0 0 2px var(--edge), 0 2px 0 2px var(--edge);
   text-shadow: none;
 }
 .fx-popup__mark {
@@ -160,9 +165,9 @@
   white-space: nowrap;
   color: var(--danger);                              /* seal red */
 }
-/* Seal red has to read on the field of every theme (CONTRACT-NOTES K-95). In 沙场 --danger is a pale coral on the sand,
-   so the seal takes the theme's darker red there, the one board.css uses for the marks it draws on the field
-   (--danger-mark). The theme is on <html> and on .bv; either one matches. */
+/* Seal red has to read wherever the seal lands (CONTRACT-NOTES K-95): it is pressed on its own opaque paper slip
+   (--surface), on which --danger reads in every theme. 沙场 keeps its own rule (--arrow-threat, the same red there
+   today). The theme is on <html> and on .bv; either one matches. */
 [data-theme="shachang"] .fx-stamp { color: var(--arrow-threat); }
 .fx-stamp__seal {
   display: block;
@@ -172,8 +177,8 @@
   border-radius: .12em;
   padding: .08em .3em;
   letter-spacing: .04em;
-  background: color-mix(in srgb, var(--field-a) 88%, transparent);       /* the slip the seal is pressed on: a piece of the field */
-  box-shadow: 0 .06em .16em #0006;
+  background: var(--surface);                        /* the slip the seal is pressed on: a piece of paper */
+  box-shadow: 0 .07em 0 currentColor;
 }
 .fx-stamp__seal[data-tail="mark"] { text-indent: .28em; }        /* balances the empty half of the trailing ！ */
 

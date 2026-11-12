@@ -1,0 +1,118 @@
+/* 弈间 — the soldiers (look v2, the sand table). Loaded after board.css.
+ *
+ * DOM (built by board-view.js):
+ *   div.piece.red|black            a square of .88 c centred on the grid point (board.css places and layers it)
+ *     div.piece__shadow            a flat soft ellipse on the sand, under the feet
+ *     div.piece__body              inset: 0; board.css puts lift, scale and rotation here
+ *       svg.piece__art             src/ui/piece-art.js, a 100 x 128 box whose point (50, 72) is the square's centre
+ *       span.piece__glyph          the character, HTML text over the shield's plate
+ *
+ * The pieces look the same in all three themes: their colours are the custom properties below, not theme tokens.
+ * Nothing here moves and nothing is blurred: the picture is the same with full and with reduced motion.
+ * Faces are switched with display.
+ */
+
+/* ---- colours of the two armies ---------------------------------------------------------------------------------------- */
+
+.piece.red {                                 /* 蜀: round shield, light plate, dark ink */
+  --pc-out: #5a1a10; --pc-rim: #ee4a32; --pc-rimhi: #ffa184; --pc-edge: #a02616;
+  --pc-plate: #fff6dd; --pc-platelo: #fbe0aa; --pc-ring: #f08a6c; --pc-glyph: #c81e16;
+  --pc-krim: #ffc93c; --pc-khi: #fff0a8; --pc-kedge: #c9861a; --pc-kring: #e09a1a;
+  --pc-cloth: #ee4a32; --pc-clothlo: #b82c1c; --pc-metal: #ffc93c; --pc-metallo: #e09a1a; --pc-skin: #ffdcb5;
+  --pc-coat: #e39a52; --pc-mane: #6e3414; --pc-hide: #d3cbdb; --pc-hidelo: #a79cb6; --pc-earin: #ffb3a6;
+  --pc-iron: #e2a236; --pc-ironlo: #b9741c; --pc-band: #d8402c; --pc-wood: #c98a45; --pc-woodlo: #8a5226;
+  --pc-shoe: #5a2a14; --pc-cape: #ee4a32; --pc-gem: #ee4a32;
+}
+.piece.black {                               /* 魏: octagonal shield, dark plate, light ink */
+  --pc-out: #0f1830; --pc-rim: #7fa0f2; --pc-rimhi: #d3e0ff; --pc-edge: #121d42;
+  --pc-plate: #2b417f; --pc-platelo: #22346a; --pc-ring: #6c8be0; --pc-glyph: #f6f8ff;
+  --pc-krim: #e9efff; --pc-khi: #ffffff; --pc-kedge: #8e9fc8; --pc-kring: #e9efff;
+  --pc-cloth: #4a6bd0; --pc-clothlo: #2c4192; --pc-metal: #d6e0f7; --pc-metallo: #8fa2cf; --pc-skin: #ffdcb5;
+  --pc-coat: #97a7cd; --pc-mane: #222d55; --pc-hide: #8a99c0; --pc-hidelo: #62719c; --pc-earin: #c9b9ea;
+  --pc-iron: #5b6a96; --pc-ironlo: #39466f; --pc-band: #d6e0f7; --pc-wood: #7d8db8; --pc-woodlo: #3d4a78;
+  --pc-shoe: #18203c; --pc-cape: #7a55d6; --pc-gem: #b79cff;
+}
+
+/* ---- the three parts -------------------------------------------------------------------------------------------------- */
+
+.piece__art {                                /* (50, 72) of the 100 x 128 box lands on the centre of the .88 c square */
+  position: absolute; left: calc(-.06 * var(--c)); top: calc(-.28 * var(--c));
+  width: var(--c); height: calc(1.28 * var(--c));
+  display: block; overflow: visible; pointer-events: none;
+}
+
+.piece__glyph {                              /* a tight box: its rectangle is the character's em square */
+  position: absolute; inset: auto; left: 50%; top: 50%;
+  width: calc(.49 * var(--c)); height: calc(.49 * var(--c));
+  margin: calc(-.245 * var(--c)) 0 0 calc(-.245 * var(--c)); padding: 0;
+  display: block; text-align: center; white-space: nowrap;
+  font: 700 calc(.49 * var(--c))/1 var(--font-kai); color: var(--pc-glyph); text-shadow: none;
+  pointer-events: none;
+}
+
+.piece__shadow {                             /* under the feet: the art's feet end .54 c below the grid point */
+  position: absolute; inset: auto; left: 3%; right: 3%; top: 93%; height: 22%; border-radius: 50%;
+  background: radial-gradient(closest-side, #6b3f0e70 0 55%, #6b3f0e00 100%);      /* soft edge from the gradient */
+  pointer-events: none;
+}
+
+/* ---- paint: the classes piece-art.js writes --------------------------------------------------------------------------- */
+
+.piece__art .po { stroke: var(--pc-out); stroke-linejoin: round; stroke-linecap: round; }
+
+.piece__art .pf-out { fill: var(--pc-out); }
+.piece__art .pf-rim { fill: var(--pc-rim); }
+.piece__art .pf-edge { fill: var(--pc-edge); }
+.piece__art .pf-plate { fill: var(--pc-plate); }
+.piece__art .pf-platelo { fill: var(--pc-platelo); }
+.piece__art .pf-krim { fill: var(--pc-krim); }
+.piece__art .pf-kedge { fill: var(--pc-kedge); }
+.piece__art .pf-cloth { fill: var(--pc-cloth); }
+.piece__art .pf-clothlo { fill: var(--pc-clothlo); }
+.piece__art .pf-metal { fill: var(--pc-metal); }
+.piece__art .pf-metallo { fill: var(--pc-metallo); }
+.piece__art .pf-skin { fill: var(--pc-skin); }
+.piece__art .pf-coat { fill: var(--pc-coat); }
+.piece__art .pf-mane { fill: var(--pc-mane); }
+.piece__art .pf-hide { fill: var(--pc-hide); }
+.piece__art .pf-hidelo { fill: var(--pc-hidelo); }
+.piece__art .pf-earin { fill: var(--pc-earin); }
+.piece__art .pf-iron { fill: var(--pc-iron); }
+.piece__art .pf-ironlo { fill: var(--pc-ironlo); }
+.piece__art .pf-band { fill: var(--pc-band); }
+.piece__art .pf-wood { fill: var(--pc-wood); }
+.piece__art .pf-woodlo { fill: var(--pc-woodlo); }
+.piece__art .pf-shoe { fill: var(--pc-shoe); }
+.piece__art .pf-cape { fill: var(--pc-cape); }
+.piece__art .pf-gem { fill: var(--pc-gem); }
+.piece__art .pf-white { fill: #fff; }
+.piece__art .pf-blush { fill: #ff8f7a; opacity: .75; }
+.piece__art .pf-steel { fill: #eef2f8; }
+.piece__art .pf-ivory { fill: #fffdf2; }
+.piece__art .pf-blaze { fill: #fff3da; }
+.piece__art .pf-bore { fill: #1c1322; }
+.piece__art .pf-spark { fill: #ffd43b; }
+
+.piece__art .ps-out { stroke: var(--pc-out); }
+.piece__art .ps-rimhi { stroke: var(--pc-rimhi); }
+.piece__art .ps-khi { stroke: var(--pc-khi); }
+.piece__art .ps-ring { stroke: var(--pc-ring); opacity: .9; }
+.piece__art .ps-kring { stroke: var(--pc-kring); opacity: .9; }
+.piece__art .ps-cloth { stroke: var(--pc-cloth); }
+.piece__art .ps-clothlo { stroke: var(--pc-clothlo); }
+.piece__art .ps-metal { stroke: var(--pc-metal); }
+.piece__art .ps-hidelo { stroke: var(--pc-hidelo); }
+.piece__art .ps-woodlo { stroke: var(--pc-woodlo); }
+.piece__art .ps-white { stroke: #fff; }
+.piece__art .ps-shine { stroke: #fff; opacity: .4; }
+
+/* ---- faces: one of four ----------------------------------------------------------------------------------------------- */
+/* default: calm eyes. is-dizzy and is-fallen: crosses. is-scared: wide eyes. is-happy: smiling arcs.
+   When several classes meet, the order is fallen / dizzy, then scared, then happy. */
+
+.piece__art .ev { display: none; }
+.piece__art .ev-n { display: inline; }
+.piece:is(.is-scared, .is-dizzy, .is-happy, .is-fallen) .piece__art .ev-n { display: none; }
+.piece:is(.is-dizzy, .is-fallen) .piece__art .ev-d { display: inline; }
+.piece.is-scared:not(.is-dizzy, .is-fallen) .piece__art .ev-s { display: inline; }
+.piece.is-happy:not(.is-scared, .is-dizzy, .is-fallen) .piece__art .ev-h { display: inline; }

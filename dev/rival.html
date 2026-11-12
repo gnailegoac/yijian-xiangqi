@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="shachang" data-motion="full">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>dev · 司马懿</title>
+<link rel="stylesheet" href="../styles/tokens.css">
+<link rel="stylesheet" href="../styles/themes.css">
+<link rel="stylesheet" href="../styles/rival.css">
+<style>
+  /* Harness chrome only. Everything that belongs to the rival is in ../styles/rival.css.
+     ?still=1 switches the page to reduced motion (data-motion="reduced" and setReducedMotion(true)). */
+  body { margin: 0; padding: 10px 14px 24px; color: var(--ink); font: 13px/18px var(--font-ui); }
+  h1 { margin: 0 0 6px; font: 700 18px/24px var(--font-kai); }
+  h2 { margin: 14px 0 6px; font: 700 14px/20px var(--font-ui); color: var(--ink-2); }
+  .sheet { display: grid; grid-template-columns: 76px 190px 216px 216px 1fr; gap: 6px 8px; align-items: stretch; max-width: 1150px; }
+  .sheet > b { align-self: center; font-weight: 600; color: var(--ink-2); }
+  .sheet > .head { align-self: end; font-size: 12px; color: var(--ink-2); }
+  /* a stand-in for the top bar: as high as the real one, on the dark theme surface and on a sunny camp */
+  .bar { --top: 48px; position: relative; display: flex; align-items: flex-start; height: 60px; padding: 0 0 0 6px; border-radius: 10px; overflow: hidden; }
+  .bar--dark { background: linear-gradient(var(--surface) 0 48px, var(--page) 48px); }
+  .bar--sun { background: linear-gradient(#7fd0ff 0 26px, #b9e88a 26px 48px, #8ed06a 48px); }
+  .big { display: grid; grid-template-columns: 76px repeat(5, 150px); gap: 10px 8px; align-items: center; }
+  .big > b { font-weight: 600; color: var(--ink-2); }
+  .big .cell { --top: 124px; --rival-d: 120px; display: grid; justify-items: center; gap: 2px; padding: 6px 0 4px; border-radius: 12px;
+               background: linear-gradient(#7fd0ff 0 58%, #a6e07a 58%); color: #2a1f3d; font-weight: 600; }
+  .big .rival__plate, .big .rival__say { display: none; }
+  @media (max-width: 1000px) {
+    .sheet { display: flex; flex-wrap: wrap; }
+    .sheet > .head { display: none; }
+    .sheet > b { flex: 0 0 100%; }
+    .sheet > .bar { flex: 0 0 190px; }
+    .sheet > .bar.say { flex: 0 0 216px; }
+    .sheet > .bar.wide.say { flex: 0 0 326px; }
+    .big { grid-template-columns: repeat(auto-fill, 150px); }
+    .big > b { grid-column: 1 / -1; }
+  }
+</style>
+</head>
+<body>
+<h1>司马懿 · rival portrait</h1>
+
+<h2>top bar: 44 px (data-layout="compact") and 56 px (data-layout="landscape"), each without and with a line</h2>
+<div class="sheet" id="sheet">
+  <span class="head">mood</span>
+  <span class="head">compact 44</span>
+  <span class="head">compact 44 + line</span>
+  <span class="head wide">landscape 56</span>
+  <span class="head wide">landscape 56 + line</span>
+</div>
+
+<h2>120 px: closed mouth, then the mouth that opens while a line shows</h2>
+<div class="big" id="big"></div>
+
+<script type="module">
+import { createRivalView } from '../src/ui/rival-view.js';
+
+/** @type {ReadonlyArray<{mood: 'calm'|'thinking'|'frown'|'rattled'|'smug', line: string}>} */
+const MOODS = [
+  { mood: 'calm', line: '请。' },
+  { mood: 'thinking', line: '容我想想……' },
+  { mood: 'frown', line: '嗯？这一步不错。' },
+  { mood: 'rattled', line: '哎呀！没料到！' },
+  { mood: 'smug', line: '哼，有点胆量。' },
+];
+
+const still = new URLSearchParams(location.search).has('still');
+if (still) document.documentElement.dataset.motion = 'reduced';
+
+/** @param {HTMLElement} parent @param {string} cls @param {string} [layout] */
+function box(parent, cls, layout) {
+  const el = document.createElement('div');
+  el.className = cls;
+  if (layout) el.dataset.layout = layout;
+  parent.append(el);
+  return el;
+}
+
+/** @param {HTMLElement} host @param {'calm'|'thinking'|'frown'|'rattled'|'smug'} mood @param {string} [line] */
+function show(host, mood, line) {
+  const view = createRivalView(host);
+  if (still) view.setReducedMotion(true);
+  view.set(line ? { mood, line } : { mood });
+  if (line) setInterval(() => view.set({ mood, line }), 2300);      // keep the line up for the harness
+}
+
+const sheet = /** @type {HTMLElement} */ (document.getElementById('sheet'));
+const big = /** @type {HTMLElement} */ (document.getElementById('big'));
+
+for (const { mood, line } of MOODS) {
+  const label = document.createElement('b');
+  label.textContent = mood;
+  sheet.append(label);
+  show(box(sheet, 'bar bar--dark', 'compact'), mood);
+  show(box(sheet, 'bar bar--sun say', 'compact'), mood, line);
+  show(box(sheet, 'bar bar--dark wide', 'landscape'), mood);
+  show(box(sheet, 'bar bar--sun wide say', 'landscape'), mood, line);
+}
+
+for (const withLine of [false, true]) {
+  const label = document.createElement('b');
+  label.textContent = withLine ? 'with a line' : 'no line';
+  big.append(label);
+  for (const { mood, line } of MOODS) {
+    const cell = box(big, 'cell');
+    show(cell, mood, withLine ? line : undefined);
+    cell.append(mood);
+  }
+}
+</script>
+</body>
+</html>

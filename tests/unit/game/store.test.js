@@ -16,7 +16,7 @@ const T0 = 1790000000000;             // startedAt of the fixtures
 const NOW = T0 + 100000000;           // the injected clock: 100 000 s after the fixtures were "played"
 const GAME_ID = /^g-[a-z0-9]{6,16}$/;
 const GAME_KEYS = ['schema', 'id', 'humanColor', 'moves', 'result', 'startedAt', 'endedAt', 'activeMs', 'counted', 'drawFrom', 'seed', 'skill', 'memory', 'start'];
-const DEFAULT_SETTINGS = { schema: 2, theme: 'chibi', sfx: true, music: true, volume: 1, motion: 'auto', haptics: true, typeTicks: false, readAloud: false,
+const DEFAULT_SETTINGS = { schema: 2, theme: 'shachang', look: 2, sfx: true, music: true, volume: 1, motion: 'auto', haptics: true, typeTicks: false, readAloud: false,
                            side: 'red', coach: 'auto', freeText: true, talk: 'smart' };
 
 /** A stand-in for src/core/teacher.js: only the three functions the store may call. */
@@ -657,10 +657,10 @@ test('without injected dependencies the store uses the page localStorage and the
 
 test('settings with unknown keys or bad values fall back per key', () => {
   assert.deepEqual(sanitizeSettings({
-    schema: 9, theme: 'longzhong', sfx: 'yes', music: false, volume: 7, motion: 'fast', haptics: 0, typeTicks: true, readAloud: null, side: 'black',
+    schema: 9, theme: 'longzhong', look: 2, sfx: 'yes', music: false, volume: 7, motion: 'fast', haptics: 0, typeTicks: true, readAloud: null, side: 'black',
     coach: 'cloud', freeText: false, talk: 'more', nickname: '小明', age: 10,
   }), {
-    schema: 2, theme: 'longzhong', sfx: true, music: false, volume: 1, motion: 'auto', haptics: true, typeTicks: true, readAloud: false, side: 'black',
+    schema: 2, theme: 'longzhong', look: 2, sfx: true, music: false, volume: 1, motion: 'auto', haptics: true, typeTicks: true, readAloud: false, side: 'black',
     coach: 'auto', freeText: false, talk: 'more',
   });
   // every documented value is accepted
@@ -668,8 +668,18 @@ test('settings with unknown keys or bad values fall back per key', () => {
                                                coach: ['auto', 'local'], talk: ['smart', 'more'], sfx: [true, false], music: [true, false],
                                                haptics: [true, false], typeTicks: [true, false], readAloud: [true, false], freeText: [true, false],
                                                volume: [0, 0.35, 1] })) {
-    for (const value of values) assert.deepEqual(sanitizeSettings({ [key]: value }), { ...DEFAULT_SETTINGS, [key]: value }, `${key}=${value}`);
+    for (const value of values) assert.deepEqual(sanitizeSettings({ look: 2, [key]: value }), { ...DEFAULT_SETTINGS, [key]: value }, `${key}=${value}`);
   }
+  // The one-time reset of the theme: a record saved under the first look (no `look`, or another number) chose its
+  // theme among pictures that no longer exist, so it gets the default theme and keeps everything else; a record
+  // saved under the current look keeps the theme it names.
+  for (const look of [undefined, 1, '2', 3, null]) {
+    assert.deepEqual(sanitizeSettings({ ...DEFAULT_SETTINGS, look, theme: 'chibi', volume: 0.5, side: 'black' }),
+      { ...DEFAULT_SETTINGS, volume: 0.5, side: 'black' }, `look=${look}`);
+  }
+  assert.equal(sanitizeSettings({ ...DEFAULT_SETTINGS, theme: 'chibi' }).theme, 'chibi');
+  assert.equal(sanitizeSettings({ theme: 'longzhong' }).theme, 'shachang');
+  assert.equal(sanitizeSettings(null).look, 2);
   // volume is clamped to 0..1; anything that is not a finite number is the default
   assert.equal(sanitizeSettings({ volume: -3 }).volume, 0);
   assert.equal(sanitizeSettings({ volume: 1.01 }).volume, 1);
@@ -912,14 +922,17 @@ test('importBackup validates everything before writing; a bad file changes nothi
   const dump = storage.dump();
   assert.deepEqual(JSON.parse(dump[KEYS.game]), ok.game);
   assert.deepEqual(JSON.parse(dump[KEYS.profile]), ok.profile);
-  assert.deepEqual(JSON.parse(dump[KEYS.settings]), { ...ok.settings, coach: 'auto' });
+  // the fixture is a backup made under the first look (it has no `look`): its theme gives way to the default once
+  const imported = { ...ok.settings, coach: 'auto', look: 2, theme: 'shachang' };
+  assert.equal(ok.settings.look, undefined);
+  assert.deepEqual(JSON.parse(dump[KEYS.settings]), imported);
   assert.deepEqual(writesTo(storage, KEYS.v1), []);
 
   // after the reload the imported state is what loads, and the import is announced exactly once
   const next = open().load();
   assert.deepEqual(next.game, ok.game);
   assert.deepEqual(next.profile, ok.profile);
-  assert.deepEqual(next.settings, { ...ok.settings, coach: 'auto' });
+  assert.deepEqual(next.settings, imported);
   assert.deepEqual(next.notices, ['imported']);
   assert.equal(next.firstVisit, false);
   assert.deepEqual(open().load().notices, []);

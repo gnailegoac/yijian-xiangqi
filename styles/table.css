@@ -1,0 +1,122 @@
+/* 弈间: the sand table (look v2, "concept C"). Every rule of the board art that src/ui/table-art.js draws into
+ * svg.bv-art. Link it after board.css.
+ *
+ * The colours of a theme are custom properties on .bv[data-theme] and on .bv-art[data-theme] (during a theme change
+ * the old art fades out inside a .bv that already carries the new theme, so the art names its own).
+ * The picture is still: nothing in this file moves, in full motion or reduced.
+ */
+
+/* 沙场: the bright day table of the mock (sand, a blue river, a wooden frame) */
+.bv[data-theme="shachang"], .bv-art[data-theme="shachang"] {
+  --tb-ink: #3a1f0c;
+  --tb-wood-a: #d9924c; --tb-wood-b: #b56c30; --tb-wood-hi: #f3b878;
+  --tb-fit: #ffc93c; --tb-fit-hi: #fff0a8; --tb-fit-dot: #c9861a;
+  --tb-sand-a: #fde092; --tb-sand-b: #f8cf72; --tb-sand-c: #f0bb58;
+  --tb-grain-lo: #d99f3c; --tb-grain-hi: #fff0b8; --tb-shade: #8a4f12;
+  --tb-river-a: #7adcfb; --tb-river-b: #2f9fe6; --tb-river-edge: #1877b8; --tb-foam: #ffffff;
+  --tb-rtext: #ffffff; --tb-rtext-edge: #146aa8;
+  --tb-line: #8f561f; --tb-line-hi: #ffeeb4;
+  --tb-floor-blk: #c6d2fa; --tb-tile-blk: #a9b9ee; --tb-floor-red: #ffc09c; --tb-tile-red: #f5a57e;
+  --tb-label: #fff3d2; --tb-label-edge: #5a2f12;
+  --tb-plank: #d08a48; --tb-plank-line: #8a4f22;
+}
+
+/* 赤壁: the same table at night (deep blue sand, a moonlit river, grooves lit warm by the lanterns) */
+.bv[data-theme="chibi"], .bv-art[data-theme="chibi"] {
+  --tb-ink: #070c20;
+  --tb-wood-a: #8a4c32; --tb-wood-b: #54281a; --tb-wood-hi: #c98652;
+  --tb-fit: #ffc93c; --tb-fit-hi: #fff0a8; --tb-fit-dot: #c9861a;
+  --tb-sand-a: #27447f; --tb-sand-b: #1b3168; --tb-sand-c: #132350;
+  --tb-grain-lo: #0c1838; --tb-grain-hi: #5d83d6; --tb-shade: #03061a;
+  --tb-river-a: #a6d4ff; --tb-river-b: #3f78d0; --tb-river-edge: #0a1740; --tb-foam: #f4f9ff;
+  --tb-rtext: #fff6d6; --tb-rtext-edge: #12296a;
+  --tb-line: #ffb648; --tb-line-hi: #060b22;
+  --tb-floor-blk: #2c4c98; --tb-tile-blk: #3b60b2; --tb-floor-red: #5e2c4a; --tb-tile-red: #7c3d5c;
+  --tb-label: #ffe9b0; --tb-label-edge: #1c0d06;
+  --tb-plank: #8a5636; --tb-plank-line: #3c1e10;
+  --tb-glow: #ff9a3c; --tb-moon: #fff3c0;
+}
+
+/* 隆中: a calm version (pale green-grey gravel, a jade river, a bamboo frame) */
+.bv[data-theme="longzhong"], .bv-art[data-theme="longzhong"] {
+  --tb-ink: #27412c;
+  --tb-wood-a: #b9da88; --tb-wood-b: #74a856; --tb-wood-hi: #e4f4be;
+  --tb-fit: #f0d478; --tb-fit-hi: #fff6cc; --tb-fit-dot: #a98a2c;
+  --tb-sand-a: #eff3e9; --tb-sand-b: #dfe6d8; --tb-sand-c: #c9d5c5;
+  --tb-grain-lo: #a3b4a0; --tb-grain-hi: #ffffff; --tb-shade: #48644e;
+  --tb-river-a: #8fe6c8; --tb-river-b: #34b08e; --tb-river-edge: #1c7a62; --tb-foam: #f4fff9;
+  --tb-rtext: #ffffff; --tb-rtext-edge: #176e58;
+  --tb-line: #44604c; --tb-line-hi: #fbfdf6;
+  --tb-floor-blk: #cfdaf0; --tb-tile-blk: #b3c3e4; --tb-floor-red: #f6d8c8; --tb-tile-red: #e6bba8;
+  --tb-label: #f6ffe8; --tb-label-edge: #27412c;
+  --tb-plank: #d2e2a0; --tb-plank-line: #6c8c48;
+}
+
+/* ---- gradients and the grain pattern ------------------------------------------------------------------------------- */
+
+.tb-stop-wa { stop-color: var(--tb-wood-a); }
+.tb-stop-wb { stop-color: var(--tb-wood-b); }
+.tb-stop-sa { stop-color: var(--tb-sand-a); }
+.tb-stop-sb { stop-color: var(--tb-sand-b); }
+.tb-stop-sc { stop-color: var(--tb-sand-c); }
+.tb-stop-ra { stop-color: var(--tb-river-a); }
+.tb-stop-rb { stop-color: var(--tb-river-b); }
+.tb-stop-sh { stop-color: var(--tb-shade); }
+.tb-grain-lo { stroke: var(--tb-grain-lo); stroke-width: 3.2; }
+.tb-grain-hi { stroke: var(--tb-grain-hi); stroke-width: 2.6; }
+
+/* ---- the frame ------------------------------------------------------------------------------------------------------ */
+
+.tb-frame { stroke: var(--tb-ink); stroke-width: 6; }
+.tb-frame-hi { fill: none; stroke: var(--tb-wood-hi); stroke-width: 2.5; opacity: .9; }
+.tb-joints { fill: none; stroke: var(--tb-ink); stroke-width: 2.6; stroke-linecap: round; opacity: .5; }
+.tb-fit { fill: var(--tb-fit); stroke: var(--tb-ink); stroke-width: 4; stroke-linejoin: round; }
+.tb-fit-hi { fill: none; stroke: var(--tb-fit-hi); stroke-width: 3; stroke-linecap: round; }
+.tb-fit-dot { stroke: var(--tb-fit-dot); stroke-width: 6; }
+
+/* the file numbers, in the rails (one <text> per edge; dy on the element centres it on its y) */
+svg.bv-art[data-theme] .bv-label, .bv[data-theme] .bv-art .bv-label {
+  font: 800 22px var(--font-ui, system-ui, sans-serif); letter-spacing: 0;
+  fill: var(--tb-label); stroke: var(--tb-label-edge); stroke-width: 5; stroke-linejoin: round; paint-order: stroke;
+  text-anchor: middle;
+}
+
+/* ---- the sand ------------------------------------------------------------------------------------------------------- */
+
+.tb-sand { stroke: var(--tb-ink); stroke-width: 5; }
+.tb-ripple-lo, .tb-ripple-hi { fill: none; stroke-width: 3.4; stroke-linecap: round; }
+.tb-ripple-lo { stroke: var(--tb-grain-lo); opacity: .55; }
+.tb-ripple-hi { stroke: var(--tb-grain-hi); opacity: .9; }
+.tb-pebble-lo { fill: var(--tb-grain-lo); }
+.tb-pebble-hi { fill: var(--tb-grain-hi); }
+
+/* the palaces: a floor in the colour of their side and the joints of its tiles (the diagonals belong to the grid) */
+.tb-floor { stroke-width: 3; }
+.tb-floor--black { fill: var(--tb-floor-blk); stroke: var(--tb-tile-blk); }
+.tb-floor--red { fill: var(--tb-floor-red); stroke: var(--tb-tile-red); }
+.tb-tiles { fill: none; stroke-width: 3; }
+.tb-tiles--black { stroke: var(--tb-tile-blk); }
+.tb-tiles--red { stroke: var(--tb-tile-red); }
+
+/* ---- the river ------------------------------------------------------------------------------------------------------ */
+
+.tb-river { stroke: var(--tb-river-edge); stroke-width: 4.5; stroke-linejoin: round; }
+.tb-foam { fill: none; stroke: var(--tb-foam); stroke-width: 3.4; stroke-linecap: round; stroke-dasharray: 46 30; opacity: .8; }
+.tb-waves { fill: none; stroke: var(--tb-foam); stroke-width: 3.2; stroke-linecap: round; opacity: .85; }
+.tb-moon { fill: none; stroke: var(--tb-moon); stroke-width: 4; stroke-linecap: round; opacity: .8; }
+.tb-plank { fill: var(--tb-plank); stroke: var(--tb-ink); stroke-width: 3.4; }
+.tb-plank-line { fill: none; stroke: var(--tb-plank-line); stroke-width: 2.2; }
+svg.bv-art[data-theme] .bv-rivertext, .bv[data-theme] .bv-art .bv-rivertext {
+  font: 700 58px var(--font-kai, "KaiTi", "STKaiti", serif); letter-spacing: 0;
+  fill: var(--tb-rtext); fill-opacity: 1; stroke: var(--tb-rtext-edge); stroke-width: 8; stroke-linejoin: round; paint-order: stroke;
+  text-anchor: middle;
+}
+
+/* ---- the carved grid ------------------------------------------------------------------------------------------------ */
+
+.tb-grid, .tb-grid-hi, .tb-glow, .tb-border, .tb-marks { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.tb-grid-hi { stroke: var(--tb-line-hi); stroke-width: 3.4; opacity: .9; }
+.tb-grid { stroke: var(--tb-line); stroke-width: 4.6; }
+.tb-border { stroke: var(--tb-line); stroke-width: 7; }
+.tb-marks { stroke: var(--tb-line); stroke-width: 3.4; }
+.tb-glow { stroke: var(--tb-glow); stroke-width: 13; opacity: .2; }      /* 赤壁: lantern light along the grooves */

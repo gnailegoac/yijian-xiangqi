@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="shachang">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>弈间 dev: the sand table</title>
+<link rel="stylesheet" href="../styles/tokens.css">
+<link rel="stylesheet" href="../styles/themes.css">
+<link rel="stylesheet" href="../styles/board.css">
+<link rel="stylesheet" href="../styles/table.css">
+<style>
+  /* dev page only: three boards side by side, one per theme (add ?bottom=black to turn them) */
+  body { margin: 0; padding: 14px; background: #6fc474; }
+  .row { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+  figure { margin: 0; }
+  figcaption { font: 700 16px system-ui, sans-serif; color: #17351c; padding: 0 0 6px 4px; }
+  .bv { width: 420px; }
+  #count { font: 14px system-ui, sans-serif; color: #17351c; margin: 10px 4px 0; }
+</style>
+</head>
+<body>
+<div class="row" id="row"></div>
+<p id="count"></p>
+<script type="module">
+  import { tableArt } from '../src/ui/table-art.js';
+
+  // ?bottom=black turns the boards, ?w=700 sets their width in px, ?only=chibi shows one theme
+  const params = new URLSearchParams(location.search);
+  const bottom = params.get('bottom') === 'black' ? 'black' : 'red';
+  const width = Number(params.get('w')) || 420;
+  const names = { shachang: '沙场', chibi: '赤壁', longzhong: '隆中' };
+  const row = document.getElementById('row');
+  const counts = [];
+  let id = 0;
+  for (const theme of /** @type {const} */ (['shachang', 'chibi', 'longzhong'])) {
+    if (params.get('only') && params.get('only') !== theme) continue;
+    id += 1;
+    const fig = document.createElement('figure');
+    fig.innerHTML = `<figcaption>${names[theme]} ${theme}</figcaption><div class="bv" style="width:${width}px" data-theme="${theme}" data-bottom="${bottom}">`
+      + `<svg class="bv-art" data-theme="${theme}" viewBox="0 0 920 1060" aria-hidden="true">${tableArt(theme, bottom, id)}</svg></div>`;
+    row.append(fig);
+    counts.push(`${theme}: ${fig.querySelectorAll('.bv-art *').length} elements`);
+  }
+  document.getElementById('count').textContent = counts.join(' / ');
+</script>
+</body>
+</html>

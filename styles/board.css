@@ -45,40 +45,17 @@ svg.bv-art, svg.bv-marks, svg.bv-over { display: block; width: 100%; height: 100
 
 /* ---- board art (§10.2.1) ------------------------------------------------------------------------------------------ */
 
-.bv-frame { fill: var(--frame); }
-.bv-field { stroke: var(--frame-edge); stroke-width: 4; }
-.bv-stop-fa { stop-color: var(--field-a); }
-.bv-stop-fb { stop-color: var(--field-b); }
-.bv-stop-ra { stop-color: var(--river-a); }
-.bv-stop-rb { stop-color: var(--river-b); }
-.bv-band { opacity: var(--river-opacity); }
-.bv-border { fill: none; stroke: var(--line); stroke-width: 6; }
-.bv-grid { fill: none; stroke: var(--line); stroke-width: 3; stroke-linecap: square; }
-.bv-gridglow { fill: none; stroke: var(--line-glow); stroke-width: 12; stroke-linecap: square; }   /* chibi: an ember glow, no filter */
-.bv-rivertext {
-  font: 400 52px var(--font-kai); letter-spacing: 34px;
-  fill: var(--river-text); fill-opacity: .8; text-anchor: middle;
-}
-/* vertical centring of every text in the SVG layers is a dy of .36em on the element (see artMarkup) */
-.bv-label { font: 600 27px var(--font-ui); fill: var(--label); text-anchor: middle; }
-/* 沙场: --label is a light sand tone and the margins are sand too, so the file numbers get a dark edge to stay readable */
-.bv[data-theme="shachang"] .bv-label, .bv-art[data-theme="shachang"] .bv-label { stroke: var(--frame); stroke-width: 5; stroke-linejoin: round; paint-order: stroke; }
-
-/* camp seals (§10.2.2): 蜀 for red, 魏 for black. 32 units in the outer corner of the frame (K-96), so the glyph is 21 */
-.bv-seal rect { stroke-width: 2; }
-.bv-seal text { font: 700 21px var(--font-kai); fill: #fff3d6; text-anchor: middle; }
-.bv-seal--red rect { fill: var(--shu); stroke: var(--red-rim); }
-.bv-seal--black rect { fill: var(--wei); stroke: var(--blk-rim); }
-
-/* theme decoration inside the art */
-.bv-bamboo { fill: #7fa27a; opacity: .55; }
-.bv-sand { fill: #8a6a3a; opacity: .25; }
-.bv-rivets { fill: #b08d57; stroke: #5a3a17; stroke-width: 1.2; }
+/* The drawing of the table (frame, sand, grid, river, palaces, the two rows of file numbers) lives in
+   src/ui/table-art.js and styles/table.css: the skin. board-view.js only asks for it. */
 
 /* G3: the old art fades out on top of the new one */
 .bv-art.is-leaving { z-index: var(--z-art); }
 
 /* ---- theme decoration in sibling layers (§10.2.2) ------------------------------------------------------------------ */
+
+/* V2: the sand table (table-art.js, table.css) draws its own river and frame, so the decoration layers of version 1
+   are switched off; their rules below stay until the layers are removed from board-view.js. */
+.bv .bv-glow, .bv .bv-deco, .bv .bv-river { display: none; }
 
 /* 赤壁: fire glow at the two ends of the river, plus a faint ember gradient from below; it follows the tension */
 .bv-glow { display: none; border-radius: calc(.26 * var(--c)); }
@@ -144,10 +121,10 @@ svg.bv-art, svg.bv-marks, svg.bv-over { display: block; width: 100%; height: 100
  * of everything the child may act on (it has contrast on the field in every theme); the rival's in its mark colour. */
 .bv-edge { border-radius: calc(.26 * var(--c)); overflow: hidden; }
 .bv-edge::before, .bv-edge::after {
-  content: ""; position: absolute; left: 5%; right: 5%; height: calc(.05 * var(--c)); opacity: 0;
+  content: ""; position: absolute; left: 5%; right: 5%; height: calc(.03 * var(--c)); opacity: 0;
   background: var(--edge-glow);
-  box-shadow: 0 0 calc(.1 * var(--c)) 0 var(--edge-glow),
-              0 0 calc(.8 * var(--c)) calc(.1 * var(--c)) color-mix(in srgb, var(--edge-glow) 36%, transparent);
+  box-shadow: 0 0 calc(.04 * var(--c)) 0 var(--edge-glow),            /* a tight core: the file numbers sit right beside it */
+              0 0 calc(.8 * var(--c)) calc(.03 * var(--c)) color-mix(in srgb, var(--edge-glow) 30%, transparent);
 }
 .bv-edge::before { top: 0; border-radius: 0 0 calc(.05 * var(--c)) calc(.05 * var(--c)); --edge-glow: var(--rival-mark); }
 .bv-edge::after { bottom: 0; border-radius: calc(.05 * var(--c)) calc(.05 * var(--c)) 0 0; --edge-glow: var(--sel); }
@@ -169,32 +146,22 @@ svg.bv-art, svg.bv-marks, svg.bv-over { display: block; width: 100%; height: 100
 
 .piece {
   position: absolute; left: calc((.6 + var(--vx)) * var(--c)); top: calc((.8 + var(--vy)) * var(--c));
-  width: calc(.88 * var(--c)); height: calc(.88 * var(--c)); margin: calc(-.44 * var(--c)) 0 0 calc(-.44 * var(--c)); z-index: 1;
+  width: calc(.88 * var(--c)); height: calc(.88 * var(--c)); margin: calc(-.44 * var(--c)) 0 0 calc(-.44 * var(--c));
+  /* A soldier is taller than its square (its head reaches into the row above), so a piece nearer to the viewer
+     is painted over the pieces behind it: the row in view order decides. --vy is written by board-view's seat(). */
+  z-index: calc(10 + var(--vy, 0));
 }
-.piece__shadow {
-  position: absolute; inset: 8% -4% -12% 0; border-radius: 50%;
-  background: radial-gradient(closest-side, var(--shadow) 55%, transparent);       /* no filter: blur */
-}
+/* The drawing of a piece (the soldier, the shield, the character, the shadow) lives in styles/pieces.css and
+   src/ui/piece-art.js: the skin. This file keeps the box, the states and the motion. */
+.piece__shadow { position: absolute; inset: 0; }
 .piece__body { position: absolute; inset: 0; }
-.piece__disc {
-  position: absolute; inset: 0; border-radius: 50%; border: calc(.063 * var(--c)) solid var(--rim);
-  background: radial-gradient(circle at 34% 26%, var(--a), var(--b) 58%, var(--cc) 100%);
-  box-shadow: 0 calc(.055 * var(--c)) 0 var(--piece-edge), 0 0 calc(.28 * var(--c)) var(--glow),
-              inset 0 calc(-.04 * var(--c)) calc(.07 * var(--c)) #0005, inset 0 calc(.04 * var(--c)) calc(.055 * var(--c)) #fff5;
-}
-.piece__ring { position: absolute; inset: 0; width: 100%; height: 100%; }
-.piece__ring * { fill: none; stroke: var(--ring); stroke-width: 3.2; opacity: .85; }
-.piece__glyph {
-  position: absolute; inset: 0; display: grid; place-items: center; padding-bottom: 4%;
-  font: 700 calc(.50 * var(--c))/1 var(--font-kai); color: var(--glyph); text-shadow: 0 calc(.025 * var(--c)) 0 #0006;
-}
-.piece.red   { --a: var(--red-a); --b: var(--red-b); --cc: var(--red-c); --rim: var(--red-rim); --glyph: var(--red-glyph); --ring: var(--red-rim); --glow: var(--red-glow); }
-.piece.black { --a: var(--blk-a); --b: var(--blk-b); --cc: var(--blk-c); --rim: var(--blk-rim); --glyph: var(--blk-glyph); --ring: var(--blk-rim); --glow: var(--blk-glow); }
 
-/* A1 / A2: the selected piece is lifted; E1: the rival's piece lifts the same way before it moves */
-.piece.is-selected, .piece.is-lifted, .piece.is-trial { z-index: 3; }
-.piece.is-selected .piece__body, .piece.is-lifted .piece__body { transform: translateY(calc(-.12 * var(--c))) scale(1.10); }
-.piece.is-selected .piece__shadow, .piece.is-lifted .piece__shadow { transform: translateY(calc(.07 * var(--c))) scale(1.12); opacity: .7; }
+/* A1 / A2: the selected piece is lifted; E1: the rival's piece lifts the same way before it moves.
+   The lifts are small enough that the head of a lifted soldier never reaches the character of the piece above it
+   (head top .60 c above the point; the character above ends .755 c above it). */
+.piece.is-selected, .piece.is-lifted, .piece.is-trial { z-index: 30; }
+.piece.is-selected .piece__body, .piece.is-lifted .piece__body { transform: translateY(calc(-.08 * var(--c))) scale(1.06); }
+.piece.is-selected .piece__shadow, .piece.is-lifted .piece__shadow { transform: translateY(calc(.05 * var(--c))) scale(1.08); opacity: .7; }
 :root[data-motion="full"] .piece__body { transition: transform 100ms var(--e-out); }
 :root[data-motion="full"] .piece__shadow { transition: transform 100ms var(--e-out), opacity 100ms var(--e-out); }
 :root[data-motion="full"] .piece.is-selected .piece__body,
@@ -206,18 +173,18 @@ svg.bv-art, svg.bv-marks, svg.bv-over { display: block; width: 100%; height: 100
 .piece.is-hover:not(.is-selected):not(.is-trial) .piece__body { transform: translateY(calc(-.04 * var(--c))); }
 
 /* D1 / D2: on trial the piece hovers, and bobs under full motion (the bob starts when the piece arrives) */
-.piece.is-trial .piece__body { transform: translateY(calc(-.12 * var(--c))) scale(1.06); }
-.piece.is-trial .piece__shadow { transform: translateY(calc(.072 * var(--c))) scale(1.06); opacity: .88; }
+.piece.is-trial .piece__body { transform: translateY(calc(-.07 * var(--c))) scale(1.05); }
+.piece.is-trial .piece__shadow { transform: translateY(calc(.05 * var(--c))) scale(1.06); opacity: .88; }
 :root[data-motion="full"] .piece.is-trial:not(.is-aim) .piece__body { animation: bv-bob 2.4s ease-in-out var(--hover-delay, 0ms) infinite; }
 @keyframes bv-bob {
-  0%, 100% { transform: translateY(calc(-.12 * var(--c))) scale(1.06); }
-  25% { transform: translateY(calc(-.14 * var(--c))) scale(1.06); }
-  75% { transform: translateY(calc(-.10 * var(--c))) scale(1.06); }
+  0%, 100% { transform: translateY(calc(-.07 * var(--c))) scale(1.05); }
+  25% { transform: translateY(calc(-.09 * var(--c))) scale(1.05); }
+  75% { transform: translateY(calc(-.05 * var(--c))) scale(1.05); }
 }
 
 /* D1a: an aim — the piece stays on its square, lifted, leaning 6 degrees towards its target */
-.piece.is-trial.is-aim .piece__body { transform: translateY(calc(-.14 * var(--c))) scale(1.08) rotate(var(--lean, 0deg)); }
-.piece.is-trial.is-aim .piece__shadow { transform: translateY(calc(.084 * var(--c))) scale(1.07); opacity: .86; }
+.piece.is-trial.is-aim .piece__body { transform: translateY(calc(-.09 * var(--c))) scale(1.06) rotate(var(--lean, 0deg)); }
+.piece.is-trial.is-aim .piece__shadow { transform: translateY(calc(.06 * var(--c))) scale(1.07); opacity: .86; }
 :root[data-motion="full"] .piece.is-trial.is-aim .piece__body { transition: transform 140ms var(--e-back); }
 
 /* while WAAPI moves a piece its class changes must not start a transition underneath */
@@ -227,8 +194,8 @@ svg.bv-art, svg.bv-marks, svg.bv-over { display: block; width: 100%; height: 100
 .piece.is-pressed .piece__body { scale: .97; }
 
 /* A6: dragging */
-.piece.is-dragging { z-index: 6; will-change: translate; }
-.piece.is-dragging .piece__body { transform: scale(1.15); }
+.piece.is-dragging { z-index: 60; will-change: translate; }
+.piece.is-dragging .piece__body { transform: scale(1.12); }
 .piece.is-dragging .piece__shadow { transform: translateY(calc(.14 * var(--c))) scale(1.2); opacity: .55; }
 
 /* E5: the mated king lies on its side; the grey comes once it has fallen */
@@ -255,17 +222,17 @@ svg.bv-art, svg.bv-marks, svg.bv-over { display: block; width: 100%; height: 100
 #app[data-layout="compact"] .bv-counter { display: none; }
 
 /* D1: the ghost left on the origin square — a faded copy with a dashed outline */
-.piece.is-ghost { opacity: .35; filter: grayscale(.6); z-index: 0; }
+.piece.is-ghost { opacity: .35; filter: grayscale(.6); z-index: calc(9 + var(--vy, 0)); }   /* just behind its own row */
 .piece.is-ghost::after {
   content: ""; position: absolute; inset: -5%; border-radius: 50%;
   border: calc(.035 * var(--c)) dashed var(--trial);
 }
 .piece.is-ghost .piece__shadow { display: none; }
 /* F6: ghost play — copies that move on top of the real position */
-.piece.is-ghost.is-preview { opacity: .82; filter: none; z-index: 4; }
+.piece.is-ghost.is-preview { opacity: .82; filter: none; z-index: 40; }
 .piece.is-ghost.is-preview::after { border-color: var(--gold); border-style: dashed; }
 /* F3: the demo ghost that slides along a hint arrow (shown only while WAAPI runs it) */
-.piece.is-ghost.is-demo { opacity: 0; filter: none; z-index: 4; }
+.piece.is-ghost.is-demo { opacity: 0; filter: none; z-index: 40; }
 .piece.is-ghost.is-demo::after { display: none; }
 /* a real piece that ghost play has captured */
 .piece.is-dimmed { opacity: .3; }

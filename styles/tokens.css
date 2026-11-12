@@ -20,7 +20,9 @@
   --font-kai: "KaiTi", "STKaiti", "Kaiti SC", "BiauKai", "Songti SC", "SimSun", "Noto Serif CJK SC", serif;  /* piece glyphs, banners, titles */
   --fs-body: 15px; --lh-body: 22px; --fs-small: 13px; --fs-button: 16px;   /* wide layout: 16 / 24 / 13 / 16 */
   /* spacing and radii */
-  --gap: 4px; --pad: 8px; --r-btn: 14px; --r-card: 16px; --r-chip: 17px;
+  --gap: 4px; --pad: 8px; --r-btn: 16px; --r-card: 22px; --r-chip: 24px;
+  /* the cartoon outline of every panel and button, and the offset of its hard shadow (colour: --edge, themes.css) */
+  --ol: 3px; --drop: 4px;
   /* z-layers inside .bv (board view) */
   --z-art: 0; --z-marks: 1; --z-pieces: 2; --z-over: 3; --z-fx: 4; --z-banner: 5; --z-hit: 6;
   /* z-layers of the app */

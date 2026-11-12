@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="shachang" data-motion="full">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>弈间 · 界面试验台 (scene.js)</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../styles/tokens.css">
+<link rel="stylesheet" href="../styles/themes.css">
+<link rel="stylesheet" href="../styles/scene.css">
+<style>
+/* Dev harness for src/ui/scene.js. Not part of the game: never built into dist/.
+ * URL: ?theme=chibi|longzhong|shachang  ?motion=full|reduced  ?box=0 (hide the board placeholder)
+ * Scripted use: window.__dev = { scene, count() }. */
+html, body { height: 100%; margin: 0; overflow: hidden; }
+body { background: transparent; }          /* the scene sits at z-index -1: a painted body would cover it */
+.dev-board {
+  position: fixed; left: 26.5%; width: 49.5%; top: 1.5%; bottom: 1.5%;
+  border: 3px dashed #ffffffb0; border-radius: 22px; background: #f4cf8e80;
+  display: grid; place-items: center; color: #3a1f0c; font: 700 16px/1.4 var(--font-ui, sans-serif); text-align: center;
+}
+.dev-board[hidden] { display: none; }
+@media (max-aspect-ratio: 1/1) { .dev-board { left: 8%; width: 84%; top: 12%; bottom: 22%; } }
+@media (max-aspect-ratio: 1/1) and (max-width: 600px) { .dev-board { left: 1%; width: 98%; top: 11.5%; bottom: 32%; } }
+</style>
+</head>
+<body>
+<div class="dev-board" id="board">棋盘在这里</div>
+<script type="module">
+import { createScene } from '../src/ui/scene.js';
+
+const q = new URLSearchParams(location.search);
+const wanted = q.get('theme');
+/** @type {'chibi'|'longzhong'|'shachang'} */
+const theme = wanted === 'chibi' || wanted === 'longzhong' ? wanted : 'shachang';
+const reduced = q.get('motion') === 'reduced' || (q.get('motion') !== 'full' && matchMedia('(prefers-reduced-motion: reduce)').matches);
+document.documentElement.dataset.theme = theme;
+document.documentElement.dataset.motion = reduced ? 'reduced' : 'full';
+const board = document.getElementById('board');
+if (board && q.get('box') === '0') board.hidden = true;
+
+const scene = createScene(document.body, { theme, reducedMotion: reduced });
+Object.assign(window, {
+  __dev: {
+    scene,
+    /** elements in the scene and how many of them run an animation */
+    count() {
+      const all = [scene.el, ...scene.el.querySelectorAll('*')];
+      return { elements: all.length, loops: all.filter((n) => getComputedStyle(n).animationName !== 'none').length };
+    },
+  },
+});
+</script>
+</body>
+</html>

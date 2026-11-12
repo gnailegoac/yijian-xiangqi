@@ -116,7 +116,7 @@ const CARD_BURST_MAX_MS = 4000;
 const IMPORT_MAX_BYTES = 4 * 1024 * 1024;      // a backup is a few kilobytes; anything huge is not one
 
 /** What the settings sheet shows before the stage has handed over real data (the defaults of §3.9). @type {Settings} */
-const DEFAULT_SETTINGS = { schema: 2, theme: 'chibi', sfx: true, music: true, volume: 1, motion: 'auto', haptics: true,
+const DEFAULT_SETTINGS = { schema: 2, theme: 'shachang', look: 2, sfx: true, music: true, volume: 1, motion: 'auto', haptics: true,
                            typeTicks: false, readAloud: false, side: 'red', coach: 'auto', freeText: true, talk: 'smart' };
 
 // ---------------------------------------------------------------------------------------------------------------------

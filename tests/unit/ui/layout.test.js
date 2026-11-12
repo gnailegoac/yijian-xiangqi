@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 import { computeLayout, applyLayout } from '../../../src/ui/layout.js';
 
@@ -784,10 +784,13 @@ test('computeLayout: every viewport from 360 x 560 up gets a board that fits and
 
 test('index.html: the head of 4.30.4, the shell of 12.1, and the manifest', () => {
   const html = read('index.html');
+  // The colour of the browser's bar and of the installed app's splash is the page colour of the default theme (the
+  // first rule of themes.css), so the first paint and the theme agree; the stage repaints it when the theme changes.
+  const page = /** @type {RegExpMatchArray} */ (read('styles/themes.css').match(/--page:\s*(#[0-9a-f]{6});/i))[1];
   for (const line of [
     '<meta charset="UTF-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-visual">',
-    '<meta name="theme-color" content="#0b0f1d">',
+    `<meta name="theme-color" content="${page}">`,
     '<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">',
     '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="弈间">',
     '<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png"><link rel="manifest" href="./manifest.webmanifest">',
@@ -805,9 +808,12 @@ test('index.html: the head of 4.30.4, the shell of 12.1, and the manifest', () =
     '<noscript><p class="noscript">请开启 JavaScript 后开始对弈。</p></noscript>',
   ]) assert.ok(html.includes(line), `index.html contains ${line}`);
 
-  // The eight stylesheets in the order of §4.30.4, tokens first.
+  // The stylesheets: the three everything else builds on come first, in this order, and every file of styles/ is
+  // linked exactly once (a skin file that is not linked would never show; a link without a file is a 404).
   const sheets = [...html.matchAll(/<link rel="stylesheet" href="\.\/styles\/([a-z]+)\.css">/g)].map(match => match[1]);
-  assert.deepEqual(sheets, ['tokens', 'themes', 'layout', 'board', 'fx', 'buddy', 'chat', 'hud']);
+  assert.deepEqual(sheets.slice(0, 3), ['tokens', 'themes', 'layout']);
+  const files = readdirSync(new URL('../../../styles/', import.meta.url)).filter(name => name.endsWith('.css')).map(name => name.slice(0, -4));
+  assert.deepEqual([...sheets].sort(), files.sort());
   // Two scripts and no style element (the build rewrites `="./src/` and `="./styles/` only): the module, and right after
   // it one small inline classic script that says so when the game does not come up (CONTRACT-NOTES 150). It loads nothing.
   assert.equal((html.match(/<script/g) ?? []).length, 2);
@@ -817,16 +823,18 @@ test('index.html: the head of 4.30.4, the shell of 12.1, and the manifest', () =
   assert.ok(inline[1].includes('window.__bootFailed = '), 'src/app.js tells a fault before its stage exists through it');
   assert.doesNotMatch(inline[1], /\b(?:href|src)\s*=|\bimport\b|\bfetch\b|<\//, 'no reference, no request, nothing that ends the element early');
   assert.equal((html.match(/<style/g) ?? []).length, 0);
-  assert.equal((html.match(/="\.\/src\//g) ?? []).length + (html.match(/="\.\/styles\//g) ?? []).length, 9);
+  // the build rewrites these references and nothing else: the one module script and the stylesheet links
+  assert.equal((html.match(/="\.\/src\//g) ?? []).length, 1);
+  assert.equal((html.match(/="\.\/styles\//g) ?? []).length, sheets.length);
   // The six regions are the children of #app in grid order; no element is ever re-parented by script.
   const ids = [...html.matchAll(/ id="([a-z]+)"/g)].map(match => match[1]);
   assert.deepEqual(ids, ['app', 'topbar', 'stage', 'board', 'underbar', 'coach', 'buddy', 'chat', 'actions', 'overlays']);
   // The default theme is on <html> before any script runs.
-  assert.match(html, /<html lang="zh-CN" data-theme="chibi">/);
+  assert.match(html, /<html lang="zh-CN" data-theme="shachang">/);
 
   assert.deepEqual(JSON.parse(read('manifest.webmanifest')), {
     name: '弈间 · 中国象棋', short_name: '弈间', start_url: './', display: 'standalone', orientation: 'any',
-    background_color: '#0b0f1d', theme_color: '#0b0f1d',
+    background_color: page, theme_color: page,
     icons: [{ src: './icons/icon-192.png', sizes: '192x192', type: 'image/png' }, { src: './icons/icon-512.png', sizes: '512x512', type: 'image/png' }],
   });
 });

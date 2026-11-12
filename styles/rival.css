@@ -1,0 +1,154 @@
+/* 弈间 — 司马懿, the rival, in the top bar (SPEC §4.28.4, §11.7). The sand-table look (V2).
+ *
+ * Load after buddy.css. The markup comes from src/ui/rival-view.js:
+ *   .rival[data-mood="calm|thinking|frown|rattled|smug"][data-say="none|line|dots"]
+ *     .rival__disc    the round portrait: svg.rival__face[data-eyes][data-mouth], .rival__ring, .rival__flash
+ *     .rival__plate   the wooden name plate: .rival__name, .rival__title
+ *     .rival__say     his one-line bubble: .rival__line, .rival__dots (three dots while he thinks)
+ *
+ * Size: the disc is 44 px (56 px under [data-layout="landscape"]) and follows the bar height --top. A host that
+ * wants another size sets --rival-d on .rival or above it (the portrait is drawn to read from 44 px to 120 px).
+ * The colours are the figure's own (they do not follow the theme): he looks the same on every background.
+ */
+
+.rival {
+  --_bar: var(--top, 48px);
+  --_d: var(--rival-d, min(44px, var(--_bar) + 4px));    /* the disc: 44 px; it may hang 4 px below a 40 px bar */
+  --_ink: #2a1f3d; --_gold: #ffc93c;
+  --_ring: var(--_gold);
+  position: relative; z-index: 2;
+  display: flex; align-items: center; gap: 0;            /* block-level: the plate is exactly as high as the bar */
+  width: max-content; max-width: 100%; height: var(--_bar);
+  color: var(--_ink);
+  -webkit-user-select: none; user-select: none;
+}
+/* 56 px in landscape (48 px bar + the 8 px above the board); 38 px under the 36 px bar of a landscape phone */
+[data-layout="landscape"] .rival { --_d: var(--rival-d, min(56px, var(--_bar) + (var(--_bar) - 32px) / 2)); gap: 0; }
+
+/* A medallion: centred in a bar that is higher than it, hanging from the bar's top edge (down to the board) otherwise. */
+.rival__disc {
+  position: relative; z-index: 1; flex: none; align-self: flex-start;
+  margin-top: max(1px, (var(--_bar) - var(--_d)) / 2);
+  width: var(--_d); height: var(--_d); border-radius: 50%;
+  background: radial-gradient(circle at 50% 20%, #ffffff 0, #d3eaff 36%, #86bdf2 100%);      /* a sunny sky behind him */
+  box-shadow: 0 2px 0 #2a1f3d59;
+}
+.rival__face { display: block; width: 100%; height: 100%; border-radius: 50%; overflow: hidden; }
+.rival__ring, .rival__flash { position: absolute; inset: 0; border-radius: 50%; pointer-events: none; }
+/* an ink outline with a gold band inside it; both grow with the disc */
+.rival__ring {
+  border: calc(var(--_d) * .034 + .5px) solid var(--_ink);
+  box-shadow: inset 0 0 0 calc(var(--_d) * .034) var(--_ring);
+}
+.rival__flash { border: calc(var(--_d) * .075) solid #ff5a4a; opacity: 0; }
+
+/* the wooden name plate: a ribbon that starts under the disc */
+.rival__plate {
+  display: flex; flex-direction: column; justify-content: center; min-width: 0;
+  margin-left: calc(var(--_d) * -.5); padding: 0 11px 0 calc(var(--_d) * .5 + 7px);
+  border-radius: 0 12px 12px 0;
+  background: linear-gradient(#cf8a49, #b06a30 52%, #94551f);
+  box-shadow: inset 0 0 0 2px #5a3214, inset 0 4.5px 0 #ffffff38, 0 2px 0 #2a1f3d40;
+}
+.rival__name {
+  font: 700 16px/19px var(--font-kai, serif); letter-spacing: 2px; white-space: nowrap;
+  color: #fff6dc; text-shadow: 0 1.5px 0 #5a3214;
+}
+.rival__title { font-size: 12px; line-height: 15px; font-weight: 600; white-space: nowrap; color: #ffe3a8; text-shadow: 0 1px 0 #5a3214; }
+[data-layout="compact"] .rival__plate { padding: 0 8px 0 calc(var(--_d) * .5 + 5px); }
+
+/* his spoken line: a small speech bubble to the right of the plate; it overlays, so nothing in the bar shifts */
+.rival__say {
+  position: absolute; left: calc(100% + 10px); top: 50%; z-index: 2;
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: -14px; height: 28px; padding: 0 10px;
+  border: 2px solid var(--_ink); border-radius: 14px 14px 14px 4px;
+  background: #ffffff; color: var(--_ink);
+  font-size: 13px; line-height: 18px; font-weight: 700; white-space: nowrap;
+  box-shadow: 0 2px 0 #2a1f3d40;
+  transform-origin: 0 100%;
+  pointer-events: none;
+}
+.rival__say[hidden], .rival__dots[hidden] { display: none; }
+.rival__line { max-width: 10.5em; overflow: hidden; text-overflow: ellipsis; }      /* his lines have at most 10 characters */
+.rival__line:empty { display: none; }
+/* A phone's bar has no room beside the plate (the round, the trophies and ♪ follow at once): while he speaks, the
+ * line takes the place of his name and title, right next to his face. The thinking dots alone stay beside the plate. */
+[data-layout="compact"] .rival[data-say="line"] .rival__plate { visibility: hidden; }
+[data-layout="compact"] .rival[data-say="line"] .rival__say { left: calc(var(--_d) + 8px); }
+.rival__dots { display: inline-flex; align-items: center; gap: 4px; }
+.rival__dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--_ink); opacity: .7; }
+:root[data-motion="full"] .rival:not(.is-still) .rival__dots i { animation: rival-dot 900ms var(--e-inout, ease-in-out) infinite; }
+:root[data-motion="full"] .rival:not(.is-still) .rival__dots i:nth-child(2) { animation-delay: 150ms; }
+:root[data-motion="full"] .rival:not(.is-still) .rival__dots i:nth-child(3) { animation-delay: 300ms; }
+@keyframes rival-dot { 0%, 60%, 100% { transform: translateY(0); opacity: .55; } 30% { transform: translateY(-5px); opacity: 1; } }
+
+/* ---- the face: one set of eyes and one mouth show ------------------------------------------------------------------ */
+.rival__face .r-eyes > g, .rival__face .r-mouth > g { display: none; }
+.rival__face[data-eyes="sly"]    .r-eyes > [data-v="sly"],
+.rival__face[data-eyes="up"]     .r-eyes > [data-v="up"],
+.rival__face[data-eyes="away"]   .r-eyes > [data-v="away"],
+.rival__face[data-eyes="wide"]   .r-eyes > [data-v="wide"],
+.rival__face[data-eyes="shut"]   .r-eyes > [data-v="shut"],
+.rival__face[data-mouth="soft"]  .r-mouth > [data-v="soft"],
+.rival__face[data-mouth="flat"]  .r-mouth > [data-v="flat"],
+.rival__face[data-mouth="wavy"]  .r-mouth > [data-v="wavy"],
+.rival__face[data-mouth="o"]     .r-mouth > [data-v="o"],
+.rival__face[data-mouth="smirk"] .r-mouth > [data-v="smirk"],
+.rival__face[data-mouth="talk"]  .r-mouth > [data-v="talk"] { display: inline; }
+
+/* While a line shows his mouth is open: a state of the plate, no timer. (Rattled, it is open already.) */
+.rival[data-say="line"]:not([data-mood="rattled"]) .rival__face .r-mouth > g { display: none; }
+.rival[data-say="line"]:not([data-mood="rattled"]) .rival__face .r-mouth > [data-v="talk"] { display: inline; }
+
+/* The brows: drawn as in his smug face (the left one low, the right one cocked); each mood moves them a little. */
+.rival__face { --brow-l: 0deg; --brow-r: 0deg; --brow-ly: 0px; --brow-ry: 0px; }
+.rival__face .r-head   { transform-origin: 142px 236px; }
+.rival__face .r-brow-l { transform-origin: 112px 144px; transform: translateY(var(--brow-ly)) rotate(var(--brow-l)); }
+.rival__face .r-brow-r { transform-origin: 172px 140px; transform: translateY(var(--brow-ry)) rotate(var(--brow-r)); }
+:root[data-motion="full"] .rival:not(.is-still) :is(.r-brow-l, .r-brow-r) { transition: transform 260ms var(--e-back, ease-out); }
+
+/* He breathes: the whole portrait (the root svg) shrinks a hair inside its ring, so the ring itself never moves. */
+:root[data-motion="full"] .rival:not(.is-still) .rival__face { animation: rival-breathe 3.4s ease-in-out infinite alternate; }
+@keyframes rival-breathe { from { transform: scale(1); } to { transform: scale(.965); } }
+
+/* ---- the five moods ------------------------------------------------------------------------------------------------ */
+/* A small badge on the rim (sweat, "!"): an HTML box, so it reads at 44 px. */
+.rival__disc::after { content: ""; position: absolute; display: none; box-sizing: border-box; pointer-events: none; }
+
+/* calm: the resting sly look, the cocked brow lowered */
+.rival[data-mood="calm"] .rival__face { --brow-r: 8deg; --brow-ry: 5px; }
+
+/* thinking: he looks up, the rim turns into a slowly turning dashed band */
+.rival[data-mood="thinking"] .rival__face { --brow-ly: -5px; --brow-ry: -4px; }
+.rival[data-mood="thinking"] .rival__ring { border-style: dashed; border-color: var(--_gold); box-shadow: inset 0 0 0 calc(var(--_d) * .034) var(--_ink); }
+:root[data-motion="full"] .rival[data-mood="thinking"]:not(.is-still) .rival__ring { animation: rival-ring 7s linear infinite; }
+@keyframes rival-ring { to { transform: rotate(360deg); } }
+
+/* frown: he sulks (eyes away, a wavy mouth, a drop of sweat); troubled, not angry */
+.rival[data-mood="frown"] { --_ring: #c3cbe6; }
+.rival[data-mood="frown"] .rival__face { --brow-l: -16deg; --brow-r: 24deg; --brow-ry: 6px; }
+.rival[data-mood="frown"] .rival__disc::after {
+  display: block; top: 12%; right: 1%;
+  width: calc(var(--_d) * .2); height: calc(var(--_d) * .2);
+  border: max(1.5px, var(--_d) * .028) solid #2f86c0; border-radius: 0 50% 50% 50%;
+  background: #8fd3ff; transform: rotate(45deg);
+}
+
+/* rattled: wide eyes, an open mouth and a "!" */
+.rival[data-mood="rattled"] .rival__face { --brow-l: -8deg; --brow-r: 10deg; --brow-ly: -9px; --brow-ry: -7px; }
+.rival[data-mood="rattled"] .rival__disc::after {
+  content: "!"; display: grid; place-items: center; top: 0; right: calc(var(--_d) * -.09);
+  width: calc(var(--_d) * .36); height: calc(var(--_d) * .36);
+  border: max(1.5px, var(--_d) * .03) solid var(--_ink); border-radius: 50%;
+  background: #ff5a4a; color: #ffffff;
+  font: 900 calc(var(--_d) * .26)/1 var(--font-ui, sans-serif);
+}
+:root[data-motion="full"] .rival[data-mood="rattled"]:not(.is-still) .rival__disc::after { animation: rival-pop 320ms var(--e-back, ease-out) 1 both; }
+@keyframes rival-pop { from { transform: scale(.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+/* without motion the flash cannot play: the ring stays lit instead */
+:root:not([data-motion="full"]) .rival[data-mood="rattled"] .rival__flash,
+.rival.is-still[data-mood="rattled"] .rival__flash { opacity: 1; }
+
+/* smug: the smirk, and a bright halo around the gold band */
+.rival[data-mood="smug"] .rival__ring { box-shadow: inset 0 0 0 calc(var(--_d) * .034) var(--_gold), 0 0 0 calc(var(--_d) * .04) #fff3a6; }

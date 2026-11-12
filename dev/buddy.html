@@ -39,7 +39,7 @@
   .sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 12px; }
   .card { display: grid; justify-items: center; gap: 6px; padding: 12px 8px 10px; border: 1px solid var(--edge);
           border-radius: 16px; background: color-mix(in srgb, var(--surface) 70%, transparent); }
-  .card__full { width: 249px; height: 290px; --buddy-h: 290px; }
+  .card__full { width: 249px; height: 290px; --buddy-h: 290px; margin-left: 28px; }      /* room for the fan, which reaches out of the box */
   .card__row { display: flex; align-items: center; gap: 12px; }
   .card__bust { width: 56px; height: 56px; --buddy-h: 56px; }
   .card__name { font-size: 14px; line-height: 20px; }
@@ -138,10 +138,10 @@
 <main>
   <section id="sheet-section">
     <h2>十种神情 · 290 px 全身 与 56 px 头像</h2>
-    <p class="note">§11.3 的整张表：每格一个独立的 createBuddy。点「朝向」可以看 landscape 布局里镜像后的样子（扇子一侧朝向棋盘），以及 landscape 里用 <code>--buddy-face: 1</code> 不镜像的样子（开场卡的迎宾：扇子一侧背向文字）。</p>
+    <p class="note">十种神情的整张表：每格一个独立的 createBuddy。沙盘版的军师画出来就是扇子在左、身子向左探（朝向沙盘）；宿主设 <code>--buddy-face: 1</code> 时整个人镜像，扇子在右（开场卡的迎宾：扇子一侧背向文字）。</p>
     <div class="group">
       <div class="seg" id="facing-switch" role="group" aria-label="facing">
-        <button type="button" data-facing="">朝右（默认）</button><button type="button" data-facing="landscape">朝左（landscape）</button><button type="button" data-facing="asdrawn">landscape 不镜像（--buddy-face: 1）</button>
+        <button type="button" data-facing="">扇子在左（默认）</button><button type="button" data-facing="landscape">landscape（同默认）</button><button type="button" data-facing="asdrawn">镜像，扇子在右（--buddy-face: 1）</button>
       </div>
     </div>
     <div class="sheet" id="sheet"></div>
@@ -320,7 +320,7 @@ for (const mood of MOODS) {
   all.buddies.push(b);
 }
 function setFacing(v) {
-  // '' = no layout attribute; 'landscape' = mirrored by buddy.css; 'asdrawn' = landscape, but the host says --buddy-face: 1
+  // '' = no layout attribute; 'landscape' = the same picture (nothing depends on the layout); 'asdrawn' = the host says --buddy-face: 1 (mirrored)
   for (const id of ['#sheet', '#sheet-small', '#bust-strip']) {
     if (v) $(id).dataset.layout = 'landscape'; else delete $(id).dataset.layout;
     if (v === 'asdrawn') $(id).style.setProperty('--buddy-face', '1'); else $(id).style.removeProperty('--buddy-face');

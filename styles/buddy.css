@@ -4,13 +4,14 @@
  *
  *   .buddy-box            the host (#buddy) once buddy.js has filled it; data-variant="full|bust", data-bubble="0|1"
  *     .buddy-fig          the tappable figure (button); as high as var(--buddy-h)
- *       svg.buddy         the drawing; data-mood, data-eyes, data-mouth, data-fan, data-extras; the rig custom properties
- *     .bubble             the comic bubble; data-state, data-source, data-empty, data-more, data-stale-corner
+ *       .buddy            the drawing (one element); data-mood, data-eyes, data-mouth, data-extras; the rig custom properties
+ *         .b-stage > svg.b-layer--main, svg.b-layer--arm      the two root <svg> layers of the sand-table figure
+ *     .bubble            the comic bubble; data-state, data-source, data-empty, data-more, data-stale-corner
  *   .rival                司马懿's plate in the top bar; data-mood, data-say="none|line|dots"
  *
  * Read from the shell (layout.css / applyLayout): --buddy-h, --top, and the attributes data-layout / data-kb on an
  * ancestor (attribute-only selectors, so a dev page can show the three layouts side by side).
- * Read from the host, optional: --buddy-face (1 = never mirrored; see "the figure" below).
+ * Read from the host, optional: --buddy-face (1 = mirrored, fan arm on the right; see "the figure" below).
  * Motion: loops run only under :root[data-motion="full"]; without it every state shows its resting picture.
  */
 
@@ -57,43 +58,32 @@
 }
 .buddy-box[data-variant="bust"] .buddy-fig { aspect-ratio: 1 / 1; }
 
-/* A pool of light under and behind him: the coach side is a stage, and the pale robe needs a ground in every theme.
- * Both glows fade to nothing inside this box on every side: the pool ends on the box's bottom edge (93 + 7 = 100 %)
- * and so does the light behind him (56 + 44); to the left and right both end on its edges (50 + 50). A glow that
- * reached past the bottom edge would be cut off in a straight line right under his feet, and the box must not grow:
- * in the coach column the chip row starts 8 px under the figure. */
-.buddy-fig::before {
-  content: ""; position: absolute; inset: 4% -6% 0 -6%; z-index: 0; pointer-events: none;
-  background:
-    radial-gradient(50% 7% at 50% 93%, color-mix(in srgb, var(--accent) 30%, transparent), transparent 100%),
-    radial-gradient(50% 44% at 50% 56%, color-mix(in srgb, var(--wei) 26%, transparent), transparent 100%);
-}
+/* Bust: a warm portrait tile behind his head. The full figure stands in the open scene and has no ground of its own. */
 .buddy-box[data-variant="bust"] .buddy-fig::before {
-  inset: 0; border-radius: 50%;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--wei) 36%, transparent) 62%, transparent 100%);
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; border-radius: 22%;
+  background: linear-gradient(#fff3cf, #fddf9a);
+  box-shadow: inset 0 0 0 2px #e3a944;
 }
 
-svg.buddy {
+/* The drawing: ONE element (data-mood and the rig's custom properties are on it). As drawn his fan arm is on the
+ * left and he leans that way: toward the table. A host that sets --buddy-face: 1 gets him mirrored, fan arm on the
+ * right (the greeter of the start overlay: the text he speaks is on his left). */
+.buddy {
   position: relative; z-index: 1;
   display: block; width: 100%; height: 100%;
-  overflow: visible;                                   /* the raised fan may leave the viewBox */
+  transform: scaleX(calc(-1 * var(--buddy-face, -1)));
 }
-.buddy-box[data-variant="bust"] svg.buddy { overflow: hidden; border-radius: 14%; }
-.buddy-box[data-variant="bust"] .b-shadow { display: none; }
+/* Full: the half figure ends on the box's bottom edge; the fan may leave the box on the three other sides. */
+.buddy-box[data-variant="full"] .buddy { clip-path: inset(-100% -100% 0 -100%); }
+.buddy-box[data-variant="bust"] .buddy { overflow: hidden; border-radius: 22%; }
 
-/* The board lies to the left of the coach column in landscape: mirror him so that his fan side faces it.
- * The collar keeps its fold (left lapel over right) and the glyphs stay readable.
- * A figure that stands somewhere else in a landscape page sets --buddy-face: 1 on its host to stand as he is drawn,
- * fan arm on the right (the greeter of the start overlay: the text he speaks is on his left, and the open fan must
- * never reach into it). */
-[data-layout="landscape"] svg.buddy { transform: scaleX(var(--buddy-face, -1)); }
-[data-layout="landscape"] svg.buddy .b-collar { transform: scaleX(var(--buddy-face, -1)); transform-origin: 60px 96px; }
-[data-layout="landscape"] svg.buddy .b-glyph--q { transform: scaleX(var(--buddy-face, -1)); transform-origin: 100px 24px; }
-[data-layout="landscape"] svg.buddy .b-glyph--note { transform: scaleX(var(--buddy-face, -1)); transform-origin: 19px 34px; }
+/* the stage carries the one-shot gestures of the whole figure (buddy.js); the two root <svg> layers fill it */
+.b-stage { position: absolute; inset: 0; display: block; transform-origin: 50% 100%; }
+.b-layer { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
 
 /* ---- variants: every group is in the DOM, the root's attributes pick the visible ones ---- */
 
-.buddy .b-eyes > g, .buddy .b-mouth > g, .buddy .b-fan > g, .buddy .b-extras > g { display: none; }
+.buddy .b-eyes > g, .buddy .b-mouth > g, .buddy .b-extras > g { display: none; }
 .buddy[data-eyes="open"]  .b-eyes [data-v="open"],
 .buddy[data-eyes="wide"]  .b-eyes [data-v="wide"],
 .buddy[data-eyes="happy"] .b-eyes [data-v="happy"],
@@ -110,77 +100,45 @@ svg.buddy {
 .buddy[data-mouth="wavy"]  .b-mouth [data-v="wavy"],
 .buddy[data-mouth="hmm"]   .b-mouth [data-v="hmm"],
 .buddy[data-mouth="soft"]  .b-mouth [data-v="soft"],
-.buddy[data-fan="gathered"] .b-fan [data-v="gathered"],
-.buddy[data-fan="spread"]   .b-fan [data-v="spread"],
 .buddy[data-extras~="sweat"] .b-extras [data-v="sweat"],
 .buddy[data-extras~="bang"]  .b-extras [data-v="bang"],
 .buddy[data-extras~="dots"]  .b-extras [data-v="dots"],
 .buddy[data-extras~="q"]     .b-extras [data-v="q"],
 .buddy[data-extras~="spark"] .b-extras [data-v="spark"],
-.buddy[data-extras~="blush"] .b-extras [data-v="blush"],
-.buddy[data-extras~="note"]  .b-extras [data-v="note"] { display: inline; }
+.buddy[data-extras~="blush"] .b-extras [data-v="blush"] { display: inline; }
 
-.buddy text { font-family: var(--font-ui); }
+/* ---- rig: transforms driven by custom properties on .buddy (origins in viewBox units) ---- */
 
-/* ---- rig: five transforms driven by custom properties on the root (origins in viewBox units) ---- */
+.b-lean   { transform-origin: 196px 404px; }                                           /* full figure only: he leans over the table */
+.buddy-box[data-variant="full"] .b-lean { transform: rotate(-4deg); }
+.b-arm    { transform-origin: 162px 252px; transform: rotate(var(--arm-r)); }          /* the fan arm about the shoulder; positive = up */
+.b-fan    { transform-origin: 44px 312px;  transform: rotate(var(--fan-rot)); }        /* about the hand; 0 = continuing the arm */
+.b-head   { transform-origin: 196px 228px; transform: rotate(var(--tilt)) translateY(var(--head-y)); }
+.b-brow-l { transform-origin: 163px 127px; transform: translateY(var(--brow-ly)) rotate(var(--brow-l)); }
+.b-brow-r { transform-origin: 227px 127px; transform: translateY(var(--brow-ry)) rotate(var(--brow-r)); }
+:root[data-motion="full"] .buddy :is(.b-arm, .b-fan, .b-head, .b-brow-l, .b-brow-r) { transition: transform 260ms var(--e-back); }
 
-.b-arm-r  { transform-origin: 76px 91px;     transform: rotate(var(--arm-r)); }      /* negative = outward / up */
-.b-arm-l  { transform-origin: 44px 91px;     transform: rotate(var(--arm-l)); }      /* positive = outward / up */
-.b-fan    { transform-origin: 76px 116px;    transform: rotate(var(--fan-rot)); }    /* in the arm's frame; 0 = feathers pointing back at the shoulder, 180 = continuing the arm */
-.b-head   { transform-origin: 60px 80px;     transform: rotate(var(--tilt)) translateY(var(--head-y)); }
-.b-brow-l { transform-origin: 46.5px 39.5px; transform: translateY(var(--brow-y)) rotate(var(--brow-l)); }
-.b-brow-r { transform-origin: 73.5px 39.5px; transform: translateY(var(--brow-y)) rotate(var(--brow-r)); }
-:root[data-motion="full"] .buddy :is(.b-arm-r, .b-arm-l, .b-fan, .b-head, .b-brow-l, .b-brow-r) { transition: transform 260ms var(--e-back); }
+/* one-shot gestures of the head (Web Animations, buddy.js) act on this wrapper */
+.b-head-act { transform-origin: 196px 228px; }
+/* the question mark stays readable on a mirrored figure */
+.b-glyph { transform-origin: 300px 56px; transform: scaleX(calc(-1 * var(--buddy-face, -1))); }
 
-/* one-shot gestures (Web Animations, buddy.js) act on these two wrappers and on the shadow */
-.b-fig      { transform-origin: 60px 133px; }
-.b-head-act { transform-origin: 60px 80px; }
-.b-shadow   { transform-origin: 60px 134px; }
-
-/* blink and glance (JS timers toggle the classes) */
-.b-eyes { transform-origin: 60px 52px; }
+/* blink and glance (JS timers toggle the classes); the glance goes to his fan side, where the table is */
+.b-eyes { transform-origin: 195px 163px; }
 .buddy.is-blink .b-eyes { scale: 1 .1; }
-.buddy.is-glance .b-eyes { translate: 1px -1.1px; }                           /* 1.5 units toward the board: up and inward ... */
-[data-layout="landscape"] .buddy.is-glance .b-eyes { translate: 1.5px 0; }      /* ... or straight to his fan side, where the board is in landscape */
+.buddy.is-glance .b-eyes { translate: -4px 0; }
 :root[data-motion="full"] .buddy .b-eyes { transition: translate 160ms var(--e-out); }
 
-/* ---- idle loops: only with full motion; they use the individual translate / rotate / scale properties, so they
- *      add to the rig transforms instead of replacing them ---- */
+/* ---- idle loops: two, each on a root <svg> (never on a child inside one), only with full motion.
+ *      He breathes, and the fan arm sways slowly about the shoulder. ---- */
 
-.b-cloak  { transform-origin: 60px 86px; }
-.b-ribbon { transform-origin: 85px 36px; }
-.b-extras [data-v="spark"] path { transform-box: fill-box; transform-origin: center; }
-
-:root[data-motion="full"] .buddy :is(.b-body, .b-arm-l, .b-arm-r) { animation: b-breathe 3.2s ease-in-out infinite alternate; }
-:root[data-motion="full"] .buddy .b-head { animation: b-breathe-head 3.2s ease-in-out infinite alternate; }
-:root[data-motion="full"] .buddy .b-cloak { animation: b-hem 3.6s ease-in-out infinite alternate; }
-:root[data-motion="full"] .buddy .b-ribbon { animation: b-ribbon 2.2s ease-in-out infinite alternate; }
-:root[data-motion="full"] .buddy[data-fan="gathered"] .b-fan { animation: b-sway 2.6s ease-in-out infinite alternate; }
-:root[data-motion="full"] .buddy[data-mood="pleased"] .b-fan { animation: b-fanning .9s ease-in-out infinite alternate; }
-:root[data-motion="full"] .buddy[data-mood="consoling"] .b-head {
-  animation: b-breathe-head 3.2s ease-in-out infinite alternate, b-console 2.4s ease-in-out infinite alternate;
-}
-:root[data-motion="full"] .buddy .b-extras [data-v="dots"] circle { animation: b-dots 1.2s linear infinite; }
-:root[data-motion="full"] .buddy .b-extras [data-v="dots"] circle:nth-child(2) { animation-delay: .2s; }
-:root[data-motion="full"] .buddy .b-extras [data-v="dots"] circle:nth-child(3) { animation-delay: .4s; }
-:root[data-motion="full"] .buddy .b-extras [data-v="q"] { animation: b-bob 1s ease-in-out infinite alternate; }
-:root[data-motion="full"] .buddy .b-extras [data-v="spark"] path { animation: b-twinkle .8s ease-in-out infinite alternate; }
-:root[data-motion="full"] .buddy .b-extras [data-v="spark"] path:nth-child(2) { animation-delay: -.4s; }
-:root[data-motion="full"] .buddy .b-extras [data-v="sweat"] { animation: b-sweat 1.4s ease-in infinite; }
-:root[data-motion="full"] .buddy .b-extras [data-v="note"] { animation: b-note 1.2s ease-in-out infinite alternate; }
-
-@keyframes b-breathe      { from { translate: 0 0; } to { translate: 0 -1px; } }
-@keyframes b-breathe-head { from { translate: 0 0; } to { translate: 0 -1.2px; } }
-@keyframes b-hem          { from { transform: skewX(-2deg); } to { transform: skewX(2deg); } }
-@keyframes b-ribbon       { from { rotate: -5deg; } to { rotate: 5deg; } }
-@keyframes b-sway         { from { rotate: -4deg; } to { rotate: 4deg; } }
-@keyframes b-fanning      { from { rotate: -7deg; } to { rotate: 7deg; } }
-@keyframes b-console      { from { rotate: 0deg; } to { rotate: 3deg; } }      /* --tilt 6 <-> 9 */
-@keyframes b-dots         { 0%, 15% { opacity: 0; } 30%, 85% { opacity: 1; } 100% { opacity: 0; } }
-@keyframes b-bob          { from { translate: 0 -1.5px; } to { translate: 0 1.5px; } }
-@keyframes b-twinkle      { from { scale: .7; } to { scale: 1.1; } }
-@keyframes b-sweat        { 0% { translate: 0 0; opacity: 1; } 70% { opacity: 1; } 100% { translate: 0 3px; opacity: 0; } }
-@keyframes b-note         { from { translate: 0 0; } to { translate: 0 -4px; } }
+.b-layer--main { transform-origin: 50% 100%; }
+.b-layer--arm  { transform-origin: 54.3% 62.4%; }                                      /* the shoulder (162, 252) in the full viewBox */
+.buddy-box[data-variant="bust"] .b-layer--arm { transform-origin: 35.8% 102.5%; }      /* ... and in the bust's */
+:root[data-motion="full"] .buddy .b-layer--main { animation: b-breathe 3.4s ease-in-out infinite alternate; }
+:root[data-motion="full"] .buddy .b-layer--arm  { animation: b-sway 2.9s ease-in-out infinite alternate; }
+@keyframes b-breathe { from { transform: scaleY(1); } to { transform: scaleY(1.014); } }
+@keyframes b-sway    { from { transform: rotate(-2.5deg); } to { transform: rotate(2.5deg); } }
 
 /* setReducedMotion(true) and instant paints: nothing tweens, nothing loops */
 .buddy.is-snap *, .buddy.is-still * { transition: none !important; }
@@ -225,7 +183,7 @@ svg.buddy {
 .buddy-box[data-variant="full"] .bubble {
   align-self: end; justify-self: start;
   margin-left: calc(var(--_fig-h) * .2);
-  min-width: calc(var(--_inset) + var(--_fig-h) * .2 + 40px);          /* always wide enough to carry the tail */
+  min-width: calc(var(--_inset) + var(--_fig-h) * .3 + 44px);          /* always wide enough to carry the tail */
 }
 .buddy-box[data-variant="bust"] .bubble { align-self: center; justify-self: start; }
 [data-layout="compact"] .buddy-box[data-variant="bust"] .bubble { align-self: start; }
@@ -243,7 +201,7 @@ svg.buddy {
 }
 .buddy-box[data-bubble="0"]::after { display: none; }
 .buddy-box[data-variant="full"]::after {
-  left: calc(var(--_inset) + var(--_fig-h) * .4); bottom: calc(var(--_fig-h) + 12px - 8px);
+  left: calc(var(--_inset) + var(--_fig-h) * .46); bottom: calc(var(--_fig-h) + 12px - 8px);      /* over his hat */
   transform: rotate(45deg) skew(10deg, 10deg);
 }
 .buddy-box[data-variant="bust"]::after {
@@ -323,91 +281,4 @@ svg.buddy {
   box-shadow: 0 0 0 1px var(--edge), -8px 0 8px 2px var(--surface);
 }
 
-/* ===== 司马懿 (§11.7) ====================================================================================================== */
-
-.rival {
-  --_bar: var(--top, 48px);
-  --_d: min(44px, var(--_bar) + 4px);                  /* the disc: 44 px; it may hang 4 px below a 40 px bar */
-  position: relative; z-index: 2;
-  display: flex; align-items: center; gap: 8px;        /* block-level: the plate is exactly as high as the bar */
-  width: max-content; max-width: 100%; height: var(--_bar);
-  color: var(--ink);
-  -webkit-user-select: none; user-select: none;
-}
-/* 56 px in landscape (48 px bar + the 8 px above the board); 38 px under the 36 px bar of a landscape phone */
-[data-layout="landscape"] .rival { --_d: min(56px, var(--_bar) + (var(--_bar) - 32px) / 2); gap: 10px; }
-
-/* A medallion: centred in a bar that is higher than it, hanging from the bar's top edge (down to the board) otherwise. */
-.rival__disc {
-  position: relative; flex: none; align-self: flex-start;
-  margin-top: max(1px, (var(--_bar) - var(--_d)) / 2);
-  width: var(--_d); height: var(--_d); border-radius: 50%;
-  background: radial-gradient(circle at 50% 26%, color-mix(in srgb, var(--wei) 72%, #fff), var(--wei) 52%, color-mix(in srgb, var(--wei) 62%, #000) 100%);
-  box-shadow: 0 2px 6px #0005;
-}
-.rival__face { display: block; width: 100%; height: 100%; border-radius: 50%; overflow: hidden; }
-.rival__ring, .rival__flash { position: absolute; inset: 0; border-radius: 50%; pointer-events: none; }
-.rival__ring { border: 2.5px solid var(--edge); }
-.rival__flash { border: 3px solid var(--accent); opacity: 0; }
-
-.rival__plate { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
-.rival__name { font-size: 15px; line-height: 20px; font-weight: 600; white-space: nowrap; }
-.rival__title { font-size: 12px; line-height: 16px; color: var(--ink-2); white-space: nowrap; }
-
-/* his spoken line: a small speech tag to the right of the plate; it overlays, so nothing in the bar shifts */
-.rival__say {
-  position: absolute; left: calc(100% + 10px); top: 50%; z-index: 1;
-  display: inline-flex; align-items: center; gap: 6px;
-  margin-top: -14px; height: 28px; padding: 0 10px;
-  border: 1.5px solid var(--edge); border-radius: 12px 12px 12px 3px;
-  background: var(--surface); color: var(--ink);
-  font-size: 13px; line-height: 18px; white-space: nowrap;
-  box-shadow: 0 2px 8px #0004;
-  transform-origin: 0 100%;
-  pointer-events: none;
-}
-.rival__line { max-width: 10.5em; overflow: hidden; text-overflow: ellipsis; }      /* his lines have at most 10 characters */
-.rival__line:empty { display: none; }
-/* A phone's bar has no room beside the plate (the round, the trophies and ♪ follow at once): while he speaks, the
- * line takes the place of his name and title, right next to his face. The thinking dots alone stay beside the plate. */
-[data-layout="compact"] .rival[data-say="line"] .rival__plate { visibility: hidden; }
-[data-layout="compact"] .rival[data-say="line"] .rival__say { left: calc(var(--_d) + 8px); }
-.rival__dots { display: inline-flex; align-items: center; gap: 4px; }
-.rival__dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--ink-2); }
-:root[data-motion="full"] .rival:not(.is-still) .rival__dots i { animation: bubble-dot 900ms var(--e-inout) infinite; }
-:root[data-motion="full"] .rival:not(.is-still) .rival__dots i:nth-child(2) { animation-delay: 150ms; }
-:root[data-motion="full"] .rival:not(.is-still) .rival__dots i:nth-child(3) { animation-delay: 300ms; }
-
-/* face variants and brows */
-.rival__face .r-eyes > g, .rival__face .r-mouth > g, .rival__face .r-sweat { display: none; }
-.rival__face[data-eyes="narrow"] .r-eyes [data-v="narrow"],
-.rival__face[data-eyes="side"]   .r-eyes [data-v="side"],
-.rival__face[data-eyes="wide"]   .r-eyes [data-v="wide"],
-.rival__face[data-eyes="happy"]  .r-eyes [data-v="happy"],
-.rival__face[data-mouth="flat"]  .r-mouth [data-v="flat"],
-.rival__face[data-mouth="hmm"]   .r-mouth [data-v="hmm"],
-.rival__face[data-mouth="frown"] .r-mouth [data-v="frown"],
-.rival__face[data-mouth="o"]     .r-mouth [data-v="o"],
-.rival__face[data-mouth="smirk"] .r-mouth [data-v="smirk"] { display: inline; }
-
-.rival__face { --brow-l: 12deg; --brow-r: -12deg; --brow-y: 0px; }          /* resting brows angled inward */
-.rival__face .r-head   { transform-origin: 60px 80px; }
-.rival__face .r-brow-l { transform-origin: 46.5px 39.5px; transform: translateY(var(--brow-y)) rotate(var(--brow-l)); }
-.rival__face .r-brow-r { transform-origin: 73.5px 39.5px; transform: translateY(var(--brow-y)) rotate(var(--brow-r)); }
-:root[data-motion="full"] .rival:not(.is-still) :is(.r-brow-l, .r-brow-r) { transition: transform 260ms var(--e-back); }
-
-/* the five moods */
-.rival[data-mood="thinking"] .rival__ring { border-style: dashed; border-color: color-mix(in srgb, var(--wei) 30%, #fff); }
-:root[data-motion="full"] .rival[data-mood="thinking"]:not(.is-still) .rival__ring { animation: rival-ring 7s linear infinite; }
-@keyframes rival-ring { to { transform: rotate(360deg); } }
-
-.rival[data-mood="frown"] .rival__face { --brow-l: 20deg; --brow-r: -20deg; opacity: .9; }      /* 8° steeper; dims 10 % */
-.rival[data-mood="frown"] .rival__face .r-sweat { display: inline; }
-.rival[data-mood="frown"] .rival__ring { border-color: color-mix(in srgb, var(--danger) 50%, transparent); }
-
-.rival[data-mood="rattled"] .rival__face { --brow-l: 4deg; --brow-r: -4deg; --brow-y: -3px; }
-/* without motion the flash cannot play: the ring stays lit instead */
-:root:not([data-motion="full"]) .rival[data-mood="rattled"] .rival__flash,
-.rival.is-still[data-mood="rattled"] .rival__flash { opacity: 1; }
-
-.rival[data-mood="smug"] .rival__ring { border-color: var(--wei); }
+/* 司马懿: his rules live in styles/rival.css. */

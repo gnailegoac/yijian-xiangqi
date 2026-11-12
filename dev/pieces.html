@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="shachang" data-motion="full">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>弈间 · 棋子小兵</title>
+<link rel="stylesheet" href="../styles/tokens.css">
+<link rel="stylesheet" href="../styles/themes.css">
+<link rel="stylesheet" href="../styles/board.css">
+<link rel="stylesheet" href="../styles/pieces.css">
+<style>
+  /* Page-only rules of this dev sheet. */
+  body { margin: 0; padding: 10px 14px 18px; background: #f6cc6e; color: #5a3a12; font: 600 13px/1.35 system-ui, sans-serif; }
+  h2 { margin: 8px 0 2px; font: 700 13px/1.3 system-ui, sans-serif; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px 22px; align-items: flex-start; }
+  .bv.stage { aspect-ratio: auto; flex: none; width: calc(var(--w) * var(--c)); height: calc(var(--h) * var(--c)); }
+  .bv.grid { outline: 2px dashed #c98a3a; outline-offset: -1px; border-radius: 8px; }
+  /* on the board a lower row has to paint over the row above it (the head overlaps the feet above) */
+  .bv.stage .piece { z-index: calc(1 + var(--row, 0)); }
+  #bed { position: absolute; left: -3000px; top: 0; --c: 70px; width: 210px; height: 280px; aspect-ratio: auto; }
+  .report { margin: 6px 0 0; font: 600 13px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
+  #pairs { font-weight: 800; }
+</style>
+</head>
+<body>
+<p class="report">column test: <span id="pairs">…</span>  <span id="pairs-info"></span></p>
+<p class="report" id="stats"></p>
+<h2>蜀(圆盾 · 浅底深字)帥 仕 相 馬 車 炮 兵 —— 魏(八角盾 · 深底浅字)將 士 象 馬 車 砲 卒 · c = 90</h2>
+<div class="bv stage" id="big" data-theme="shachang" style="--c:90px; --w:8.7; --h:2.75"></div>
+<div class="row">
+  <div>
+    <h2>c = 70(平板)</h2>
+    <div class="bv stage" id="pad" data-theme="shachang" style="--c:70px; --w:8.7; --h:2.75"></div>
+  </div>
+  <div>
+    <h2>棋盘上的间距:相邻一格,第二排抬起</h2>
+    <div class="bv stage grid" id="tight" data-theme="shachang" style="--c:70px; --w:6.2; --h:3.5"></div>
+  </div>
+</div>
+<div class="row">
+  <div>
+    <h2>c = 37(手机)</h2>
+    <div class="bv stage" id="phone" data-theme="shachang" style="--c:37px; --w:8.7; --h:2.75"></div>
+  </div>
+  <div>
+    <h2>c = 37 相邻</h2>
+    <div class="bv stage grid" id="tight37" data-theme="shachang" style="--c:37px; --w:6.2; --h:3.5"></div>
+  </div>
+  <div>
+    <h2>表情:平常 / is-scared / is-dizzy / is-happy / is-fallen(只换脸)</h2>
+    <div class="bv stage" id="faces" data-theme="shachang" style="--c:70px; --w:8.7; --h:1.45"></div>
+  </div>
+</div>
+<div class="bv" id="bed" data-theme="shachang"></div>
+
+<script type="module">
+  import { pieceArt, PIECE_BOX } from '../src/ui/piece-art.js';
+
+  /** @typedef {'red'|'black'} Side */
+  /** @typedef {'king'|'advisor'|'elephant'|'horse'|'rook'|'cannon'|'pawn'} Kind */
+
+  /** @type {Kind[]} */
+  const KINDS = ['king', 'advisor', 'elephant', 'horse', 'rook', 'cannon', 'pawn'];
+  /** @type {Side[]} */
+  const SIDES = ['red', 'black'];
+  /** @type {Record<Side, Record<Kind, string>>} */
+  const GLYPH = {
+    red: { king: '帥', advisor: '仕', elephant: '相', horse: '馬', rook: '車', cannon: '炮', pawn: '兵' },
+    black: { king: '將', advisor: '士', elephant: '象', horse: '馬', rook: '車', cannon: '砲', pawn: '卒' },
+  };
+  const LIFT = 'translateY(calc(-.09 * var(--c))) scale(1.06)';
+  let serial = 0;
+
+  /**
+   * One piece with exactly the DOM of board-view.js.
+   * @param {HTMLElement} host @param {Side} color @param {Kind} type @param {number} vx @param {number} vy
+   * @param {string} [extra] more classes
+   */
+  function addPiece(host, color, type, vx, vy, extra = '') {
+    const el = document.createElement('div');
+    el.className = `piece ${color}${extra ? ' ' + extra : ''}`;
+    el.dataset.id = `${color}-${type}-${serial++}`;
+    el.dataset.type = type;
+    el.dataset.color = color;
+    el.style.setProperty('--vx', String(vx));
+    el.style.setProperty('--vy', String(vy));
+    el.style.setProperty('--row', String(Math.round(vy)));
+    el.innerHTML = `<div class="piece__shadow"></div><div class="piece__body">${pieceArt(color, type)}`
+      + `<span class="piece__glyph">${GLYPH[color][type]}</span></div>`;
+    host.appendChild(el);
+    return el;
+  }
+  /** @param {string} id */
+  const $ = (id) => /** @type {HTMLElement} */ (document.getElementById(id));
+  /** @param {HTMLElement} piece */
+  const body = (piece) => /** @type {HTMLElement} */ (piece.querySelector('.piece__body'));
+
+  // ---- the show ------------------------------------------------------------------------------------------------------
+  // ?big=220 enlarges the first stage to look at details
+  const bigC = Number(new URLSearchParams(location.search).get('big'));
+  if (bigC > 0) $('big').style.setProperty('--c', `${bigC}px`);
+  for (const id of ['big', 'pad', 'phone']) {
+    KINDS.forEach((k, i) => { addPiece($(id), 'red', k, i * 1.25, -.1); addPiece($(id), 'black', k, i * 1.25, 1.25); });
+  }
+  for (const id of ['tight', 'tight37']) {
+    /** @type {[Side, Kind][][]} */
+    const rows = [
+      [['black', 'rook'], ['black', 'horse'], ['black', 'elephant'], ['black', 'advisor'], ['black', 'king'], ['red', 'cannon']],
+      [['red', 'king'], ['red', 'rook'], ['black', 'cannon'], ['red', 'pawn'], ['black', 'pawn'], ['red', 'horse']],
+      [['red', 'advisor'], ['red', 'elephant'], ['black', 'king'], ['red', 'rook'], ['red', 'cannon'], ['black', 'rook']],
+    ];
+    rows.forEach((row, r) => row.forEach(([color, type], c) => {
+      const p = addPiece($(id), color, type, c, r);
+      if (r === 1) body(p).style.transform = LIFT;
+    }));
+  }
+  ['', 'is-scared', 'is-dizzy', 'is-happy'].forEach((cls, i) => {
+    addPiece($('faces'), i % 2 ? 'black' : 'red', 'pawn', i * 1.05, -.1, cls);
+    addPiece($('faces'), i % 2 ? 'red' : 'black', (/** @type {Kind[]} */ (['horse', 'cannon', 'elephant', 'rook']))[i], 4.3 + i * 1.05, -.1, cls);
+  });
+  // is-fallen: board.css also lays the body down; here only the face is of interest
+  body(addPiece($('faces'), 'red', 'king', 8.5 - .6 - .5, -.1, 'is-fallen')).style.rotate = '0deg';
+
+  // ---- measurements --------------------------------------------------------------------------------------------------
+  const bed = $('bed');
+  const k = 70 / PIECE_BOX.w;                                     // px per art unit in the bed
+  const SHAPES = 'path, circle, ellipse, rect, polygon, line, polyline';
+
+  // does getBoundingClientRect() of an SVG shape include its stroke in this browser?
+  bed.innerHTML = '<svg class="piece__art" viewBox="0 0 100 128"><rect x="10" y="10" width="50" height="50" fill="none" stroke="#000" stroke-width="10"/></svg>';
+  const strokeIncluded = /** @type {Element} */ (bed.querySelector('rect')).getBoundingClientRect().height > 50 * k + 1;
+  bed.innerHTML = '';
+
+  /**
+   * The painted box of one shape in page px (stroke included), or null when it is not rendered.
+   * @param {Element} el @param {number} scale
+   */
+  function paintBox(el, scale) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return null;
+    let pad = 0;
+    if (!strokeIncluded) {
+      const cs = getComputedStyle(el);
+      if (cs.stroke !== 'none') pad = parseFloat(cs.strokeWidth) / 2 * k * scale;
+    }
+    return { l: r.left - pad, t: r.top - pad, r: r.right + pad, b: r.bottom + pad };
+  }
+
+  // 1. the box: every shape inside 0..100 x 12..128, and the element count
+  /** @type {string[]} */
+  const boxFails = [];
+  let maxCount = 0, minTop = 999;
+  for (const color of SIDES) for (const type of KINDS) {
+    for (const face of ['', 'is-scared', 'is-dizzy', 'is-happy']) {
+      const p = addPiece(bed, color, type, 1, 1, face);
+      const art = /** @type {Element} */ (p.querySelector('.piece__art'));
+      const o = art.getBoundingClientRect();
+      const count = art.querySelectorAll('*').length + 1;
+      maxCount = Math.max(maxCount, count);
+      if (count > 30) boxFails.push(`${color} ${type}: ${count} elements`);
+      for (const s of art.querySelectorAll(SHAPES)) {
+        const b = paintBox(s, 1);
+        if (!b) continue;
+        const x0 = (b.l - o.left) / k, x1 = (b.r - o.left) / k, y0 = (b.t - o.top) / k, y1 = (b.b - o.top) / k;
+        minTop = Math.min(minTop, y0);
+        if (x0 < -.05 || x1 > 100.05 || y0 < 11.95 || y1 > 128.05) {
+          boxFails.push(`${color} ${type}${face ? ' ' + face : ''}: a shape at x ${x0.toFixed(1)}..${x1.toFixed(1)}, y ${y0.toFixed(1)}..${y1.toFixed(1)}`);
+        }
+      }
+      p.remove();
+    }
+  }
+
+  // 2. the column test: the lower piece, lifted, against the character of the piece on the point above
+  /** @type {string[]} */
+  const pairFails = [];
+  let pairs = 0, minGap = 999;
+  for (const uc of SIDES) for (const ut of KINDS) for (const lc of SIDES) for (const lt of KINDS) {
+    const upper = addPiece(bed, uc, ut, 1, 1);
+    const lower = addPiece(bed, lc, lt, 1, 2);
+    body(lower).style.transform = LIFT;
+    const g = /** @type {Element} */ (upper.querySelector('.piece__glyph')).getBoundingClientRect();
+    pairs++;
+    for (const face of ['', 'is-scared', 'is-dizzy', 'is-happy']) {
+      if (face) lower.classList.add(face);
+      let hit = false;
+      for (const s of lower.querySelectorAll(`.piece__art :is(${SHAPES})`)) {
+        const b = paintBox(s, 1.06);
+        if (!b) continue;
+        if (b.l < g.right && b.r > g.left) minGap = Math.min(minGap, b.t - g.bottom);
+        if (b.l < g.right && b.r > g.left && b.t < g.bottom && b.b > g.top) hit = true;
+      }
+      if (hit) pairFails.push(`${uc} ${ut} / ${lc} ${lt}${face ? ' ' + face : ''}`);
+      if (face) lower.classList.remove(face);
+    }
+    upper.remove();
+    lower.remove();
+  }
+  $('pairs').textContent = pairFails.length ? `PAIRS FAIL (${pairFails.length}): ${pairFails.slice(0, 12).join('; ')}` : 'PAIRS OK';
+  $('pairs-info').textContent = `(${pairs} pairs x 4 faces, lower piece lifted; smallest gap ${minGap.toFixed(1)} px at c = 70; stroke in rect: ${strokeIncluded})`;
+
+  // 3. the character on a phone
+  const g37 = /** @type {Element} */ ($('phone').querySelector('.piece__glyph'));
+  const range = document.createRange();
+  range.selectNodeContents(g37);
+  const gh = g37.getBoundingClientRect().height, fs = parseFloat(getComputedStyle(g37).fontSize);
+  $('stats').textContent = `box: ${boxFails.length ? 'BOX FAIL ' + boxFails.slice(0, 10).join('; ') : 'BOX OK'} (top-most paint y = ${minTop.toFixed(1)}, most elements = ${maxCount})\n`
+    + `glyph at c = 37: font ${fs.toFixed(1)} px, box ${gh.toFixed(1)} px, text line ${range.getBoundingClientRect().height.toFixed(1)} px ${fs >= 16 ? 'GLYPH OK' : 'GLYPH SMALL'}`;
+</script>
+</body>
+</html>

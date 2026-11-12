@@ -100,7 +100,8 @@
 /**
  * @typedef {Object} Settings                     key 'yijian.xiangqi.v2.settings'
  * @property {2} schema
- * @property {'chibi'|'longzhong'|'shachang'} theme      default 'chibi'
+ * @property {'chibi'|'longzhong'|'shachang'} theme      default 'shachang'
+ * @property {2} look                             the look the record was saved under; an older record gets the default theme once
  * @property {boolean} sfx                        default true
  * @property {boolean} music                      default true
  * @property {number}  volume                     default 1.0, clamped 0..1

@@ -14,19 +14,20 @@
 /* The caret: a 7 x 15 px block after the last character while the line is streaming; 1 Hz, steady without motion. */
 .stream-text.is-streaming::after {
   content: ""; display: inline-block; width: 7px; height: 15px; margin-left: 2px; vertical-align: -2px;
-  border-radius: 1px; background: var(--accent);
+  border-radius: 1px; background: var(--accent-text);
 }
 :root[data-motion="full"] .stream-text.is-streaming:not(.is-reduced)::after { animation: stream-caret 1s steps(2, jump-none) infinite; }
 @keyframes stream-caret { from { opacity: 1; } to { opacity: 0; } }
 
-/* A move inside the text: tappable, in the colour of the side that plays it. */
+/* A move inside the text: tappable, in the colour of the side that plays it: red moves in the red that reads as text
+ * on the paper of the theme, the other side's in its blue (both at least 4.5 : 1 on --surface). */
 .move-link {
-  --rival-red: var(--red-rim); --rival-blk: var(--blk-rim);
+  --rival-red: var(--accent-text); --rival-blk: var(--wei);
   -webkit-appearance: none; appearance: none;
   position: relative; display: inline-block; margin: 0 1px; padding: 0 2px; border: 0; border-radius: 6px;
-  background: linear-gradient(90deg, currentColor 60%, transparent 0) left bottom 1px / 7px 1.5px repeat-x;   /* 1.5 px dashed underline */
-  color: var(--accent);
-  font: inherit; font-weight: 600; line-height: inherit; letter-spacing: inherit; white-space: nowrap; vertical-align: baseline;
+  background: linear-gradient(90deg, currentColor 60%, transparent 0) left bottom 1px / 7px 2px repeat-x;   /* 2 px dashed underline */
+  color: var(--accent-text);
+  font: inherit; font-weight: 700; line-height: inherit; letter-spacing: inherit; white-space: nowrap; vertical-align: baseline;
   cursor: pointer; -webkit-user-select: none; user-select: none; touch-action: manipulation;
 }
 .move-link::before {                                  /* the 44 px-high tap area */
@@ -35,12 +36,13 @@
 /* Lines are closer than 44 px, so the tap areas of links on neighbouring lines overlap. A link's own box lies above
  * every tap area: a tap on the word always goes to that word. */
 .move-link::after { content: ""; position: absolute; z-index: 2; inset: 0; }
-/* On rice paper the pale rims cannot be read as text: 隆中 writes the rival's moves in the camp colours instead. */
-[data-theme="longzhong"] .move-link { --rival-red: var(--shu); --rival-blk: var(--wei); }
-.move-link[data-color="red"] { color: var(--accent); }                 /* the child plays red unless the board says otherwise */
+/* 沙场's camp red is too light for text on cream (its --accent-text is the darker red); the other two themes write
+ * red moves in their camp red. */
+[data-theme="chibi"] .move-link, [data-theme="longzhong"] .move-link { --rival-red: var(--shu); }
+.move-link[data-color="red"] { color: var(--rival-red); }
 .move-link[data-color="black"] { color: var(--rival-blk); }
 :root:has(.bv[data-bottom="black"]) .move-link[data-color="red"] { color: var(--rival-red); }
-:root:has(.bv[data-bottom="black"]) .move-link[data-color="black"] { color: var(--accent); }
+:root:has(.bv[data-bottom="black"]) .move-link[data-color="black"] { color: var(--rival-blk); }
 .move-link:active { transform: scale(.96); }
 .move-link.is-active {
   background: color-mix(in srgb, currentColor 22%, transparent);
@@ -50,11 +52,11 @@
 /* ▶ 演示: plays the line that the links before it spell out. */
 .move-link--play {
   margin-left: 6px; padding: 0 10px; border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 65%, transparent);
-  color: var(--accent); font-size: .82em; line-height: 1.75; vertical-align: 1px;
+  background: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--edge);
+  color: var(--accent-ink); font-size: .82em; line-height: 1.75; vertical-align: 1px;
 }
-.move-link--play:active { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.move-link--play:active { background: color-mix(in srgb, var(--accent) 80%, var(--edge)); }
 
 /* A link of an earlier position (chat-panel retireLinks): its squares may hold other pieces by now. It is a word of its
  * sentence again, in the sentence's colour and weight, with no underline and no tap area: a tap goes to what is
@@ -74,7 +76,7 @@
 .chat-tool { position: relative; display: block; padding-left: 1.45em; color: var(--ink-2); font-size: .9em; }
 .chat-tool::before {
   content: ""; position: absolute; left: .1em; top: 50%; width: .8em; height: .8em; margin-top: -.4em;
-  box-sizing: border-box; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%;
+  box-sizing: border-box; border: 2px solid var(--accent-text); border-top-color: transparent; border-radius: 50%;
 }
 :root[data-motion="full"] .chat-tool::before { animation: chat-spin 900ms linear infinite; }
 @keyframes chat-spin { to { transform: rotate(360deg); } }
@@ -110,32 +112,31 @@
 .chip {
   -webkit-appearance: none; appearance: none;
   position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center;
-  height: var(--chip-h); min-width: 72px; max-width: 100%; margin: 0; padding: 0 16px;
-  border: 1px solid var(--edge); border-radius: var(--r-chip);
-  background: var(--surface-2); color: var(--ink);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ink) 10%, transparent), 0 3px 0 color-mix(in srgb, var(--edge) 62%, #000);
-  font: 600 var(--chip-fs) / 1.2 var(--font-ui);
+  height: var(--chip-h); min-width: 72px; max-width: 100%; margin: 0; padding: 0 calc(17px - var(--ol));   /* the old box: 1 + 16 */
+  border: var(--ol) solid var(--edge); border-radius: var(--r-chip);
+  background: var(--surface); color: var(--ink);
+  box-shadow: 0 3px 0 var(--edge);
+  font: 700 var(--chip-fs) / 1.2 var(--font-ui);
   cursor: pointer; -webkit-user-select: none; user-select: none; touch-action: manipulation;
   transition: transform 60ms, box-shadow 60ms;
 }
-.chat[data-mode="compact"] .chip { padding: 0 12px; }
-.chat[data-mode="compact"] .chip::before { content: ""; position: absolute; inset: -5px 0; }      /* 34 px inside the border + 10 = 44 */
+.chat[data-mode="compact"] .chip { padding: 0 calc(13px - var(--ol)); }
+.chat[data-mode="compact"] .chip::before { content: ""; position: absolute; inset: -7px 0; }      /* 30 px inside the outline + 14 = 44 */
 .chip__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip:active:not(:disabled) {
   transform: translateY(2px);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ink) 10%, transparent), 0 1px 0 color-mix(in srgb, var(--edge) 62%, #000);
+  box-shadow: 0 1px 0 var(--edge);
 }
 .chip--primary {
-  border-color: color-mix(in srgb, var(--accent) 70%, #000);
   background: var(--accent); color: var(--accent-ink);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 35%, transparent), 0 3px 0 color-mix(in srgb, var(--accent) 55%, #000);
+  box-shadow: inset 0 2px 0 color-mix(in srgb, #fff 42%, transparent), 0 3px 0 var(--edge);
 }
 .chip--primary:active:not(:disabled) {
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 35%, transparent), 0 1px 0 color-mix(in srgb, var(--accent) 55%, #000);
+  box-shadow: inset 0 2px 0 color-mix(in srgb, #fff 42%, transparent), 0 1px 0 var(--edge);
 }
 .chip.is-used, .chip:disabled {
   opacity: .45; cursor: default; transform: translateY(2px);
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--edge) 62%, #000);
+  box-shadow: 0 1px 0 var(--edge);
 }
 /* A chip that was not in the previous set pops in, one after the other. */
 :root[data-motion="full"] .chip.is-new { animation: chip-in 260ms var(--e-back) backwards; animation-delay: calc(var(--i, 0) * 45ms); }
@@ -152,16 +153,17 @@
 .chat__tools > button {
   -webkit-appearance: none; appearance: none;
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  height: 44px; min-width: 44px; margin: 0; padding: 0 14px;
-  border: 1px solid var(--edge); border-radius: 12px;
-  background: var(--surface); color: var(--ink-2);
-  font: 500 14px / 1 var(--font-ui); white-space: nowrap;
+  height: 44px; min-width: 44px; margin: 0; padding: 0 calc(15px - var(--ol));      /* the old box: 1 + 14 */
+  border: var(--ol) solid var(--edge); border-radius: 14px;
+  background: var(--wood); color: var(--wood-ink);
+  box-shadow: inset 0 2px 0 color-mix(in srgb, #fff 34%, transparent);
+  font: 700 14px / 1 var(--font-ui); white-space: nowrap;
   cursor: pointer; -webkit-user-select: none; user-select: none; touch-action: manipulation;
   transition: transform 60ms;
 }
-.chat__tools > button:active { transform: translateY(1px); background: var(--surface-2); }
+.chat__tools > button:active { transform: translateY(1px); background: var(--wood-lo); }
 #chat-toggle {                                        /* ✎ as a drawn glyph, not as a colour emoji */
-  min-width: 48px; padding: 0 12px; color: var(--accent);
+  min-width: 48px; padding: 0 calc(13px - var(--ol)); color: var(--wood-ink);
   font: 400 24px / 1 "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2", "Noto Sans Symbols2", var(--font-ui);
   font-variant-emoji: text;
 }
@@ -183,9 +185,8 @@
 
 .chat[data-sheet="1"] {
   gap: 0; padding: 0; overflow: hidden;
-  border: 1.5px solid var(--edge); border-radius: var(--r-card);
+  border: var(--ol) solid var(--edge); border-radius: var(--r-card);
   background: var(--surface);
-  box-shadow: 0 -6px 28px var(--shadow);
 }
 .chat[data-sheet="1"]:not([data-mode="landscape"]) { border-bottom: 0; border-radius: var(--r-card) var(--r-card) 0 0; }
 :root[data-motion="full"] .chat[data-sheet="1"] { animation: chat-sheet-rise 240ms var(--e-out); }
@@ -198,20 +199,21 @@
   -webkit-appearance: none; appearance: none;
   position: relative; display: flex; align-items: center; justify-content: space-between; flex: none;
   height: 52px; width: 100%; margin: 0; padding: 0 4px 0 18px;
-  border: 0; border-bottom: 1px solid var(--edge); border-radius: 0;
-  background: var(--surface-2); color: var(--ink);
+  border: 0; border-bottom: 2px solid var(--edge); border-radius: 0;
+  background: var(--wood); color: var(--wood-ink);
+  box-shadow: inset 0 2px 0 color-mix(in srgb, #fff 34%, transparent);
   font: 700 21px / 1 var(--font-kai); letter-spacing: .12em;
   cursor: pointer; -webkit-user-select: none; user-select: none; touch-action: manipulation;
 }
 .chat[data-sheet="1"] .chat__head:focus-visible { outline-offset: -4px; }
 .chat__title { display: inline-flex; align-items: center; gap: 10px; }
 .chat__title::before {                                /* a seal-red mark before the title */
-  content: ""; width: 6px; height: 20px; border-radius: 3px; background: var(--accent);
+  content: ""; width: 8px; height: 20px; border-radius: 4px; background: var(--accent); box-shadow: inset 0 0 0 1.5px var(--edge);
 }
-.chat__arrow { display: grid; place-items: center; width: 48px; height: 44px; color: var(--ink-2); font: 400 30px / 1 var(--font-ui); letter-spacing: 0; }
+.chat__arrow { display: grid; place-items: center; width: 48px; height: 44px; color: var(--wood-ink); font: 400 30px / 1 var(--font-ui); letter-spacing: 0; }
 .chat[data-sheet="1"]:not([data-mode="landscape"]) .chat__head::before {      /* the grip of a bottom sheet */
   content: ""; position: absolute; left: 50%; top: 5px; width: 40px; height: 4px; margin-left: -20px;
-  border-radius: 2px; background: var(--edge);
+  border-radius: 2px; background: color-mix(in srgb, var(--wood-ink) 55%, transparent);
 }
 .chat[data-sheet="1"][data-mode="compact"] .chat__head { height: 46px; font-size: 19px; }
 /* Keyboard up on a phone: the sheet is short, so the title bar and the paddings give their room to the last line. */
@@ -223,7 +225,7 @@
   display: flex; flex-direction: column; gap: 8px; flex: 1 1 0; min-height: 0;
   padding: 12px 12px 14px;
   overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
-  scrollbar-width: thin; scrollbar-color: var(--edge) transparent;
+  scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--edge) 45%, var(--surface)) transparent;
 }
 
 .chat[data-sheet="1"][data-kb="1"] .chat__log { padding-block: 6px; }
@@ -232,19 +234,19 @@
   display: flex; align-items: center; gap: 10px; flex: none;
   margin: 6px 0 0; color: var(--ink-2); font-size: 13px; line-height: 18px; white-space: nowrap;
 }
-.chat__event::before, .chat__event::after { content: ""; flex: 1 1 0; min-width: 12px; height: 1px; background: var(--edge); }
+.chat__event::before, .chat__event::after { content: ""; flex: 1 1 0; min-width: 12px; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--edge) 30%, var(--surface)); }
 
+/* (the old box: 2 px of outline, 1 px less padding) */
 .msg {
-  position: relative; flex: none; max-width: 92%; padding: 8px 12px;
-  border: 1px solid var(--edge); border-radius: 14px;
+  position: relative; flex: none; max-width: 92%; padding: 7px 11px;
+  border: 2px solid var(--edge); border-radius: 16px;
   font-size: 16px; line-height: 24px; overflow-wrap: anywhere;
 }
 .chat[data-mode="compact"] .msg { font-size: 15px; line-height: 22px; }
 .msg[data-role="buddy"] { align-self: flex-start; border-bottom-left-radius: 4px; background: var(--surface-2); }
 .msg[data-role="me"] {
   align-self: flex-end; border-bottom-right-radius: 4px;
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--surface));
-  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  background: var(--sky); color: var(--sky-ink);
 }
 .msg[data-kind="caption"] {                           /* the quiet caption of a rival move */
   padding: 0 4px; border: 0; background: none; color: var(--ink-2); font-size: 14px; line-height: 22px;
@@ -252,7 +254,7 @@
 .msg__text { display: inline; }
 .msg__cue {
   display: inline-block; margin: 0 8px 0 -2px; padding: 0 8px; border-radius: 9px;
-  background: var(--surface); color: var(--ink);
+  background: var(--surface); color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--edge);
   font: 700 14px / 22px var(--font-kai); white-space: nowrap; vertical-align: 1px;
 }
 .msg__cue[data-tone="good"] { background: var(--accent); color: var(--accent-ink); }
@@ -273,58 +275,59 @@
 :root[data-motion="full"] .msg[data-typing="1"] .msg__text:empty::before { animation: chat-wait 900ms var(--e-inout) infinite alternate; }
 @keyframes chat-wait { from { opacity: .35; } to { opacity: 1; } }
 
-.chat[data-sheet="1"] .chat__chips { flex: none; padding: 10px 12px 6px; border-top: 1px solid var(--edge); }
+.chat[data-sheet="1"] .chat__chips { flex: none; padding: 9px 12px 6px; border-top: 2px solid var(--edge); }
 .chat[data-sheet="1"][data-mode="compact"] .chat__chips { padding-block: 8px 6px; }
 .chat[data-sheet="1"][data-mode="compact"][data-kb="1"] .chat__chips { padding-block: 6px 4px; }
 .chat[data-sheet="1"][data-chips="0"] .chat__chips { display: none; }
 
 /* Inside the sheet the tools row holds ✎ alone (▾ closes the sheet), spelled out. */
 .chat[data-sheet="1"] .chat__tools { padding: 6px 12px 10px; }
-.chat[data-sheet="1"][data-chips="0"] .chat__tools { padding-top: 10px; border-top: 1px solid var(--edge); }
+.chat[data-sheet="1"][data-chips="0"] .chat__tools { padding-top: 9px; border-top: 2px solid var(--edge); }
 .chat[data-sheet="1"] #history-button { display: none; }
 .chat[data-sheet="1"][data-free="0"] .chat__tools,
 .chat[data-sheet="1"][data-input="1"] .chat__tools { display: none; }
 .chat[data-sheet="1"] #chat-toggle { flex: 1 1 auto; justify-content: flex-start; gap: 10px; }
-.chat[data-sheet="1"] #chat-toggle::after { content: attr(aria-label); color: var(--ink-2); font: 500 15px / 1 var(--font-ui); }
+.chat[data-sheet="1"] #chat-toggle::after { content: attr(aria-label); color: var(--wood-ink); font: 700 15px / 1 var(--font-ui); }
 
 /* The ✎ field: one line growing to three, and the send / stop button. */
 .chat__input {
   display: flex; align-items: flex-end; gap: 8px; flex: none;
-  margin: 0; padding: 8px 12px; border-top: 1px solid var(--edge);
+  margin: 0; padding: 7px 12px 8px; border-top: 2px solid var(--edge);
   background: var(--surface-2);
 }
+/* (the old box and the old text box: the padding gives the wider outline back) */
 #chat-input {
   -webkit-appearance: none; appearance: none;
-  flex: 1 1 auto; min-width: 0; height: 44px; min-height: 44px; max-height: 96px; margin: 0; padding: 9px 14px;
-  border: 1.5px solid var(--edge); border-radius: 14px;
+  flex: 1 1 auto; min-width: 0; height: 44px; min-height: 44px; max-height: 96px; margin: 0; padding: 8px 13px;
+  border: 2.5px solid var(--edge); border-radius: 16px;
   background: var(--surface); color: var(--ink);
   font: 400 16px / 24px var(--font-ui);              /* 16 px: Safari does not zoom the page on focus */
   resize: none; overflow-y: auto; scrollbar-width: none;
 }
 #chat-input::placeholder { color: var(--ink-2); opacity: 1; }
-#chat-input:focus { border-color: var(--accent); }
+#chat-input:focus { border-color: var(--accent-text); }
 #chat-input:focus-visible { outline-width: 2px; outline-offset: 0; }
 #chat-send {
   -webkit-appearance: none; appearance: none;
   position: relative; flex: none; width: 56px; height: 41px; margin: 0 0 3px; padding: 0;
-  border: 0; border-radius: var(--r-btn);
-  background: var(--accent); color: var(--accent-ink);
-  box-shadow: 0 3px 0 color-mix(in srgb, var(--accent) 55%, #000);
-  font: 700 15px / 1 var(--font-ui);
+  border: var(--ol) solid var(--edge); border-radius: var(--r-btn);
+  background: var(--jade); color: var(--jade-ink);
+  box-shadow: 0 3px 0 var(--edge);
+  font: 800 15px / 1 var(--font-ui);
   cursor: pointer; touch-action: manipulation; transition: transform 60ms, box-shadow 60ms;
 }
-#chat-send::after { content: ""; position: absolute; inset: -2px 0 -4px; }             /* tap area 56 x 47 */
+#chat-send::after { content: ""; position: absolute; inset: -5px -3px -7px; }           /* tap area 56 x 47 (measured from inside the outline) */
 #chat-send[data-mode="send"]::before {                 /* an arrow pointing up */
   content: ""; position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; margin: -10px 0 0 -10px;
   background: currentColor; clip-path: polygon(50% 0, 100% 52%, 64% 52%, 64% 100%, 36% 100%, 36% 52%, 0 52%);
 }
-#chat-send:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 55%, #000); }
+#chat-send:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 var(--edge); }
 #chat-send:disabled { opacity: .45; cursor: default; }
 #chat-send[data-mode="stop"] {
   background: var(--danger); color: var(--danger-ink);
-  box-shadow: 0 3px 0 color-mix(in srgb, var(--danger) 55%, #000);
+  box-shadow: 0 3px 0 var(--edge);
 }
-#chat-send[data-mode="stop"]:active { box-shadow: 0 1px 0 color-mix(in srgb, var(--danger) 55%, #000); }
+#chat-send[data-mode="stop"]:active { box-shadow: 0 1px 0 var(--edge); }
 
 .chat[data-sheet="1"] .chat__note:not([hidden]) {
   display: block; flex: none; margin: 0; padding: 0 16px 8px;

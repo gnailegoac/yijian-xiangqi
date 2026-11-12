@@ -38,6 +38,7 @@ import { createFx } from './fx.js';
 import { createHud } from './hud.js';
 import { applyLayout, computeLayout } from './layout.js';
 import { createRivalView } from './rival-view.js';
+import { createScene } from './scene.js';
 import { createSpeech } from './speech.js';
 import { TXT } from './texts.js';
 
@@ -248,6 +249,7 @@ export function createStage(app, deps) {
   speech.setEnabled(settings.readAloud);
 
   const fx = createFx({ reducedMotion: reduced, haptics: settings.haptics });
+  const scene = createScene(doc.body, { theme, reducedMotion: reduced });     // the camp behind everything (decoration only)
   const board = createBoardView(boardEl, { fx, audio, bottom: settings.side, theme, reducedMotion: reduced });
   board.setInteractive(false);                             // nothing to touch before the first position
   const buddy = createBuddy(buddyEl, { variant: layout.buddy, reducedMotion: reduced });
@@ -341,6 +343,7 @@ export function createStage(app, deps) {
     theme = next;
     html.dataset.theme = next;
     paintThemeColor();
+    scene.setTheme(next);
     board.setTheme(next);
     fx.refreshPalette();
     audio.setPalette(next);

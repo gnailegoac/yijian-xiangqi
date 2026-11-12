@@ -1,0 +1,138 @@
+/* 弈间 — the scene behind the whole game (src/ui/scene.js): sky, sun or moon, clouds, far hills, the two camps, grass.
+ *
+ * One <div class="scene" data-theme="chibi|longzhong|shachang"> fixed behind everything (z-index -1). It takes no
+ * token from themes.css: each of its three pictures carries its own colours, keyed by the scene's own data-theme.
+ *
+ * Lengths: --hz is the line where the grass begins. --u is one pixel of the 1180 x 820 drawing for the things in the
+ * sky; --s is the same for the band of hills and camps, which follows the width so each camp stays in its corner.
+ *
+ * Loops (at most six per picture) run only under html[data-motion="full"] and only without data-still on the scene.
+ * Each one animates transform or opacity of a direct HTML child or of a root <svg>.
+ */
+
+.scene {
+  position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden;
+  contain: layout paint style;
+  --hz: 18vh;
+  --u: clamp(0.62px, min(100vw / 1180, 100vh / 820), 1.6px);
+  --s: max(0.62px, min(100vw / 1180, 100vh / 560));
+  background: linear-gradient(#2f9bf0, #bdeaff 21vh) #bdeaff;
+}
+.scene > *, .scene__camp > * { position: absolute; display: block; }
+
+/* ---- the sky ------------------------------------------------------------------------------------------------------- */
+
+.scene__halo {
+  left: calc(89.15% - 62 * var(--u)); top: calc(7.56vh - 62 * var(--u));
+  width: calc(124 * var(--u)); height: calc(124 * var(--u)); border-radius: 50%;
+  background: #fff8c8; opacity: .38;
+}
+.scene__orb {
+  left: calc(89.15% - 40 * var(--u)); top: calc(7.56vh - 40 * var(--u));
+  width: calc(80 * var(--u)); height: calc(80 * var(--u));
+}
+.scene__cloud--a { left: calc(21.2% - 61 * var(--u)); top: calc(7.8vh - 43 * var(--u)); width: calc(122 * var(--u)); height: calc(57.6 * var(--u)); }
+.scene__cloud--b { left: calc(59.3% - 48 * var(--u)); top: calc(6.6vh - 33.6 * var(--u)); width: calc(95 * var(--u)); height: calc(44.8 * var(--u)); }
+.scene__cloud--c { left: calc(81.4% - 41 * var(--u)); top: calc(10.2vh - 28.8 * var(--u)); width: calc(81.6 * var(--u)); height: calc(38.4 * var(--u)); }
+
+.scene__stars { left: 0; top: 0; width: 100%; height: var(--hz); }
+.scene__fire {
+  left: 0; right: 0; top: calc(var(--hz) - 17vh); height: 17vh;
+  background:
+    radial-gradient(ellipse 58% 100% at 50% 100%, #ff8a3de6, #ff5a2a80 42%, transparent 74%),
+    radial-gradient(ellipse 30% 70% at 8% 100%, #ffb347b0, transparent 72%),
+    radial-gradient(ellipse 30% 70% at 92% 100%, #ffb347b0, transparent 72%);
+}
+
+/* ---- the band on the horizon: far hills, then the two camps on their green hills ------------------------------------- */
+
+.scene__far { left: 0; width: 100%; top: calc(var(--hz) - 90 * var(--s)); height: calc(116 * var(--s)); overflow: visible; }
+.scene__camp { top: calc(var(--hz) - 90 * var(--s)); width: calc(590 * var(--s)); height: calc(116 * var(--s)); }
+.scene__camp--l { left: 0; }
+.scene__camp--r { right: 0; }
+.scene__hill { inset: 0; width: 100%; height: 100%; overflow: visible; }
+.scene__flag { top: calc(28 * var(--s)); width: calc(24 * var(--s)); height: calc(18 * var(--s)); overflow: visible; }
+.scene__camp--l .scene__flag { left: calc(86 * var(--s)); transform-origin: 8.3% 50%; }
+.scene__camp--r .scene__flag { left: calc(468 * var(--s)); transform-origin: 91.7% 50%; }
+
+/* ---- the ground ------------------------------------------------------------------------------------------------------ */
+
+.scene__ground { left: 0; right: 0; top: var(--hz); bottom: 0; background: linear-gradient(#86dc76, #62c765 25%, #3fa457); }
+.scene__rim { left: 0; width: 100%; top: calc(var(--hz) - 8 * var(--s)); height: calc(18 * var(--s)); }
+.scene__decor { top: var(--hz); height: calc(100% - var(--hz)); width: auto; }
+.scene__decor--l { left: 0; }
+.scene__decor--r { right: 0; }
+
+/* the tent's valance along the top edge: scallops in red and cream with a gold line */
+.scene__valance {
+  left: 0; right: 0; top: 0; height: 36px;
+  background:
+    linear-gradient(#c2331f 0 7px, #5a1a10 7px 10px, transparent 10px) 0 0 / 100% 11px no-repeat,
+    radial-gradient(circle at 50% 0, #ee4a32 0 14px, #ffd43b 14.5px 18px, #ee4a32 18.5px 21px, #5a1a10 21.5px 24px, transparent 24.5px) 0 9px / 96px 26px repeat-x,
+    radial-gradient(circle at 50% 0, #fff5dc 0 14px, #ffd43b 14.5px 18px, #fff5dc 18.5px 21px, #5a1a10 21.5px 24px, transparent 24.5px) 48px 9px / 96px 26px repeat-x;
+}
+@media (max-aspect-ratio: 1/1) and (max-width: 600px) {
+  .scene__valance {
+    height: 22px;
+    background:
+      linear-gradient(#c2331f 0 5px, #5a1a10 5px 7px, transparent 7px) 0 0 / 100% 8px no-repeat,
+      radial-gradient(circle at 50% 0, #ee4a32 0 8px, #ffd43b 8.5px 10.5px, #ee4a32 11px 12.5px, #5a1a10 13px 14.5px, transparent 15px) 0 6px / 56px 16px repeat-x,
+      radial-gradient(circle at 50% 0, #fff5dc 0 8px, #ffd43b 8.5px 10.5px, #fff5dc 11px 12.5px, #5a1a10 13px 14.5px, transparent 15px) 28px 6px / 56px 16px repeat-x;
+  }
+}
+
+/* ---- 赤壁: the same camp at night ------------------------------------------------------------------------------------ */
+
+.scene[data-theme="chibi"] { background: linear-gradient(#0a1038, #1a2a78 12vh, #3a3f96 19vh) #3a3f96; }
+.scene[data-theme="chibi"] .scene__halo { background: #ffe9a0; opacity: .2; }
+.scene[data-theme="chibi"] .scene__cloud { opacity: .85; }
+.scene[data-theme="chibi"] .scene__ground { background: linear-gradient(#2f8f6c, #23755f 25%, #17504c); }
+
+/* ---- 隆中: a bamboo grove in morning mist ---------------------------------------------------------------------------- */
+
+.scene[data-theme="longzhong"] { background: linear-gradient(#a6dccb, #dff3dc 13vh, #fff5d6 20vh) #fff5d6; }
+.scene[data-theme="longzhong"] .scene__halo { background: #fff3b8; opacity: .55; }
+.scene[data-theme="longzhong"] .scene__cloud { opacity: .8; }
+.scene[data-theme="longzhong"] .scene__ground { background: linear-gradient(#bfeab0, #93d69c 28%, #6dbd88); }
+.scene__mist { left: -8%; width: 116%; }
+.scene__mist--a {
+  top: calc(var(--hz) - 7.5vh); height: 9vh;
+  background:
+    radial-gradient(ellipse 34% 50% at 26% 55%, #ffffffd9, transparent 72%),
+    radial-gradient(ellipse 30% 46% at 74% 50%, #ffffffc4, transparent 72%),
+    radial-gradient(ellipse 24% 36% at 50% 70%, #ffffff8c, transparent 72%);
+}
+.scene__mist--b {
+  top: 40vh; height: 34vh;
+  background:
+    radial-gradient(ellipse 26% 26% at 12% 30%, #ffffff8c, transparent 72%),
+    radial-gradient(ellipse 28% 24% at 90% 62%, #ffffff80, transparent 72%),
+    radial-gradient(ellipse 22% 20% at 4% 86%, #ffffff66, transparent 72%);
+}
+.scene__bamboo { top: 0; height: 100%; width: clamp(56px, 10vw, 150px); }   /* stretched: the stalks get thinner on a narrow window */
+.scene__bamboo--l { left: 0; }
+.scene__bamboo--r { right: 0; }
+.scene__leaves { top: 0; width: calc(250 * var(--u)); height: calc(150 * var(--u)); overflow: visible; }
+.scene__leaves--l { left: 0; transform-origin: 0 0; }
+.scene__leaves--r { right: 0; transform-origin: 100% 0; }
+
+/* ---- loops: only with full motion, never with data-still ------------------------------------------------------------- */
+
+html[data-motion="full"] .scene:not([data-still]) .scene__cloud--a,
+html[data-motion="full"] .scene:not([data-still]) .scene__mist--a { animation: scene-drift 46s ease-in-out infinite alternate; }
+html[data-motion="full"] .scene:not([data-still]) .scene__cloud--b,
+html[data-motion="full"] .scene:not([data-still]) .scene__mist--b { animation: scene-drift 62s ease-in-out -20s infinite alternate-reverse; }
+html[data-motion="full"] .scene:not([data-still]) .scene__flag { animation: scene-wave 1.5s ease-in-out infinite alternate; }
+html[data-motion="full"] .scene:not([data-still]) .scene__camp--r .scene__flag { animation-delay: -.7s; }
+/* the halo breathes by day only: the night and the grove already have six loops without it */
+html[data-motion="full"] .scene[data-theme="shachang"]:not([data-still]) .scene__halo { animation: scene-pulse 4.2s ease-in-out infinite alternate; }
+html[data-motion="full"] .scene:not([data-still]) .scene__stars { animation: scene-twinkle 2.6s ease-in-out infinite alternate; }
+html[data-motion="full"] .scene:not([data-still]) .scene__fire { animation: scene-twinkle 3.4s ease-in-out -1s infinite alternate; }
+html[data-motion="full"] .scene:not([data-still]) .scene__leaves { animation: scene-sway 5.2s ease-in-out infinite alternate; }
+html[data-motion="full"] .scene:not([data-still]) .scene__leaves--r { animation-direction: alternate-reverse; }
+
+@keyframes scene-drift { from { transform: translateX(-5vw); } to { transform: translateX(6.5vw); } }
+@keyframes scene-wave { from { transform: skewY(-7deg) scaleX(1); } to { transform: skewY(7deg) scaleX(.84); } }
+@keyframes scene-pulse { from { transform: scale(.94); } to { transform: scale(1.1); } }
+@keyframes scene-twinkle { from { opacity: .62; } to { opacity: 1; } }
+@keyframes scene-sway { from { transform: rotate(-1.6deg); } to { transform: rotate(2deg); } }

@@ -25,6 +25,8 @@
 
 import { pieceLabel } from '../core/engine.js';
 import { VIEW_W, VIEW_H, PITCH, X0, Y0, crossesRiver, fileLabels, fromView, horseLeg, pxPoint, toView, viewPoint } from './geometry.js';
+import { pieceArt } from './piece-art.js';
+import { tableArt } from './table-art.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -64,12 +66,6 @@ const VICTIM_MS = Object.freeze({ rook: 200, horse: 200, cannon: 120, elephant: 
 const GOLD = '#ffd166';
 const DEFAULT_GUARD_MS = 200;
 
-/** The octagon of black's inner ring (§10.2.3): circumradius 37.5, first vertex at 22.5 degrees. */
-const OCTAGON = Array.from({ length: 8 }, (_, k) => {
-  const a = (22.5 + 45 * k) * Math.PI / 180;
-  return `${(50 + 37.5 * Math.cos(a)).toFixed(2)},${(50 + 37.5 * Math.sin(a)).toFixed(2)}`;
-}).join(' ');
-
 /** @param {number} col */
 const X = (col) => X0 + PITCH * col;
 /** @param {number} row */
@@ -102,222 +98,9 @@ function div(cls) {
   return node;
 }
 
-// ---- board art (§10.2.1, §10.2.2): static SVG markup, no external data ---------------------------------------------
+// ---- board art: the table is drawn by table-art.js and a piece by piece-art.js (the skin) ------------------------
 
-/** Grid: ten horizontals, verticals split at the river for columns 1-7, the palace diagonals. */
-function gridPath() {
-  let d = '';
-  for (let row = 0; row < 10; row++) d += `M${X(0)} ${Y(row)}H${X(8)}`;
-  for (let col = 0; col < 9; col++) {
-    d += col === 0 || col === 8 ? `M${X(col)} ${Y(0)}V${Y(9)}` : `M${X(col)} ${Y(0)}V${Y(4)}M${X(col)} ${Y(5)}V${Y(9)}`;
-  }
-  for (const top of [0, 7]) d += `M${X(3)} ${Y(top)}L${X(5)} ${Y(top + 2)}M${X(5)} ${Y(top)}L${X(3)} ${Y(top + 2)}`;
-  return d;
-}
-
-/** Position ticks at the cannon points and the pawn points; the quadrant outside the board is skipped on cols 0 and 8. */
-function tickPath() {
-  /** @type {number[][]} */
-  const points = [];
-  for (const row of [2, 7]) for (const col of [1, 7]) points.push([col, row]);
-  for (const row of [3, 6]) for (const col of [0, 2, 4, 6, 8]) points.push([col, row]);
-  let d = '';
-  for (const [col, row] of points) {
-    for (const dx of [-1, 1]) {
-      if ((col === 0 && dx < 0) || (col === 8 && dx > 0)) continue;
-      for (const dy of [-1, 1]) d += `M${X(col) + 26 * dx} ${Y(row) + 10 * dy}H${X(col) + 10 * dx}V${Y(row) + 26 * dy}`;
-    }
-  }
-  return d;
-}
-
-/** @param {number} seed */
-function mulberry32(seed) {
-  let a = seed | 0;
-  return () => {
-    a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/** @param {number} cx @param {number} cy @param {number} r */
-const dotPath = (cx, cy, r) => `M${f1(cx - r)} ${f1(cy)}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0Z`;
-
-// Theme decoration never hides information (CONTRACT-NOTES K-96): nothing drawn below overlaps a file label or the
-// characters 楚河 / 汉界, and no decoration object (seal, pennant, ship, rivet, bamboo) lies inside the 0.44 c radius
-// of a piece standing on a grid point. Where the literal coordinates of §10.2.2 broke that rule, the object was moved
-// or shrunk; each function says how. The sand speckle is the texture of the field and the fire glow is light: like
-// the field they pass under the pieces. The speckle keeps off the labels and the characters, the drifting river layer
-// (赤壁's wave lines, 隆中's mist) is masked over the characters (board.css), and the glow only tints what it falls on.
-
-/** The em box of the river text: 楚河 centred on X(2), 汉界 on X(6); 52-unit glyphs, letter-spacing 34. */
-const RIVER_TEXT = Object.freeze([[X(2) - 69, X(2) + 69], [X(6) - 69, X(6) + 69]]);
-
-/**
- * 沙场: 120 sand dots (r 1.5-3) placed by a fixed-seed mulberry32 (seed 7) over the field, as one path.
- * A dot that would fall on a file label or on the river characters is drawn again elsewhere.
- */
-function sandPath() {
-  const rnd = mulberry32(7);
-  let d = '';
-  for (let i = 0; i < 120;) {
-    const x = 14 + rnd() * 892, y = 14 + rnd() * 1032, r = f1(1.5 + rnd() * 1.5);
-    const onLabel = (y < 42 || y > VIEW_H - 42) && Math.abs((x - X0 + PITCH / 2) % PITCH - PITCH / 2) < 17;
-    const onText = y > Y(4) + 22 && y < Y(4) + 82 && RIVER_TEXT.some(([x0, x1]) => x > x0 - 4 && x < x1 + 4);
-    if (onLabel || onText) continue;
-    d += dotPath(x, y, r);
-    i++;
-  }
-  return d;
-}
-
-/**
- * 沙场: twelve bronze rivets on the border rect (x 46..874, y 66..994). The corners and the edge midpoints of that
- * rect lie under the corner pieces and the kings, so the rivets sit between the grid points instead: one on each
- * side of every corner and a pair on each long edge beside the river. They are r 4 (the contract's r 7 does not fit
- * between two neighbouring pieces on the edge), and the side ones sit 2.75 units below the middle of their gap,
- * because a piece is 0.055 c thicker at its lower edge.
- */
-function rivetPath() {
-  let d = '';
-  for (const x of [46, 874]) for (const row of [0, 3, 5, 8]) d += dotPath(x, Y(row) + 52.75, 4);
-  for (const y of [66, 994]) for (const col of [0, 7]) d += dotPath(X(col) + 50, y, 4);
-  return d;
-}
-
-/**
- * 隆中: bamboo in the two side margins. A piece on the edge file reaches to 16 units from the frame, so the only
- * room for a stalk that no piece covers is the strip beside the frame edge: one stalk per side (the contract's
- * three stalks at x 6..54 ran under the edge pieces), 7 units wide, with a 3-unit node gap every 120 units. Its six
- * leaves grow from the nodes that lie between two ranks and point into the gap between the pieces there.
- * The left margin is drawn (clear of the seal in the bottom-left corner); the right margin is its half-turn copy
- * (clear of the seal at the top right).
- * @returns {{stalks:string, leaves:string}}
- */
-function bambooPaths() {
-  const x = 8, w = 7, top = 30, bottom = 1010;
-  const first = 110;                                       // y of the first node; the others follow every 120 units
-  // Leaves: [node number, angle in degrees]. Only a node about 30 units below a rank (its leaves hang down into the
-  // gap) or about 70 units below one (they point up into it) has room for the 34-unit leaf, so two nodes carry a pair.
-  const leaves = [[0, 40], [0, 64], [2, -46], [5, 44], [7, -44], [7, -68]];
-  let sd = '';
-  let ld = '';
-  /** @param {number} rx @param {number} y @param {number} h */
-  const rect = (rx, y, h) => {
-    const r = Math.min(3.5, h / 2);
-    return `M${f1(rx + r)} ${f1(y)}h${f1(w - 2 * r)}a${r} ${r} 0 0 1 ${r} ${r}v${f1(h - 2 * r)}a${r} ${r} 0 0 1 ${-r} ${r}h${f1(2 * r - w)}`
-      + `a${r} ${r} 0 0 1 ${-r} ${-r}v${f1(2 * r - h)}a${r} ${r} 0 0 1 ${r} ${-r}Z`;
-  };
-  /** @param {number} ox @param {number} oy @param {number} deg  the leaf M0 0 q18 -6 34 4 q-18 4 -34 -4 Z turned by deg around its stem */
-  const leaf = (ox, oy, deg) => {
-    const a = deg * Math.PI / 180, cos = Math.cos(a), sin = Math.sin(a);
-    /** @param {number} lx @param {number} ly */
-    const p = (lx, ly) => `${f1(ox + lx * cos - ly * sin)} ${f1(oy + lx * sin + ly * cos)}`;
-    return `M${p(0, 0)}Q${p(18, -6)} ${p(34, 4)}Q${p(16, 8)} ${p(0, 0)}Z`;
-  };
-  for (const turn of [false, true]) {
-    for (let y = top, node = first; y < bottom; y = node, node += 120) {
-      const h = Math.min(node - 3, bottom) - y;
-      sd += turn ? rect(VIEW_W - x - w, VIEW_H - y - h, h) : rect(x, y, h);
-    }
-    for (const [node, deg] of leaves) {
-      const ox = x + w / 2, oy = first + 120 * node - 1.5;
-      ld += turn ? leaf(VIEW_W - ox, VIEW_H - oy, deg + 180) : leaf(ox, oy, deg);
-    }
-  }
-  return { stalks: sd, leaves: ld };
-}
-
-const GRID_D = gridPath();
-const TICK_D = tickPath();
-
-/**
- * Camp seals (§10.2.2, CONTRACT-NOTES K-96): a rounded square of SEAL units that caps the outer corner of the frame,
- * SEAL_INSET units from the two frame edges. The contract's 40-unit box centred at (30, 1023) / (890, 37) reached
- * into the corner piece's 0.44 c radius and into the nearest file label; this box clears both (and the thick lower
- * edge of a piece standing in the bottom corner), so the corner piece never covers it.
- */
-const SEAL = 32;
-const SEAL_INSET = 6;
-
-/**
- * The content of svg.bv-art for one theme and orientation. `id` makes the gradient ids unique.
- * @param {ThemeId} theme @param {Color} bottom @param {string} id
- */
-function artMarkup(theme, bottom, id) {
-  const labels = fileLabels(bottom);                       // the only source of file labels (CONTRACT-NOTES item 80)
-  /** @param {number} x @param {number} y @param {Color} color  a camp seal with its top-left corner at (x, y) */
-  const seal = (x, y, color) => `<g class="bv-seal bv-seal--${color}"><rect x="${x}" y="${y}" width="${SEAL}" height="${SEAL}" rx="8"/>`
-    + `<text x="${x + SEAL / 2}" y="${y + SEAL / 2}" dy=".36em">${color === 'red' ? '蜀' : '魏'}</text></g>`;
-  let s = '<defs>'
-    + `<linearGradient id="bvf${id}" x1="0" y1="0" x2="1" y2="1"><stop class="bv-stop-fa" offset="0"/><stop class="bv-stop-fb" offset="1"/></linearGradient>`
-    + `<linearGradient id="bvr${id}" x1="0" y1="0" x2="1" y2="0"><stop class="bv-stop-ra" offset="0"/><stop class="bv-stop-rb" offset=".5"/>`
-    + '<stop class="bv-stop-ra" offset="1"/></linearGradient></defs>';
-  s += `<rect class="bv-frame" x="0" y="0" width="${VIEW_W}" height="${VIEW_H}" rx="26"/>`;
-  s += `<rect class="bv-field" x="5" y="5" width="${VIEW_W - 10}" height="${VIEW_H - 10}" rx="22" fill="url(#bvf${id})"/>`;
-  if (theme === 'shachang') s += `<path class="bv-sand" d="${sandPath()}"/>`;
-  if (theme === 'longzhong') {
-    const bamboo = bambooPaths();
-    s += `<path class="bv-bamboo" d="${bamboo.stalks}"/><path class="bv-bamboo" d="${bamboo.leaves}"/>`;
-  }
-  s += `<rect class="bv-band" x="${X(0)}" y="${Y(4)}" width="800" height="100" fill="url(#bvr${id})"/>`;
-  s += `<rect class="bv-border" x="${X(0) - 14}" y="${Y(0) - 14}" width="828" height="928"/>`;
-  if (theme === 'chibi') s += `<path class="bv-gridglow" d="${GRID_D}"/>`;
-  s += `<path class="bv-grid" d="${GRID_D}${TICK_D}"/>`;
-  if (theme === 'shachang') s += `<path class="bv-rivets" d="${rivetPath()}"/>`;
-  // Texts are centred on their y by a fixed baseline shift (dy), which holds for digits and for 汉字 in every system font
-  // (dominant-baseline: central follows the font's own metrics and sits a few units low with a fallback CJK face).
-  // letter-spacing also follows the last glyph, so the pair is shifted by half of it to stay centred on its file.
-  s += `<text class="bv-rivertext" x="${X(2) + 17}" y="${Y(4) + 52}" dy=".36em">楚河</text><text class="bv-rivertext" x="${X(6) + 17}" y="${Y(4) + 52}" dy=".36em">汉界</text>`;
-  // one <text> per edge: the list of x values places each label on its own file
-  const xs = Array.from({ length: 9 }, (_, vx) => X(vx)).join(' ');
-  s += `<text class="bv-label" x="${xs}" y="21" dy=".36em">${labels.top.join('')}</text><text class="bv-label" x="${xs}" y="1041" dy=".36em">${labels.bottom.join('')}</text>`;
-  s += seal(SEAL_INSET, VIEW_H - SEAL_INSET - SEAL, bottom) + seal(VIEW_W - SEAL_INSET - SEAL, SEAL_INSET, other(bottom));
-  return s;
-}
-
-/**
- * The drifting river layer's tile (800 x 100 units, one river band), as a CSS background-image value.
- * @param {ThemeId} theme @param {string} ink  the theme's --river-text
- */
-function riverImage(theme, ink) {
-  let body = '';
-  if (theme === 'chibi') {
-    /** @param {number} y @param {number} amp  a sine line of wavelength 200 across the tile; pathLength 900 = ten dash periods, so it tiles */
-    const wave = (y, amp) => `<path pathLength="900" d="M0 ${y}q50 ${-amp} 100 0${'t100 0'.repeat(7)}"/>`;
-    body = `<g fill="none" stroke="${ink}" stroke-opacity=".28" stroke-width="3" stroke-linecap="round" stroke-dasharray="36 54">${wave(26, 14)}${wave(76, -14)}</g>`;
-  } else if (theme === 'longzhong') {
-    body = '<defs><radialGradient id="m"><stop offset="0" stop-color="#fff" stop-opacity=".5"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>'
-      // at rest one blob lies between 河 and 汉 and the other is split over the two ends of the band (the tile wraps),
-      // so the still river of reduced motion shows its mist beside the characters; board.css masks the band over them
-      + '<ellipse cx="0" cy="46" rx="150" ry="45" fill="url(#m)"/><ellipse cx="800" cy="46" rx="150" ry="45" fill="url(#m)"/>'
-      + '<ellipse cx="400" cy="56" rx="150" ry="45" fill="url(#m)"/>';
-  } else {
-    return 'none';
-  }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 100" preserveAspectRatio="none">${body}</svg>`;
-  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
-}
-
-/**
- * 赤壁: the three ship silhouettes (§10.2.2), 60 x 30 units at scale 1. A ship that drifts with the wave lines sails
- * over 楚河 / 汉界 and under the pieces on the two river banks (CONTRACT-NOTES K-96), so the fleet lies at anchor:
- * each ship rides in the middle of a gap between four grid points, clear of the characters, and only bobs.
- * [file to the left of the gap, y of the box centre inside the 100-unit river band, scale]; the contract's scales are
- * 1.0 / 0.8 / 1.2. A gap holds 1.1 at most, and then the hull is less than a unit (a third of a pixel on a phone) from
- * the pieces below it when it dips; 1.05 keeps two units of room all round.
- */
-const SHIPS = Object.freeze([[0, 46.5, 1], [4, 48, 0.8], [7, 45.75, 1.05]]);
-
-/** One ship as a CSS background-image value. */
-function shipImage() {
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 30"><g fill="#0a0d18" opacity=".7"><path d="M0 18L8 30H52L60 18Z"/>'
-    + '<path d="M30 2L48 14H30Z"/><path d="M30 18V0" fill="none" stroke="#0a0d18" stroke-width="2.5"/></g></svg>';
-  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
-}
-
+/** Counts the views of the page; it makes the ids of masks unique. */
 let instances = 0;
 
 /**
@@ -624,12 +407,11 @@ export function createBoardView(host, deps) {
     el.dataset.color = piece.color;
     const shadow = div('piece__shadow');
     const body = div('piece__body');
-    const ring = svgEl('svg', { class: 'piece__ring', viewBox: '0 0 100 100' });
-    ring.append(piece.color === 'red' ? svgEl('circle', { cx: 50, cy: 50, r: 35 }) : svgEl('polygon', { points: OCTAGON }));
+    body.innerHTML = pieceArt(piece.color, piece.type);     // the soldier, a static template: no external data
     const glyph = document.createElement('span');
     glyph.className = 'piece__glyph';
-    glyph.textContent = pieceLabel(piece);
-    body.append(div('piece__disc'), ring, glyph);
+    glyph.textContent = pieceLabel(piece);                  // the character stays HTML text on the shield's plate
+    body.append(glyph);
     el.append(shadow, body);
     piecesEl.append(el);
     /** @type {Rec} */
@@ -1033,7 +815,7 @@ export function createBoardView(host, deps) {
     const after = el.getBoundingClientRect();
     const dx = (before.left - after.left) / k, dy = (before.top - after.top) / k;
     const ms = reduced ? 120 : Math.max(1, o.ms);
-    el.style.zIndex = '5';
+    el.style.zIndex = '50';                                 // above every row (a resting piece has 10 + its view row)
     el.style.willChange = 'transform';
     /** @type {Keyframe[]} */
     const path = [{ transform: `translate(${f1(dx)}px, ${f1(dy)}px)` }];
@@ -1938,36 +1720,16 @@ export function createBoardView(host, deps) {
   // ---- board lifecycle (G1 - G5) -----------------------------------------------------------------------------------------------
 
   function buildScenery() {
-    riverInner.style.backgroundImage = riverImage(theme, token('--river-text'));
+    // The sand table draws its own river and frame (table-art.js): the decoration layers of version 1 stay empty.
+    riverInner.style.backgroundImage = '';
     deco.replaceChildren();
-    // 沙场: two pennants, each in the free corner of its camp's edge (the other corner holds the camp seal)
-    if (theme === 'shachang') {
-      const top = document.createElement('i'), low = document.createElement('i');
-      top.className = `bv-pennant bv-pennant--top bv-pennant--${other(bottom)}`;
-      low.className = `bv-pennant bv-pennant--bottom bv-pennant--${bottom}`;
-      deco.append(top, low);
-    }
-    // 赤壁: the three ships at anchor on the river (positions: SHIPS)
-    if (theme === 'chibi') {
-      const image = shipImage();
-      SHIPS.forEach(([col, cy, k], index) => {
-        const ship = document.createElement('i');
-        ship.className = 'bv-ship';
-        /** @param {number} units  viewBox units as a length in c */
-        const len = (units) => `calc(${Math.round(units * 10) / 1000} * var(--c))`;
-        ship.style.cssText = `left:${len(X(col) + 50 - 30 * k)};top:${len(Y(4) + cy - 15 * k)};width:${len(60 * k)};height:${len(30 * k)};`
-          + `animation-delay:${-1300 * index}ms`;
-        ship.style.backgroundImage = image;
-        deco.append(ship);
-      });
-    }
     applyTension();
   }
 
   /** Draws the art for the current theme and orientation. @param {boolean} fade  G3: the old art fades out on top (200 ms) */
   function buildArt(fade) {
     const next = layerSvg('bv-art');
-    next.innerHTML = artMarkup(theme, bottom, `${uid}-${++artSeq}`);       // a static template: no external data
+    next.innerHTML = tableArt(theme, bottom, artSeq += 1);                 // a static template: no external data
     const old = art;
     art = next;
     if (fade && !reduced && old.isConnected) {

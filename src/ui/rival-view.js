@@ -1,4 +1,4 @@
-// 司马懿's portrait and name plate in the top bar (SPEC §4.28.4, §11.7). Package X5.
+// 司马懿's portrait and name plate in the top bar (SPEC §4.28.4, §11.7). Package X5; the sand-table look (V2).
 //
 // createRivalView(host) appends
 //   <div class="rival" data-mood data-say="none|line|dots">
@@ -6,56 +6,69 @@
 //     <span class="rival__plate"> 司马懿 / 魏 · 大都督 </span>
 //     <span class="rival__say"> his spoken line (2.4 s) · three dots while he thinks </span>
 //   </div>
-// to `host`. The look is in styles/buddy.css. The bust is drawn in the style of 诸葛亮 (§11.2) with a cooler
-// palette, an official's cap, a thin moustache and a chin tuft. He is a worthy rival, never a frightening one.
+// to `host`. The look is in styles/rival.css. The bust is the head and shoulders of the sand-table cartoon figure:
+// a purple robe under a dark mantle, a tall hat with a gold pin, half-lidded eyes, a thin moustache and beard.
+// He is a worthy rival: sly and proud, never frightening, never humiliated.
+//
+// Faces: the mood picks the eyes and the mouth (data-eyes / data-mouth on the <svg>); the brows, the ring and the
+// small badge on the disc follow data-mood in the stylesheet. While a line shows (data-say="line") the stylesheet
+// swaps the mouth for the open one: he talks without a script timer.
 //
 // Motion: the one-shot shake, tilt and ring flash play only while html[data-motion="full"] and setReducedMotion(true)
 // was not called, so the plate is still even if the stage only switches the attribute (§10.1: still is the default).
 
 /** @import { RivalMood } from '../game/types.js' */
 
-/** @typedef {'narrow'|'side'|'wide'|'happy'} RivalEyes */
-/** @typedef {'flat'|'hmm'|'frown'|'o'|'smirk'} RivalMouth */
+/** @typedef {'sly'|'up'|'away'|'wide'|'shut'} RivalEyes */
+/** @typedef {'soft'|'flat'|'wavy'|'o'|'smirk'|'talk'} RivalMouth */
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-const INK = '#1d2433', SKIN = '#f3dcc6', SKIN_EDGE = '#d9b08c', ROBE = '#2a2f4a', TRIM = '#8a94b8';
-const CAP = '#1a1d2b', CAP_BAND = '#3a4266', PIN = '#9cc4a8';
+const INK = '#2a1f3d', SKIN = '#fbe0c6', SKIN_EDGE = '#dfa888', HAIR = '#1f1c30';
+const ROBE = '#6d4dc8', ROBE_HI = '#8f72e6', MANTLE = '#2a2750', SILVER = '#dfe6fa', GOLD = '#ffc93c', IRIS = '#8a6be0';
 
 /** How long a spoken line stays (§11.7). */
 const SAY_MS = 2400;
 
-/** §11.7: the face of each mood. @type {Readonly<Record<RivalMood, {eyes:RivalEyes, mouth:RivalMouth}>>} */
+/** §11.7: the face of each mood, in the faces of the sand-table figure:
+ *  calm = his resting sly look, thinking = "think", frown = "sulk", rattled = "shock", smug = "smug".
+ *  @type {Readonly<Record<RivalMood, {eyes:RivalEyes, mouth:RivalMouth}>>} */
 const MOOD = Object.freeze({
-  calm:     { eyes: 'narrow', mouth: 'flat' },
-  thinking: { eyes: 'side',   mouth: 'hmm' },
-  frown:    { eyes: 'narrow', mouth: 'frown' },
-  rattled:  { eyes: 'wide',   mouth: 'o' },
-  smug:     { eyes: 'happy',  mouth: 'smirk' },
+  calm:     { eyes: 'sly',  mouth: 'soft' },
+  thinking: { eyes: 'up',   mouth: 'flat' },
+  frown:    { eyes: 'away', mouth: 'wavy' },
+  rattled:  { eyes: 'wide', mouth: 'o' },
+  smug:     { eyes: 'sly',  mouth: 'smirk' },
 });
 
-/** @param {number} x */
-const n2 = (x) => String(Math.round(x * 100) / 100);
-/** Both eyes of one variant: left eye centre x = 47, right x = 73. @param {(cx:number) => string} one */
-const eyes = (one) => one(47) + one(73);
+/** A filled shape with the ink outline. @param {string} d @param {string} fill @param {number} [sw] */
+const P = (d, fill, sw = 6) => `<path d="${d}" fill="${fill}" stroke="${INK}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round"/>`;
+/** A line. @param {string} d @param {string} stroke @param {number} sw @param {string} [cls] */
+const L = (d, stroke, sw, cls) => `<path${cls ? ` class="${cls}"` : ''} d="${d}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>`;
+/** Both eyes of one variant: the eye centres are x = 114 and x = 170. @param {(cx:number) => string} one */
+const eyes = (one) => one(114) + one(170);
 
 /** @type {Readonly<Record<RivalEyes, string>>} */
 const EYES = Object.freeze({
-  narrow: eyes((cx) => `<path d="M${cx - 5} 52 Q${cx} 49 ${cx + 5} 52" fill="none" stroke="${INK}" stroke-width="2.2" stroke-linecap="round"/><circle cx="${cx + 1}" cy="52.2" r="1.6" fill="${INK}"/>`),
-  side: eyes((cx) => `<ellipse cx="${n2(cx + 1.8)}" cy="52.5" rx="3.6" ry="4.8" fill="${INK}"/><circle cx="${n2(cx + 0.8)}" cy="50.8" r="1.3" fill="#fff"/>`),
-  wide: eyes((cx) => `<ellipse cx="${cx}" cy="52" rx="5.4" ry="6.8" fill="#fff" stroke="${INK}" stroke-width="1.6"/><circle cx="${cx}" cy="52.5" r="3" fill="${INK}"/><circle cx="${cx - 1}" cy="51.2" r="1" fill="#fff"/>`),
-  happy: eyes((cx) => `<path d="M${cx - 5} 54 Q${cx} 46.5 ${cx + 5} 54" fill="none" stroke="${INK}" stroke-width="2.6" stroke-linecap="round"/>`),
+  // half-lidded: the upper lid cuts the eye flat (sly, not scary)
+  sly: eyes((cx) => `<path d="M${cx - 13} 159 H${cx + 13} Q${cx + 14} 181 ${cx} 181 Q${cx - 14} 181 ${cx - 13} 159 Z" fill="${INK}"/><ellipse cx="${cx + 1.5}" cy="173" rx="7.5" ry="6" fill="${IRIS}"/>`
+    + `<circle cx="${cx + 5}" cy="166" r="3.8" fill="#fff"/>` + L(`M${cx - 17} 158.5 H${cx + 17}`, INK, 7)),
+  up: eyes((cx) => `<ellipse cx="${cx}" cy="166" rx="12.5" ry="15.5" fill="${INK}"/><ellipse cx="${cx - 2}" cy="160" rx="7.5" ry="6.5" fill="${IRIS}"/><circle cx="${cx - 5}" cy="157" r="3.8" fill="#fff"/>`),
+  away: eyes((cx) => `<path d="M${cx - 13} 162 H${cx + 13} Q${cx + 14} 180 ${cx} 180 Q${cx - 14} 180 ${cx - 13} 162 Z" fill="${INK}"/><circle cx="${cx - 7}" cy="169" r="3.6" fill="#fff"/>`
+    + L(`M${cx - 17} 161.5 H${cx + 17}`, INK, 7)),
+  wide: eyes((cx) => `<circle cx="${cx}" cy="164" r="15.5" fill="#fff" stroke="${INK}" stroke-width="4.6"/><circle cx="${cx + 2}" cy="165" r="5.6" fill="${INK}"/>`),
+  shut: eyes((cx) => L(`M${cx - 16} 166 Q${cx} 176 ${cx + 16} 166`, INK, 6.4)),          // the bow: no mood asks for it yet
 });
-
-const LINE = `fill="none" stroke="${INK}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"`;
 
 /** @type {Readonly<Record<RivalMouth, string>>} */
 const MOUTHS = Object.freeze({
-  flat: `<path d="M55 67 H65" ${LINE}/>`,
-  hmm: `<path d="M56.5 66.2 Q59.5 68 62.5 66.2 T67 65" ${LINE}/>`,
-  frown: `<path d="M54 68 Q60 64 66 68" ${LINE}/>`,
-  o: `<ellipse cx="60" cy="67" rx="3.2" ry="4.2" fill="#7a2e2a" stroke="${INK}" stroke-width="1.4"/>`,
-  smirk: `<path d="M54.5 65.2 Q60.5 69.8 66.5 63.4" ${LINE}/>`,
+  soft: L('M130 211 Q142 219 154 211', INK, 5.6),
+  flat: L('M130 213 H156', INK, 5.6),
+  wavy: L('M126 214 Q134 207 142 214 T158 214', INK, 5.6),
+  o: `<ellipse cx="142" cy="215" rx="7.5" ry="9" fill="#7a2e2a" stroke="${INK}" stroke-width="4.4"/>`,
+  smirk: L('M130 214 Q144 222 158 212', INK, 5.6),
+  // open while he speaks (the stylesheet shows it for data-say="line")
+  talk: `<path d="M128 209 Q142 205 156 209 Q155 227 142 227 Q129 227 128 209 Z" fill="#7a2e2a" stroke="${INK}" stroke-width="4.4" stroke-linejoin="round"/><ellipse cx="142" cy="222.5" rx="6.5" ry="3.2" fill="#ff8f8f"/>`,
 });
 
 /** @param {string} cls @param {Readonly<Record<string, string>>} table */
@@ -63,32 +76,38 @@ function variants(cls, table) {
   return `<g class="${cls}">${Object.keys(table).map((v) => `<g data-v="${v}">${table[v]}</g>`).join('')}</g>`;
 }
 
+// The figure's own coordinates (its full drawing is 330 x 384); the portrait shows the square 2 8 280 280, so the
+// hat, its pin and the shoulders stay inside the ring. The beard is shortened to end above the rim. The shoulders
+// are drawn for the crop: the robe's purple reaches up beside the collar (the full figure has its sleeves there),
+// and the dark shoulder cape is left out, because in so small a crop it would hide the purple robe.
 const FACE = `
 <g class="r-bust">
-  <path d="M30 133 Q24 98 40 84 Q60 74 80 84 Q96 98 90 133 Z" fill="${ROBE}" stroke="${INK}" stroke-width="1.6" stroke-linejoin="round"/>
-  <path d="M40 84 Q34 104 33 133" fill="none" stroke="${TRIM}" stroke-width="3" stroke-linecap="round"/>
-  <path d="M80 84 Q86 104 87 133" fill="none" stroke="${TRIM}" stroke-width="3" stroke-linecap="round"/>
-  <path d="M36 133 Q33 100 43 85 Q60 77 77 85 Q87 100 84 133 Z" fill="${ROBE}" stroke="${INK}" stroke-width="1.6" stroke-linejoin="round"/>
-  <path d="M49 82 L62.5 106 L58 108 L45 85.5 Z" fill="${TRIM}"/>
-  <path d="M71 82 L55 109 L59.5 111 L75 85.5 Z" fill="${TRIM}"/>
+  ${P('M30 310 Q36 242 104 234 Q142 226 180 234 Q248 242 254 310 Z', ROBE)}
+  ${L('M62 262 Q74 250 90 246 M222 262 Q210 250 194 246', ROBE_HI, 5)}
+  ${P('M110 238 L142 300 L174 238 Q142 228 110 238 Z', '#fffdf4', 5)}
+  ${P('M106 236 L140 312 L130 318 L93 244 Z', MANTLE, 5)}${P('M178 236 L144 312 L154 318 L191 244 Z', MANTLE, 5)}
+  ${L('M100 242 L135 314 M184 242 L149 314', SILVER, 3.4)}
 </g>
 <g class="r-head">
-  <ellipse cx="60" cy="50" rx="32.5" ry="31.5" fill="${INK}"/>
-  <circle cx="31.5" cy="56" r="4.6" fill="${SKIN}" stroke="${SKIN_EDGE}"/><circle cx="88.5" cy="56" r="4.6" fill="${SKIN}" stroke="${SKIN_EDGE}"/>
-  <circle cx="60" cy="52" r="29" fill="${SKIN}" stroke="${SKIN_EDGE}"/>
-  <path d="M34 30 Q36 6 60 4 Q84 6 86 30 Q72 24 60 24 Q48 24 34 30 Z" fill="${CAP}" stroke="${INK}" stroke-width="1.4" stroke-linejoin="round"/>
-  <path d="M34 30 Q60 20 86 30 L86 35 Q60 25 34 35 Z" fill="${CAP_BAND}" stroke="${INK}"/>
-  <path d="M30 22 H90" fill="none" stroke="${PIN}" stroke-width="2.2" stroke-linecap="round"/>
-  <circle cx="30" cy="22" r="2.4" fill="${PIN}"/><circle cx="90" cy="22" r="2.4" fill="${PIN}"/>
-  <ellipse cx="40" cy="61" rx="5.2" ry="3.1" fill="#ff9d8a" opacity=".3"/><ellipse cx="80" cy="61" rx="5.2" ry="3.1" fill="#ff9d8a" opacity=".3"/>
-  <path class="r-brow-l" d="M42 40.5 L51 38.6" stroke="${INK}" stroke-width="2.4" stroke-linecap="round"/>
-  <path class="r-brow-r" d="M69 38.6 L78 40.5" stroke="${INK}" stroke-width="2.4" stroke-linecap="round"/>
+  <ellipse cx="142" cy="160" rx="77" ry="74" fill="${HAIR}" stroke="${INK}" stroke-width="6"/>
+  <circle cx="70" cy="172" r="12" fill="${SKIN}" stroke="${INK}" stroke-width="5"/><circle cx="214" cy="172" r="12" fill="${SKIN}" stroke="${INK}" stroke-width="5"/>
+  ${P('M72 162 Q72 104 142 104 Q212 104 212 162 Q212 204 182 224 Q162 236 142 236 Q122 236 102 224 Q72 204 72 162 Z', SKIN, 5.4)}
+  <ellipse cx="96" cy="197" rx="11" ry="6.5" fill="#ff9d8a" opacity=".5"/><ellipse cx="188" cy="197" rx="11" ry="6.5" fill="#ff9d8a" opacity=".5"/>
   ${variants('r-eyes', EYES)}
-  <path d="M53 62 Q57 64 59.5 62.5" fill="none" stroke="${INK}" stroke-width="1.4" stroke-linecap="round"/>
-  <path d="M60.5 62.5 Q63 64 67 62" fill="none" stroke="${INK}" stroke-width="1.4" stroke-linecap="round"/>
+  ${L('M95 141 Q112 141 130 149', INK, 7, 'r-brow-l')}${L('M153 146 Q170 130 190 135', INK, 7, 'r-brow-r')}
+  ${L('M141 186 q-3.4 5 .6 8', SKIN_EDGE, 3.6)}
+  ${L('M136 201 Q124 207 113 202 Q107 199 106 192', INK, 5.6)}${L('M148 201 Q160 207 171 202 Q177 199 178 192', INK, 5.6)}
   ${variants('r-mouth', MOUTHS)}
-  <path d="M58.5 76 L60 82 L61.5 76 Z" fill="${INK}"/>
-  <path class="r-sweat" d="M90 33 Q94.5 40 90 43.5 Q85.5 40 90 33 Z" fill="#8fd3ff" stroke="#3b8fc4" stroke-width="1"/>
+  ${P('M125 231 Q134 252 143 266 Q151 252 159 231 Q142 243 125 231 Z', HAIR, 4)}
+  ${P('M72 164 Q66 98 142 96 Q218 98 212 164 Q207 132 184 121 Q160 114 142 132 Q124 114 100 121 Q77 132 72 164 Z', HAIR, 5)}
+  ${P('M74 158 Q68 190 80 206 Q82 182 87 166 Z', HAIR, 4)}${P('M210 158 Q216 190 204 206 Q202 182 197 166 Z', HAIR, 4)}
+  ${L('M82 102 Q70 132 76 160', ROBE_HI, 7)}${L('M202 102 Q214 132 208 160', ROBE_HI, 7)}
+  ${P('M86 110 L96 38 Q142 20 188 38 L198 110 Q142 88 86 110 Z', MANTLE)}
+  ${L('M104 46 Q120 38 136 36', '#4a4680', 5)}
+  ${P('M120 100 L127 52 H157 L164 100 Q142 93 120 100 Z', ROBE, 5)}${L('M127 96 L132 58 H152 L157 96', GOLD, 3.4)}
+  <circle cx="142" cy="74" r="8" fill="#7fe0b8" stroke="#1d7a5c" stroke-width="3.4"/>
+  ${L('M70 60 H214', INK, 13)}${L('M70 60 H214', GOLD, 6.5)}<circle cx="69" cy="60" r="7.5" fill="${GOLD}" stroke="${INK}" stroke-width="4"/><circle cx="215" cy="60" r="7.5" fill="${GOLD}" stroke="${INK}" stroke-width="4"/>
+  ${P('M82 106 Q142 80 202 106 L203 122 Q142 96 81 122 Z', SILVER, 5)}
 </g>`;
 
 /** 司马懿's portrait and name plate. @param {HTMLElement} host @returns {{ set(r:{mood:RivalMood, line?:string}):void, setReducedMotion(on:boolean):void }} */
@@ -105,7 +124,7 @@ export function createRivalView(host) {
   disc.className = 'rival__disc';
   const face = /** @type {SVGSVGElement} */ (doc.createElementNS(SVG_NS, 'svg'));
   face.setAttribute('class', 'rival__face');
-  face.setAttribute('viewBox', '10 2 100 100');
+  face.setAttribute('viewBox', '2 8 280 280');
   face.setAttribute('role', 'img');
   face.setAttribute('aria-label', '司马懿');
   face.innerHTML = FACE;                                    // static template, numbers only

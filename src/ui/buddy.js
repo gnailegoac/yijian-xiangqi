@@ -1,10 +1,14 @@
 // The strategist 诸葛亮 and his speech bubble (SPEC §4.28.4; construction, moods, motion: §11). Package X5.
 //
 // createBuddy(host, opts) fills `host` (#buddy) with
-//   <button class="buddy-fig"> <svg class="buddy" data-mood data-eyes data-mouth data-fan data-extras> … </svg> </button>
+//   <button class="buddy-fig">
+//     <span class="buddy" data-mood data-eyes data-mouth data-extras>          the drawing: ONE element
+//       <span class="b-stage"> <svg class="b-layer b-layer--main"/> <svg class="b-layer b-layer--arm"/> </span>
+//     </span>
+//   </button>
 //   <div class="bubble" data-state data-source> question · tag · caption · text </div>
-// and returns the Buddy controller. Everything visual is in styles/buddy.css; this file owns the drawing
-// (one inline SVG built from the coordinates of §11.2), the mood table of §11.3, the timers and one-shot
+// and returns the Buddy controller. Everything visual is in styles/buddy.css; this file owns the drawing (the
+// sand-table half figure: big head, hat, green-trimmed robe, feather fan), the mood table, the timers and one-shot
 // animations of §11.4 and the bubble of §11.6.
 //
 // Events on the host (bubbling CustomEvents): buddy:tap {}, bubble:expand {id}. Move-link events (chat:movelink)
@@ -24,8 +28,8 @@
 //     begun in that same turn, drops the previous line and its question (state "done", source "local").
 //   - status() and a caption set data-source="local"; begin() removes data-source until the caller writes it.
 //
-// Drawing space: he gestures toward +x (side glance, pointing fan, peek). styles/buddy.css mirrors the figure
-// where the board lies on the other side (landscape) and un-mirrors the collar and the glyphs.
+// Drawing space: he leans and gestures toward -x, his fan side (side glance, pointing fan, peek): that is where the
+// table lies. A host that sets --buddy-face: 1 gets him mirrored, fan arm on the right (styles/buddy.css).
 //
 // Reduced motion (opts.reducedMotion / setReducedMotion, on top of html[data-motion]): no tween, no loop, no timer.
 // A gesture is then a brief swap with nothing moving: nod and hop close the eyes in a smile, shake shows the wavy
@@ -39,159 +43,152 @@ import { CUE } from '../core/codes.js';
 
 /** @typedef {'open'|'wide'|'happy'|'soft'|'star'|'side'|'up'} EyeVariant */
 /** @typedef {'smirk'|'smile'|'grin'|'cheer'|'o'|'bigo'|'wavy'|'hmm'|'soft'} MouthVariant */
-/** @typedef {'gathered'|'spread'} FanVariant */
-/** @typedef {'sweat'|'bang'|'dots'|'q'|'spark'|'blush'|'note'} ExtraVariant */
+/** @typedef {'sweat'|'bang'|'dots'|'q'|'spark'|'blush'} ExtraVariant */
 /** @typedef {'nod'|'hop'|'shake'|'peek'|'point'} Gesture */
 /**
- * One row of the mood table (§11.3). Angles in degrees, offsets in viewBox units.
+ * One row of the mood table. Angles in degrees (positive = clockwise as drawn), offsets in viewBox units.
  * @typedef {Object} MoodSpec
  * @property {EyeVariant} eyes
  * @property {MouthVariant} mouth
- * @property {FanVariant} fan
- * @property {number} armR
- * @property {number} armL
- * @property {number} fanRot
+ * @property {number} arm      the fan arm about the shoulder: 16 = pointing at the table beside him, 58 = raised, negative = lowered
+ * @property {number} fanRot   the fan about the hand, in the arm's frame: 0 = continuing the arm
  * @property {number} tilt
  * @property {number} browL
  * @property {number} browR
- * @property {number} browY
+ * @property {number} browLY
+ * @property {number} browRY
  * @property {number} headY
  * @property {readonly ExtraVariant[]} extras
  */
 
 // ---------------------------------------------------------------------------------------------------------------------
-// §11.3 the mood table
+// the mood table: ten moods on the six faces of the sand-table figure (calm, talk, happy, wow, worry, cheer)
 // ---------------------------------------------------------------------------------------------------------------------
 
 /**
- * @param {EyeVariant} eyes @param {MouthVariant} mouth @param {FanVariant} fan
- * @param {number} armR @param {number} armL @param {number} fanRot @param {number} tilt
- * @param {number} browL @param {number} browR @param {number} browY @param {number} headY
+ * @param {EyeVariant} eyes @param {MouthVariant} mouth
+ * @param {number} arm @param {number} fanRot @param {number} tilt
+ * @param {number} browL @param {number} browR @param {number} browLY @param {number} browRY @param {number} headY
  * @param {ExtraVariant[]} extras
  * @returns {MoodSpec}
  */
-function row(eyes, mouth, fan, armR, armL, fanRot, tilt, browL, browR, browY, headY, extras) {
-  return Object.freeze({ eyes, mouth, fan, armR, armL, fanRot, tilt, browL, browR, browY, headY, extras: Object.freeze(extras) });
+function row(eyes, mouth, arm, fanRot, tilt, browL, browR, browLY, browRY, headY, extras) {
+  return Object.freeze({ eyes, mouth, arm, fanRot, tilt, browL, browR, browLY, browRY, headY, extras: Object.freeze(extras) });
 }
 
-// The rows are the contract's, tuned on the rendered sheet (dev/buddy.html) at 290 px and 56 px.
-// Within the ±6° / ±2 units of §11.3: armL 14 -> 20 wherever the free arm hangs (the sleeve shows beside the body
-// instead of hiding behind it); listening browY -1.5 -> -3.5; worried armR -6 -> -12; alarmed fanRot 148 -> 142 (the
-// fan stays inside the bust frame); cheering armR -150 -> -144.
-// Beyond it, because the contract's value does not give the pose its row "reads as" with the feather fan:
-//   thinking  fanRot 28 -> 8     the fan's upper edge passes under both eyes instead of across them
-//   worried   fanRot 172 -> 122  the drooping fan stays above the ground line instead of piercing it by 15 units
-//   cheering  fanRot 175 -> 198  the open fan is beside his head instead of over his right eye
-//   listening tilt -5 -> -11     the only cue that tells listening from idle on the 56 px bust
+// idle = the mock's "calm", pleased = "happy", impressed = "wow", alarmed = "worry", cheering = "cheer"; the mock's
+// "talk" is the speaking mouth (setSpeaking). Drawn for this table: listening (head tilted, one brow lower than the
+// other), thinking (eyes up, the fan held up in front of him), curious (wide eyes, a small "o"), worried (side
+// glance, wavy mouth, a drop of sweat), consoling (closed soft eyes, soft smile, lowered brows).
 /** @type {Readonly<Record<Mood, MoodSpec>>} */
 const MOOD = Object.freeze({
-  //               eyes     mouth    fan         armR  armL fanRot tilt browL browR browY headY extras
-  idle:      row('open',  'smirk', 'gathered',  -18,   20,   40,    0,    7,   -7,    0,    0, []),
-  listening: row('up',    'soft',  'gathered',  -18,   20,   40,  -11,    0,    0, -3.5,    0, []),
-  thinking:  row('side',  'hmm',   'spread',   -148,   20,    8,    5,   -8,   10,    0,    0, ['dots']),
-  curious:   row('open',  'o',     'gathered',  -75,   20,   85,   -8,   -6,  -14,   -2,    0, ['q']),
-  pleased:   row('happy', 'smile', 'spread',    -40,   20,   15,    0,    0,    0,    0,    0, ['blush']),
-  impressed: row('star',  'grin',  'spread',    -70,  150,   60,    0,    0,    0,   -3,    0, ['spark']),
-  worried:   row('side',  'wavy',  'gathered',  -12,   20,  122,    4,   16,  -16,   -1,    1, ['sweat']),
-  alarmed:   row('wide',  'bigo',  'gathered', -128,  128,  142,    0,   12,  -12,   -4,   -2, ['bang']),
-  cheering:  row('happy', 'cheer', 'spread',   -144,  150,  198,    0,    0,    0,   -3,   -2, ['blush', 'note']),
-  consoling: row('soft',  'soft',  'gathered',  -18,   78,   40,    6,   10,  -10,    0,    0, []),
+  //               eyes     mouth    arm fanRot tilt browL browR browLY browRY headY extras
+  idle:      row('open',  'smirk',  16,    0,   0,    0,    0,    0,    0,    0, []),
+  listening: row('open',  'soft',   10,    0,   8,    6,  -10,    6,   -1,    0, []),
+  thinking:  row('up',    'hmm',   -58,  160,  -4,    8,   -6,    3,    0,    0, ['dots']),
+  curious:   row('wide',  'o',      26,    0,  -7,    0,    0,   -2,   -2,    0, ['q']),
+  pleased:   row('happy', 'grin',   16,    0,   0,    0,    0,    0,    0,    0, ['blush']),
+  impressed: row('star',  'cheer',  36,    0,   0,    0,    0,   -1,   -1,   -3, ['spark', 'blush']),
+  worried:   row('side',  'wavy',    6,    0,   3,  -14,   14,    4,    4,    2, ['sweat']),
+  alarmed:   row('wide',  'bigo',   46,    0,   0,   -8,    8,   -1,   -1,   -4, ['sweat', 'bang']),
+  cheering:  row('happy', 'cheer',  58,    0,   0,    0,    0,    0,    0,   -3, ['spark', 'blush']),
+  consoling: row('soft',  'soft',   10,    0,   6,  -12,   12,    5,    5,    2, []),
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
-// §11.2 construction: one static SVG template (numbers only, no external data)
+// construction: the sand-table half figure (big head, hat with the gold band, green-trimmed robe, feather fan).
+// Two root <svg> layers with the same viewBox lie on top of each other: the body and head, and the fan arm. A root
+// <svg> can breathe or sway on the compositor; nothing inside an <svg> ever loops.
 // ---------------------------------------------------------------------------------------------------------------------
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
-let figures = 0;                                          // for unique ids inside each drawing
-const VIEW_FULL = '0 0 120 140';
-const VIEW_BUST = '10 2 100 100';
+// The figure's box is 120 : 140 (styles/buddy.css). Full: the body fills the box and the fan reaches out of it on
+// his fan side (overflow is visible). Bust: head and shoulders in a square.
+const VIEW_FULL = '-26 0 346 404';
+const VIEW_BUST = '76 6 240 240';
 
-const INK = '#1d2433', SKIN = '#ffe3c4', SKIN_EDGE = '#e6b58c', ROBE = '#f4f1e6', CLOAK = '#e9eef2', TRIM = '#27344d';
-const CLOTH = '#2f4a6b', FOLD = '#3d5f87', BAND = '#c9a260', JADE = '#7fd6b8', JADE_EDGE = '#2b7a64';
-const FEATHER = '#ffffff', QUILL = '#b9c4d2', HANDLE = '#8a6a3a';
-// Not in the colour list of §11.2: "gold" (star eyes and glyphs), the down between the feathers, a brow seen through the fringe.
-const GOLD = '#ffc83d', DOWN = '#e8eef6', BROW_ON_HAIR = '#6f84ad';
+const INK = '#2a1f3d', SKIN = '#ffe2c4', SKIN_EDGE = '#e7b08a', HAIR = '#262238';
+const ROBE = '#fffdf4', ROBE_LO = '#e3dfcf', CLOAK = '#d6ecf6', CLOAK_LO = '#a9cfe2', TEAL = '#1fa6a0', TEAL_LO = '#13777c';
+const CLOTH = '#2f7fd0', CLOTH_HI = '#6cb2f5', CLOTH_LO = '#2260a8', GOLD = '#ffc93c', JADE = '#7fe0b8', JADE_EDGE = '#1d7a5c';
+const FEATHER = '#ffffff', QUILL = '#b4c6de', DOWN = '#dfeaf6', HANDLE = '#9a7440', IRIS = '#5a78c8';
 
 /** @param {number} x */
-const n2 = (x) => String(Math.round(x * 100) / 100);
+const n1 = (x) => String(Math.round(x * 10) / 10);
 
-/** A point on the fan, in the arm's frame: pivot (76,116), angle in degrees. @param {number} a @param {number} r */
-function fanPoint(a, r) {
-  const t = (a * Math.PI) / 180;
-  return `${n2(76 + r * Math.cos(t))} ${n2(116 + r * Math.sin(t))}`;
+/** A filled shape with the ink outline. @param {string} d @param {string} fill @param {number} [sw] */
+const shape = (d, fill, sw = 4) => `<path d="${d}" fill="${fill}" stroke="${INK}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round"/>`;
+/** An open line. @param {string} d @param {string} stroke @param {number} sw @param {string} [cls] */
+const line = (d, stroke, sw, cls) => `<path${cls ? ` class="${cls}"` : ''} d="${d}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>`;
+
+/** The feather fan: seven feathers around the pivot (px, py), drawn from the outside in. @param {number} px @param {number} py */
+function fan(px, py) {
+  const axes = [130, 144, 158, 172, 186, 200, 214];
+  /** @param {number} a @param {number} r @returns {[number, number]} */
+  const pt = (a, r) => { const t = (a * Math.PI) / 180; return [px + r * Math.cos(t), py + r * Math.sin(t)]; };
+  /** @param {number} a @param {number} len @param {number} w */
+  const feather = (a, len, w) => {
+    const t = (a * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t);
+    const b = pt(a, 12), tip = pt(a, len), m = pt(a, 12 + (len - 12) * 0.58), q = pt(a, len - 8);
+    return {
+      d: `M${n1(b[0])} ${n1(b[1])} Q${n1(m[0] - s * w)} ${n1(m[1] + c * w)} ${n1(tip[0])} ${n1(tip[1])} Q${n1(m[0] + s * w)} ${n1(m[1] - c * w)} ${n1(b[0])} ${n1(b[1])} Z`,
+      q: `M${n1(b[0])} ${n1(b[1])} L${n1(q[0])} ${n1(q[1])}`,
+    };
+  };
+  const order = axes.map((a, i) => ({ a, k: Math.abs(i - 3) })).sort((p, q) => q.k - p.k);
+  const a0 = pt(axes[0], 70), a1 = pt(axes[6], 70);
+  let out = shape(`M${px} ${py} L${n1(a0[0])} ${n1(a0[1])} A70 70 0 0 1 ${n1(a1[0])} ${n1(a1[1])} Z`, DOWN);
+  for (const f of order) {
+    const ft = feather(f.a, 102 - f.k * 6, 14.5);
+    out += shape(ft.d, FEATHER, 3.4) + line(ft.q, QUILL, 2.2);
+  }
+  return out;
 }
 
-/** The outline of one feather on axis `a` with half-spread `w` and tip radius `R` (§11.2). @param {number} a @param {number} w @param {number} R */
-function featherPath(a, w, R) {
-  const mid = (12 + R) / 2 + 3;
-  return `M${fanPoint(a, 12)} Q${fanPoint(a - w, mid)} ${fanPoint(a, R)} Q${fanPoint(a + w, mid)} ${fanPoint(a, 12)} Z`;
-}
+/** One open eye; the iris looks (dx, dy) away from straight ahead. @param {number} cx @param {number} dx @param {number} dy */
+const eye = (cx, dx, dy) => `<ellipse cx="${cx}" cy="160" rx="13" ry="17.5" fill="${INK}"/>`
+  + `<ellipse cx="${cx + dx}" cy="${167 + dy}" rx="8.5" ry="8" fill="${IRIS}"/>`
+  + `<circle cx="${cx - 5 + dx}" cy="${152 + dy / 2}" r="5.4" fill="#fff"/><circle cx="${cx + 4.5 + dx}" cy="${169 + dy}" r="2.6" fill="#fff"/>`
+  + line(`M${cx - 16} 148 Q${cx - 2} 136 ${cx + 15} 147`, INK, 4.4);
+/** @param {number} cx */
+const star = (cx) => shape(`M${cx} 140 L${cx + 5.5} 154.5 L${cx + 20} 160 L${cx + 5.5} 165.5 L${cx} 180 L${cx - 5.5} 165.5 L${cx - 20} 160 L${cx - 5.5} 154.5 Z`, GOLD, 3);
+/** @param {number} cx */
+const wide = (cx) => `<circle cx="${cx}" cy="160" r="16" fill="#fff" stroke="${INK}" stroke-width="3.6"/><circle cx="${cx - 3}" cy="162" r="6.5" fill="${INK}"/>`;
 
-/**
- * The feather fan. The feathers and their quills are the ones of §11.2; behind them lie the down that fills the
- * gaps between the quills (it follows the two outer feathers and ends `tip` units below the feather tips) and one
- * ink outline around the whole silhouette, so the white fan reads as one solid prop on a pale robe and on a pale
- * page alike. The feathers are drawn from the outside in, so the middle one lies on top.
- * @param {number[]} axes @param {number} w @param {number} R @param {number} tip
- */
-function fan(axes, w, R, tip) {
-  const mid = (axes.length - 1) / 2;
-  const order = axes.map((a, i) => ({ a, d: Math.abs(i - mid) })).sort((p, q) => q.d - p.d);
-  const a0 = axes[0], a1 = axes[axes.length - 1], r = R - tip, bulge = (12 + R) / 2 + 3;
-  const down = `M${fanPoint(a0, 12)} Q${fanPoint(a0 - w, bulge)} ${fanPoint(a0, r)} A${r} ${r} 0 0 1 ${fanPoint(a1, r)} Q${fanPoint(a1 + w, bulge)} ${fanPoint(a1, 12)} Z`;
-  const shapes = order.map((f) => featherPath(f.a, w, R));
-  return `<path d="${down} ${shapes.join(' ')}" fill="${INK}" stroke="${INK}" stroke-width="2.6" stroke-linejoin="round"/>`
-    + `<path d="${down}" fill="${DOWN}"/>`
-    + order.map((f, i) => `<path d="${shapes[i]}" fill="${FEATHER}" stroke="${QUILL}" stroke-width=".8" stroke-linejoin="round"/>`
-      + `<path d="M${fanPoint(f.a, 12)} L${fanPoint(f.a, R - 2)}" fill="none" stroke="${QUILL}" stroke-width=".6" stroke-linecap="round"/>`).join('')
-    + `<rect x="74.6" y="104" width="2.8" height="16" rx="1.4" fill="${HANDLE}" stroke="${INK}" stroke-width=".8"/>`
-    + `<circle cx="76" cy="104" r="2.4" fill="${JADE}" stroke="${JADE_EDGE}" stroke-width=".8"/>`;
-}
-
-/** Both eyes of one variant: left eye centre x = 47, right x = 73. @param {(cx:number) => string} one */
-const eyes = (one) => one(47) + one(73);
-
-/** @type {Readonly<Record<EyeVariant, string>>} */
+/** Left eye centre x = 164, right x = 226. He looks toward his fan side (-x), where the table is. @type {Readonly<Record<EyeVariant, string>>} */
 const EYES = Object.freeze({
-  open: eyes((cx) => `<ellipse cx="${cx}" cy="52" rx="4.3" ry="5.8" fill="${INK}"/><circle cx="${n2(cx - 1.4)}" cy="49.8" r="1.6" fill="#fff"/>`),
-  wide: eyes((cx) => `<ellipse cx="${cx}" cy="52" rx="5.4" ry="6.8" fill="#fff" stroke="${INK}" stroke-width="1.6"/><circle cx="${cx}" cy="52.5" r="3" fill="${INK}"/><circle cx="${cx - 1}" cy="51.2" r="1" fill="#fff"/>`),
-  happy: eyes((cx) => `<path d="M${cx - 5} 54 Q${cx} 46.5 ${cx + 5} 54" fill="none" stroke="${INK}" stroke-width="2.6" stroke-linecap="round"/>`),
-  soft: eyes((cx) => `<path d="M${cx - 5} 51 Q${cx} 56 ${cx + 5} 51" fill="none" stroke="${INK}" stroke-width="2.4" stroke-linecap="round"/>`),
-  star: eyes((cx) => `<path d="M${cx} 44.5 L${cx + 2} 50 L${n2(cx + 7.5)} 52 L${cx + 2} 54 L${cx} 59.5 L${cx - 2} 54 L${n2(cx - 7.5)} 52 L${cx - 2} 50 Z" fill="${GOLD}" stroke="${INK}" stroke-width="1.2" stroke-linejoin="round"/>`),
-  side: eyes((cx) => `<ellipse cx="${n2(cx + 1.8)}" cy="52.5" rx="3.6" ry="4.8" fill="${INK}"/><circle cx="${n2(cx + 0.8)}" cy="50.8" r="1.3" fill="#fff"/>`),
-  up: eyes((cx) => `<ellipse cx="${cx + 1}" cy="50.6" rx="4" ry="5.4" fill="${INK}"/><circle cx="${n2(cx + 0.2)}" cy="48.2" r="1.5" fill="#fff"/>`),
+  open: eye(164, 0, 0) + eye(226, 0, 0),
+  side: eye(164, -3.5, -1) + eye(226, -3.5, -1),
+  up: eye(164, 1.5, -8) + eye(226, 1.5, -8),
+  wide: wide(164) + wide(226),
+  happy: line('M149 166 Q164 144 180 166 M211 166 Q226 144 242 166', INK, 6.4),
+  soft: line('M150 158 Q164 171 179 158 M212 158 Q226 171 241 158', INK, 5.6),
+  star: star(164) + star(226),
 });
-
-const LINE = `fill="none" stroke="${INK}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"`;
 
 /** @type {Readonly<Record<MouthVariant, string>>} */
 const MOUTHS = Object.freeze({
-  smirk: `<path d="M54.5 65.2 Q60.5 69.8 66.5 63.4" ${LINE}/>`,
-  smile: `<path d="M54 64.5 Q60 70.5 66 64.5" ${LINE}/>`,
-  grin: `<path d="M52.5 63 Q60 74.5 67.5 63 Z" fill="#b5433a" stroke="${INK}" stroke-width="1.8" stroke-linejoin="round"/>`,
-  cheer: `<path d="M51 61.5 Q60 79 69 61.5 Z" fill="#b5433a" stroke="${INK}" stroke-width="1.8" stroke-linejoin="round"/>`
-    + `<path d="M55.5 70.5 Q60 67 64.5 70.5 Q60 75.5 55.5 70.5 Z" fill="#ff8f86"/>`,
-  o: `<ellipse cx="60" cy="67" rx="3.2" ry="4.2" fill="#7a2e2a" stroke="${INK}" stroke-width="1.4"/>`,
-  bigo: `<ellipse cx="60" cy="68" rx="5" ry="6.4" fill="#7a2e2a" stroke="${INK}" stroke-width="1.6"/>`,
-  wavy: `<path d="M53 67.5 Q56.5 63.5 60 67.5 T67 67.5" ${LINE}/>`,
-  hmm: `<path d="M56.5 66.2 Q59.5 68 62.5 66.2 T67 65" ${LINE}/>`,
-  soft: `<path d="M55.5 65 Q60 68.6 64.5 65" ${LINE}/>`,
+  smirk: line('M181 199 Q195 212 211 198', INK, 4.2),
+  smile: line('M180 198 Q196 214 212 198', INK, 4.2),
+  grin: shape('M179 196 Q196 224 213 196 Z', '#b5433a', 3.6) + '<path d="M188 209 Q196 203 204 209 Q196 217 188 209 Z" fill="#ff8f86"/>',
+  cheer: shape('M174 194 Q196 232 218 194 Z', '#b5433a', 3.6) + '<path d="M185 211 Q196 203 207 211 Q196 222 185 211 Z" fill="#ff8f86"/>',
+  o: `<ellipse cx="196" cy="203" rx="6" ry="7.5" fill="#7a2e2a" stroke="${INK}" stroke-width="3.2"/>`,
+  bigo: `<ellipse cx="196" cy="205" rx="9.5" ry="12" fill="#7a2e2a" stroke="${INK}" stroke-width="3.4"/>`,
+  wavy: line('M179 204 Q187.5 196 196 204 T213 204', INK, 4.2),
+  hmm: line('M184 203 Q191 207 198 203 T211 200', INK, 4.2),
+  soft: line('M184 199 Q196 209 208 199', INK, 4.2),
 });
 
-// The glyphs and the thought dots carry a thin outline: they float over the page, which is pale in one theme.
-const GLYPH = `fill="${GOLD}" stroke="${INK}" stroke-width=".7" stroke-linejoin="round" paint-order="stroke"`;
-const DOT = 'fill="#cfe0ff" stroke="#7f95c2" stroke-width=".8"';
+const DOT = `fill="#fff" stroke="${INK}" stroke-width="2.4"`;
 
 /** @type {Readonly<Record<ExtraVariant, string>>} */
 const EXTRAS = Object.freeze({
-  sweat: `<path d="M90 33 Q94.5 40 90 43.5 Q85.5 40 90 33 Z" fill="#8fd3ff" stroke="#3b8fc4" stroke-width="1"/>`,
-  bang: `<g transform="translate(101 6) rotate(12)"><rect x="-2.6" y="0" width="5.2" height="13" rx="2.4" fill="#ff5a4a"/><circle cx="0" cy="18" r="2.8" fill="#ff5a4a"/></g>`,
-  dots: `<circle cx="27" cy="30" r="2.2" ${DOT}/><circle cx="20" cy="22" r="3" ${DOT}/><circle cx="12" cy="12" r="4" ${DOT}/>`,
-  q: `<g class="b-glyph b-glyph--q"><text x="100" y="24" font-size="22" font-weight="800" text-anchor="middle" dominant-baseline="central" ${GLYPH}>?</text></g>`,
-  spark: `<path d="M20 26 l2 5 l5 2 l-5 2 l-2 5 l-2 -5 l-5 -2 l5 -2 Z" ${GLYPH}/><path d="M103 16 l1.6 4 l4 1.6 l-4 1.6 l-1.6 4 l-1.6 -4 l-4 -1.6 l4 -1.6 Z" ${GLYPH}/>`,
-  blush: `<ellipse cx="40" cy="61" rx="6" ry="3.6" fill="#ff8f7a" opacity=".75"/><ellipse cx="80" cy="61" rx="6" ry="3.6" fill="#ff8f7a" opacity=".75"/>`,
-  note: `<g class="b-glyph b-glyph--note"><circle cx="16" cy="40" r="3" ${GLYPH}/><rect x="18" y="26" width="1.8" height="14" ${GLYPH}/><path d="M18 26 q6 1 7 6 q-3 -3 -7 -2 Z" ${GLYPH}/></g>`,
+  blush: '<ellipse cx="146" cy="191" rx="14" ry="8.5" fill="#ff7f6e" opacity=".7"/><ellipse cx="246" cy="191" rx="14" ry="8.5" fill="#ff7f6e" opacity=".7"/>',
+  sweat: '<path d="M284 108 Q294 126 284 134 Q274 126 284 108 Z" fill="#8fd3ff" stroke="#2f86c0" stroke-width="2.6" stroke-linejoin="round"/>',
+  spark: shape('M100 60 l5 13 l13 5 l-13 5 l-5 13 l-5 -13 l-13 -5 l13 -5 Z', GOLD, 2.6) + shape('M292 40 l4 10 l10 4 l-10 4 l-4 10 l-4 -10 l-10 -4 l10 -4 Z', GOLD, 2.6),
+  bang: `<g transform="translate(296 44) rotate(14)"><rect x="-5.5" y="0" width="11" height="30" rx="5" fill="#ffb000" stroke="${INK}" stroke-width="3"/><circle cx="0" cy="42" r="6" fill="#ffb000" stroke="${INK}" stroke-width="3"/></g>`,
+  dots: `<circle cx="280" cy="98" r="4.5" ${DOT}/><circle cx="291" cy="80" r="6.5" ${DOT}/><circle cx="304" cy="57" r="9.5" ${DOT}/>`,
+  q: `<g class="b-glyph">${line('M287 44 Q287 28 300 28 Q313 28 313 42 Q313 51 304 56 Q300 59 300 67', INK, 12)}${line('M287 44 Q287 28 300 28 Q313 28 313 42 Q313 51 304 56 Q300 59 300 67', GOLD, 6.5)}`
+    + `<circle cx="300" cy="83" r="5.4" fill="${GOLD}" stroke="${INK}" stroke-width="2.8"/></g>`,
 });
 
 /** @param {string} cls @param {Readonly<Record<string, string>>} table */
@@ -199,67 +196,49 @@ function variants(cls, table) {
   return `<g class="${cls}">${Object.keys(table).map((v) => `<g data-v="${v}">${table[v]}</g>`).join('')}</g>`;
 }
 
-const FRINGE = 'M30.6 52 Q28.5 21 60 20 Q91.5 21 89.4 52 Q85 39.5 75 36.5 Q70.5 44.5 61 38 Q52.5 46.5 44.5 37.5 Q36 41 30.6 52 Z';
-const BROW_L = 'M42 40.5 L51 38.6', BROW_R = 'M69 38.6 L78 40.5';
-
-/** The drawing, back to front (§11.2). `uid` keeps the clip-path id unique when several figures share a page. @param {string} uid */
-const figureMarkup = (uid) => `
-<defs><clipPath id="${uid}-fringe"><path d="${FRINGE}"/></clipPath></defs>
-<ellipse class="b-shadow" cx="60" cy="134" rx="30" ry="4.5" fill="#000" opacity=".18"/>
-<g class="b-fig">
-  <g class="b-cloak">
-    <path d="M30 133 Q24 98 40 84 Q60 74 80 84 Q96 98 90 133 Z" fill="${CLOAK}" stroke="${INK}" stroke-width="1.6" stroke-linejoin="round"/>
-    <path d="M40 84 Q34 104 33 133" fill="none" stroke="${TRIM}" stroke-width="3" stroke-linecap="round"/>
-    <path d="M80 84 Q86 104 87 133" fill="none" stroke="${TRIM}" stroke-width="3" stroke-linecap="round"/>
-  </g>
-  <g class="b-arm-l">
-    <path d="M38 88 H50 L52 112 Q44 119 36 112 Z" fill="${ROBE}" stroke="${INK}" stroke-width="1.4" stroke-linejoin="round"/>
-    <path d="M36.5 108 Q44 114 51.5 108" fill="none" stroke="${TRIM}" stroke-width="2.2"/>
-    <circle cx="44" cy="116" r="5" fill="${SKIN}" stroke="${SKIN_EDGE}"/>
-  </g>
+/** The body and the head, back to front. The robe runs on below the viewBox, so a hop never shows its lower edge. */
+const MAIN_MARKUP = `
+<g class="b-lean">
   <g class="b-body">
-    <path d="M36 133 Q33 100 43 85 Q60 77 77 85 Q87 100 84 133 Z" fill="${ROBE}" stroke="${INK}" stroke-width="1.6" stroke-linejoin="round"/>
-    <g class="b-collar">
-      <path d="M49 82 L62.5 106 L58 108 L45 85.5 Z" fill="${TRIM}"/>
-      <path d="M71 82 L55 109 L59.5 111 L75 85.5 Z" fill="${TRIM}"/>
-    </g>
-    <rect x="38.5" y="109" width="43" height="7.5" rx="2.5" fill="${TRIM}" stroke="${INK}" stroke-width="1.1"/>
-    <circle cx="60" cy="112.8" r="4.4" fill="${JADE}" stroke="${JADE_EDGE}" stroke-width="1.2"/>
+    ${shape('M90 452 L90 408 Q76 300 122 244 Q160 220 196 220 Q232 220 270 244 Q316 300 302 408 L302 452 Z', CLOAK)}
+    ${line('M106 330 q9 9 18 0 M104 366 q10 9 20 0 M270 330 q9 9 18 0 M270 366 q10 9 20 0', CLOAK_LO, 3)}
+    ${shape('M124 452 L124 408 Q118 312 142 248 Q170 228 196 228 Q222 228 250 248 Q274 312 268 408 L268 452 Z', ROBE)}
+    ${line('M168 372 Q172 396 170 440 M226 374 Q222 396 224 440', ROBE_LO, 3)}
+    ${shape('M168 230 L200 296 L190 303 L155 241 Z', TEAL, 3.4)}${shape('M224 230 L186 306 L197 313 L237 241 Z', TEAL, 3.4)}
+    ${shape('M129 332 Q196 348 263 332 L265 355 Q196 371 127 355 Z', TEAL_LO, 3.4)}
+    <circle cx="196" cy="353" r="13.5" fill="${JADE}" stroke="${JADE_EDGE}" stroke-width="3.4"/><circle cx="192" cy="349" r="4.4" fill="#fff" opacity=".7"/>
+    ${shape('M248 248 Q294 268 290 338 Q272 358 244 344 Q252 296 238 266 Z', ROBE)}${line('M247 344 Q270 356 289 337', TEAL, 7)}
   </g>
   <g class="b-head-act">
     <g class="b-head">
-      <g class="b-ribbon">
-        <path d="M84 34 Q96 40 94 58 Q90 50 86 48 Q90 42 84 38 Z" fill="${CLOTH}" stroke="${INK}"/>
-        <path d="M86 36 Q102 46 99 66 Q95 56 90 54 Q94 46 86 40 Z" fill="${CLOTH}" stroke="${INK}"/>
-      </g>
-      <ellipse cx="60" cy="50" rx="32.5" ry="31.5" fill="${INK}"/>
-      <circle cx="31.5" cy="56" r="4.6" fill="${SKIN}" stroke="${SKIN_EDGE}"/><circle cx="88.5" cy="56" r="4.6" fill="${SKIN}" stroke="${SKIN_EDGE}"/>
-      <circle cx="60" cy="52" r="29" fill="${SKIN}" stroke="${SKIN_EDGE}"/>
-      <path class="b-brow-l" d="${BROW_L}" stroke="${INK}" stroke-width="2.4" stroke-linecap="round"/>
-      <path class="b-brow-r" d="${BROW_R}" stroke="${INK}" stroke-width="2.4" stroke-linecap="round"/>
-      <path d="${FRINGE}" fill="${INK}"/>
-      <g clip-path="url(#${uid}-fringe)">
-        <path class="b-brow-l" d="${BROW_L}" stroke="${BROW_ON_HAIR}" stroke-width="2.4" stroke-linecap="round"/>
-        <path class="b-brow-r" d="${BROW_R}" stroke="${BROW_ON_HAIR}" stroke-width="2.4" stroke-linecap="round"/>
-      </g>
-      <path d="M33 34 Q34 8 60 6 Q86 8 87 34 Q74 26 60 26 Q46 26 33 34 Z" fill="${CLOTH}" stroke="${INK}" stroke-width="1.4" stroke-linejoin="round"/>
-      <path d="M36.5 27.5 Q60 17.5 83.5 27.5 M55 11 Q46.5 13.5 41 21.5" fill="none" stroke="${FOLD}" stroke-width="1.3" stroke-linecap="round"/>
-      <path d="M52 8 Q60 0 68 8 Q60 12 52 8 Z" fill="${FOLD}" stroke="${INK}"/>
-      <path d="M33 33 Q60 23 87 33 L87 38 Q60 28 33 38 Z" fill="${BAND}" stroke="${INK}"/>
-      <ellipse cx="40" cy="61" rx="5.2" ry="3.1" fill="#ff9d8a" opacity=".5"/><ellipse cx="80" cy="61" rx="5.2" ry="3.1" fill="#ff9d8a" opacity=".5"/>
+      ${shape('M256 98 Q300 102 310 168 Q294 150 280 150 Q288 124 256 114 Z', CLOTH_LO)}${shape('M262 106 Q324 124 320 202 Q304 178 290 174 Q300 140 262 122 Z', CLOTH)}
+      <ellipse cx="196" cy="150" rx="80" ry="77" fill="${HAIR}" stroke="${INK}" stroke-width="4"/>
+      <circle cx="121" cy="164" r="12.5" fill="${SKIN}" stroke="${INK}" stroke-width="3.4"/><circle cx="271" cy="164" r="12.5" fill="${SKIN}" stroke="${INK}" stroke-width="3.4"/>
+      ${shape('M124 154 Q124 96 196 96 Q268 96 268 154 Q268 198 236 216 Q216 227 196 227 Q176 227 156 216 Q124 198 124 154 Z', SKIN, 3.6)}
+      <ellipse cx="146" cy="191" rx="12.5" ry="7.5" fill="#ff9d8a" opacity=".6"/><ellipse cx="246" cy="191" rx="12.5" ry="7.5" fill="#ff9d8a" opacity=".6"/>
       ${variants('b-eyes', EYES)}
+      ${line('M146 131 Q163 122 180 129', INK, 4.6, 'b-brow-l')}${line('M210 129 Q227 122 244 131', INK, 4.6, 'b-brow-r')}
+      ${line('M194 182 q-3.4 4 0 6.4', SKIN_EDGE, 3)}
       ${variants('b-mouth', MOUTHS)}
+      ${shape('M124 156 Q118 86 196 84 Q274 86 268 156 Q262 126 240 116 Q226 132 204 118 Q186 136 160 118 Q138 126 124 156 Z', HAIR, 3.6)}
+      ${shape('M126 150 Q121 178 131 194 Q133 172 138 158 Z', HAIR, 3)}${shape('M266 150 Q271 178 261 194 Q259 172 254 158 Z', HAIR, 3)}
+      ${shape('M127 114 Q121 62 138 42 Q164 22 196 22 Q228 22 254 42 Q271 62 265 114 Q232 94 196 94 Q160 94 127 114 Z', CLOTH)}
+      ${line('M165 31 Q157 62 160 100 M196 24 V92 M227 31 Q235 62 232 100', CLOTH_LO, 3.4)}
+      ${line('M140 58 Q146 44 158 37', CLOTH_HI, 5)}${line('M178 44 Q180 34 186 30', CLOTH_HI, 4)}
+      ${shape('M124 110 Q196 76 268 110 L268 127 Q196 93 124 127 Z', GOLD, 3.6)}
+      <ellipse cx="196" cy="101.5" rx="8" ry="6.5" fill="${JADE}" stroke="${JADE_EDGE}" stroke-width="2.6"/>
       ${variants('b-extras', EXTRAS)}
     </g>
   </g>
-  <g class="b-arm-r">
-    <path d="M70 88 H82 L84 112 Q76 119 68 112 Z" fill="${ROBE}" stroke="${INK}" stroke-width="1.4" stroke-linejoin="round"/>
-    <path d="M68.5 108 Q76 114 83.5 108" fill="none" stroke="${TRIM}" stroke-width="2.2"/>
-    <g class="b-fan">
-      <g data-v="gathered">${fan([-104, -97, -90, -83, -76], 7, 40, 3)}</g>
-      <g data-v="spread">${fan([-150, -130, -110, -90, -70, -50, -30], 9, 42, 9)}</g>
-    </g>
-    <circle cx="76" cy="116" r="5" fill="${SKIN}" stroke="${SKIN_EDGE}"/>
+</g>`;
+
+/** The fan arm: sleeve, fan, hand. It lies over the body and the head. */
+const ARM_MARKUP = `
+<g class="b-lean">
+  <g class="b-arm">
+    ${shape('M163 238 Q112 242 58 284 Q50 304 66 328 Q120 320 170 290 Z', ROBE)}${line('M120 270 Q104 284 96 302', ROBE_LO, 3)}${line('M58 285 Q50 305 66 327', TEAL, 8)}
+    <g class="b-fan">${fan(44, 312)}${line('M70 298 L40 314', INK, 12)}${line('M70 298 L40 314', HANDLE, 6.5)}<circle cx="44" cy="312" r="11" fill="${JADE}" stroke="${JADE_EDGE}" stroke-width="3.4"/><circle cx="44" cy="312" r="4.4" fill="${GOLD}"/></g>
+    <circle cx="60" cy="305" r="14.5" fill="${SKIN}" stroke="${INK}" stroke-width="3.6"/>${line('M53 300 q6 5 5 12 M62 298 q4 6 2 13', SKIN_EDGE, 2.4)}
   </g>
 </g>`;
 
@@ -270,9 +249,9 @@ const figureMarkup = (uid) => `
 const BLINK_MIN = 2600, BLINK_MAX = 6000, BLINK_MS = 110, BLINK_AGAIN_MS = 140, BLINK_AGAIN_CHANCE = 0.15;
 const GLANCE_MIN = 8000, GLANCE_MAX = 14000, GLANCE_MS = 900;
 const FLAP_MS = 120;
-const POINT_MS = 800, POINT_ARM = -95, POINT_FAN = 170;
-// As a bust the stretched arm would leave the frame, and the board is above him: there the fan goes up beside his head.
-const POINT_ARM_BUST = -150, POINT_FAN_BUST = 158;
+const POINT_MS = 800, POINT_ARM = 42, POINT_FAN = 0;
+// As a bust the stretched arm is outside the frame, and the board is above him: there the fan goes up beside his head.
+const POINT_ARM_BUST = 74, POINT_FAN_BUST = 24;
 const TYPING_DELAY_MS = 300, TYPING_MAX_MS = 3500;       // the dots never outlive the longest first-text cap (§7.5)
 
 /** Eyes that are already closed or decorative never blink. @type {readonly EyeVariant[]} */
@@ -322,16 +301,28 @@ export function createBuddy(host, opts) {
   figure.type = 'button';
   figure.className = 'buddy-fig';
 
-  const svg = /** @type {SVGSVGElement} */ (doc.createElementNS(SVG_NS, 'svg'));
-  svg.setAttribute('class', 'buddy');
-  svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', '军师诸葛亮');
-  svg.innerHTML = figureMarkup(`buddy${++figures}`);        // static template, numbers only
-  figure.append(svg);
+  // The drawing is one HTML element: data-mood and the rig's custom properties live on it. Inside it a stage (the
+  // one-shot gestures of the whole figure act on it) holds the two root <svg> layers.
+  const fig = doc.createElement('span');
+  fig.className = 'buddy';
+  fig.setAttribute('role', 'img');
+  fig.setAttribute('aria-label', '军师诸葛亮');
+  const stage = doc.createElement('span');
+  stage.className = 'b-stage';
+  /** @param {string} cls @param {string} markup */
+  const layer = (cls, markup) => {
+    const el = /** @type {SVGSVGElement} */ (doc.createElementNS(SVG_NS, 'svg'));
+    el.setAttribute('class', `b-layer ${cls}`);
+    el.setAttribute('aria-hidden', 'true');
+    el.innerHTML = markup;                                  // static template, numbers only
+    stage.append(el);
+    return el;
+  };
+  const layers = [layer('b-layer--main', MAIN_MARKUP), layer('b-layer--arm', ARM_MARKUP)];
+  fig.append(stage);
+  figure.append(fig);
 
-  /** @param {string} sel */
-  const part = (sel) => /** @type {SVGGElement} */ (svg.querySelector(sel));
-  const figG = part('.b-fig'), headAct = part('.b-head-act'), shadow = part('.b-shadow');
+  const headAct = /** @type {SVGGElement} */ (fig.querySelector('.b-head-act'));
 
   host.classList.add('buddy-box');
   host.append(figure);
@@ -386,32 +377,31 @@ export function createBuddy(host, opts) {
 
   function paintFace() {
     const spec = MOOD[mood];
-    svg.dataset.mood = mood;
-    svg.dataset.eyes = face.eyes ?? spec.eyes;
-    svg.dataset.mouth = mouthNow();
-    svg.dataset.fan = spec.fan;
-    svg.dataset.extras = spec.extras.join(' ');
+    fig.dataset.mood = mood;
+    fig.dataset.eyes = face.eyes ?? spec.eyes;
+    fig.dataset.mouth = mouthNow();
+    fig.dataset.extras = spec.extras.join(' ');
   }
 
   function paintRig() {
     const spec = MOOD[mood];
-    const s = svg.style;
-    s.setProperty('--arm-r', `${pose.armR ?? spec.armR}deg`);
-    s.setProperty('--arm-l', `${spec.armL}deg`);
+    const s = fig.style;
+    s.setProperty('--arm-r', `${pose.armR ?? spec.arm}deg`);
     s.setProperty('--fan-rot', `${pose.fanRot ?? spec.fanRot}deg`);
     s.setProperty('--tilt', `${spec.tilt}deg`);
     s.setProperty('--brow-l', `${spec.browL}deg`);
     s.setProperty('--brow-r', `${spec.browR}deg`);
-    s.setProperty('--brow-y', `${spec.browY}px`);
+    s.setProperty('--brow-ly', `${spec.browLY}px`);
+    s.setProperty('--brow-ry', `${spec.browRY}px`);
     s.setProperty('--head-y', `${spec.headY}px`);
   }
 
   /** Paint without the 260 ms tween. @param {() => void} fn */
   function snap(fn) {
-    svg.classList.add('is-snap');
+    fig.classList.add('is-snap');
     fn();
-    void svg.getBoundingClientRect();                       // flush, so that removing the class starts no transition
-    svg.classList.remove('is-snap');
+    void fig.getBoundingClientRect();                       // flush, so that removing the class starts no transition
+    fig.classList.remove('is-snap');
   }
 
   /** @param {Mood} next @param {boolean} instant */
@@ -426,19 +416,17 @@ export function createBuddy(host, opts) {
     if (!changed) return;
     play(headAct, [{ transform: 'scaleY(.96)' }, { transform: 'scaleY(1)' }], { duration: 90, easing: 'ease-out' });
     if (next === 'alarmed') {
-      play(figG, [{ transform: 'translateX(0)' }, { transform: 'translateX(-2.4px)' }, { transform: 'translateX(2.4px)' },
-        { transform: 'translateX(-1.6px)' }, { transform: 'translateX(1.6px)' }, { transform: 'translateX(0)' }], { duration: 240, easing: 'linear' });
+      play(stage, [{ transform: 'translateX(0)' }, { transform: 'translateX(-1.6%)' }, { transform: 'translateX(1.6%)' },
+        { transform: 'translateX(-1%)' }, { transform: 'translateX(1%)' }, { transform: 'translateX(0)' }], { duration: 240, easing: 'linear' });
     }
-    if (next === 'cheering') hop(-6, 500, 3);
+    if (next === 'cheering') hop(-4, 500, 3);
   }
 
-  /** The whole figure leaves the ground and lands; its shadow shrinks meanwhile. @param {number} dy @param {number} ms @param {number} times */
+  /** The whole figure jumps up and lands. @param {number} dy percent of the figure's height @param {number} ms @param {number} times */
   function hop(dy, ms, times) {
     const up = 'cubic-bezier(.2,.8,.2,1)', down = 'cubic-bezier(.6,0,.9,.4)';
-    play(figG, [{ transform: 'translateY(0)', easing: up }, { transform: `translateY(${dy}px)`, easing: down }, { transform: 'translateY(0)' }],
+    play(stage, [{ transform: 'translateY(0)', easing: up }, { transform: `translateY(${dy}%)`, easing: down }, { transform: 'translateY(0)' }],
       { duration: ms, iterations: times });
-    play(shadow, [{ transform: 'scale(1)', opacity: 0.18, easing: up }, { transform: 'scale(.82)', opacity: 0.11, easing: down },
-      { transform: 'scale(1)', opacity: 0.18 }], { duration: ms, iterations: times });
   }
 
   // ---- idle timers (blink, glance) and the speaking mouth; all stopped under reduced motion and while hidden ----
@@ -446,8 +434,8 @@ export function createBuddy(host, opts) {
   const live = () => !destroyed && !reduced && !doc.hidden;
 
   function blinkOnce() {
-    svg.classList.add('is-blink');
-    later(() => svg.classList.remove('is-blink'), BLINK_MS);
+    fig.classList.add('is-blink');
+    later(() => fig.classList.remove('is-blink'), BLINK_MS);
   }
   function scheduleBlink() {
     blinkTimer = drop(blinkTimer);
@@ -467,8 +455,8 @@ export function createBuddy(host, opts) {
     glanceTimer = later(() => {
       glanceTimer = null;
       if (live() && mood === 'idle') {
-        svg.classList.add('is-glance');
-        later(() => svg.classList.remove('is-glance'), GLANCE_MS);
+        fig.classList.add('is-glance');
+        later(() => fig.classList.remove('is-glance'), GLANCE_MS);
       }
       scheduleGlance();
     }, between(GLANCE_MIN, GLANCE_MAX));
@@ -476,12 +464,12 @@ export function createBuddy(host, opts) {
   function syncFlap() {
     const on = speaking && live() && !NO_FLAP.includes(MOOD[mood].mouth);
     if (on && flapTimer === null) {
-      flapTimer = setInterval(() => { flap = !flap; svg.dataset.mouth = mouthNow(); }, FLAP_MS);
+      flapTimer = setInterval(() => { flap = !flap; fig.dataset.mouth = mouthNow(); }, FLAP_MS);
     } else if (!on && flapTimer !== null) {
       clearInterval(flapTimer);
       flapTimer = null;
     }
-    if (!on && flap) { flap = false; svg.dataset.mouth = mouthNow(); }
+    if (!on && flap) { flap = false; fig.dataset.mouth = mouthNow(); }
   }
   function syncTimers() {
     if (live()) {
@@ -490,7 +478,7 @@ export function createBuddy(host, opts) {
     } else {
       blinkTimer = drop(blinkTimer);
       glanceTimer = drop(glanceTimer);
-      svg.classList.remove('is-blink', 'is-glance');
+      fig.classList.remove('is-blink', 'is-glance');
     }
     syncFlap();
   }
@@ -514,7 +502,7 @@ export function createBuddy(host, opts) {
   function paintVariant(v) {
     variant = v === 'bust' ? 'bust' : 'full';
     host.dataset.variant = variant;
-    svg.setAttribute('viewBox', variant === 'bust' ? VIEW_BUST : VIEW_FULL);
+    for (const el of layers) el.setAttribute('viewBox', variant === 'bust' ? VIEW_BUST : VIEW_FULL);
   }
 
   /** A brief static stand-in for a gesture under reduced motion (nothing moves; a part is swapped and swapped back).
@@ -551,11 +539,11 @@ export function createBuddy(host, opts) {
       switch (gesture) {
         case 'nod':
           if (reduced) flashFace({ eyes: 'happy' }, 500);
-          else play(headAct, [0, 2, 0, 2, 0].map((y) => ({ transform: `translateY(${y}px)` })), { duration: 400, easing: 'ease-in-out' });
+          else play(headAct, [0, 7, 0, 7, 0].map((y) => ({ transform: `translateY(${y}px)` })), { duration: 400, easing: 'ease-in-out' });
           break;
         case 'hop':
           if (reduced) flashFace({ eyes: 'happy' }, 500);
-          else hop(-5, 300, 1);
+          else hop(-3.5, 300, 1);
           break;
         case 'shake':
           if (reduced) flashFace({ mouth: 'wavy' }, 500);
@@ -563,8 +551,8 @@ export function createBuddy(host, opts) {
           break;
         case 'peek':
           if (reduced) flashFace({ eyes: 'side' }, 700);
-          else play(figG, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(6deg)', offset: 0.4 }, { transform: 'rotate(6deg)', offset: 0.6 },
-            { transform: 'rotate(0deg)' }], { duration: 700, easing: 'ease-in-out' });
+          else play(stage, [{ transform: 'rotate(0deg)' }, { transform: 'rotate(-5deg)', offset: 0.4 }, { transform: 'rotate(-5deg)', offset: 0.6 },
+            { transform: 'rotate(0deg)' }], { duration: 700, easing: 'ease-in-out' });      // he leans toward his fan side, where the table is
           break;
         case 'point':
           poseTimer = drop(poseTimer);
@@ -586,7 +574,7 @@ export function createBuddy(host, opts) {
     },
     setReducedMotion(on) {
       reduced = !!on;
-      svg.classList.toggle('is-still', reduced);
+      fig.classList.toggle('is-still', reduced);
       if (reduced) {
         stopAnimations();
         snap(() => { paintFace(); paintRig(); });
@@ -613,7 +601,7 @@ export function createBuddy(host, opts) {
 
   // ---- first paint ----
 
-  svg.classList.toggle('is-still', reduced);
+  fig.classList.toggle('is-still', reduced);
   paintVariant(variant);
   snap(() => { paintFace(); paintRig(); });
   if (win) syncTimers();
