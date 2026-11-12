@@ -1,0 +1,36 @@
+// Tour for any viewport: rest, streaming, done, held, sheet, input, keyboard.
+export default async ({ page, shot }) => {
+  await page.waitForSelector('html[data-ready="1"]');
+  await shot('01-rest');
+  page.evaluate(() => { window.__dev.run.tryLine(); });
+  await page.waitForTimeout(1500);
+  await shot('02-typing');
+  await page.waitForTimeout(2600);
+  await shot('03-done');
+  await page.evaluate(() => window.__dev.run.heldLine());
+  await page.waitForTimeout(900);
+  await shot('04-held');
+  page.evaluate(() => { window.__dev.run.planLine(); });
+  await page.waitForTimeout(4300);
+  await shot('05-plan');
+  page.evaluate(() => { window.__dev.run.toolLine(); });
+  await page.waitForTimeout(1500);
+  await shot('06-tool');
+  await page.waitForTimeout(3300);
+  await page.evaluate(() => window.__dev.chat.setChips(window.__dev.CHIPS.hint3));
+  await page.waitForTimeout(700);
+  await shot('07-hint3');
+  await page.evaluate(() => window.__dev.chat.setSheet(true));
+  await page.waitForTimeout(500);
+  await shot('08-sheet');
+  await page.evaluate(() => window.__dev.chat.setSheet(true, { focusInput: true }));
+  await page.waitForTimeout(300);
+  await page.fill('#chat-input', '马八进七好不好？');
+  await shot('09-input');
+  await page.evaluate(() => { window.__dev.state.kb = true; window.__dev.relayout(); });
+  await page.waitForTimeout(400);
+  await shot('10-keyboard');
+  await page.evaluate(() => { window.__dev.chat.setSheet(false); });
+  await page.waitForTimeout(300);
+  await shot('11-keyboard-closed');
+};

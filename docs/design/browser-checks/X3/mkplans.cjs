@@ -1,0 +1,26 @@
+// node mkplans.cjs <prefix>   writes p-dom-<prefix>.json and p-cv-<prefix>.json
+const fs = require('fs');
+const prefix = process.argv[2];
+const dom = [];
+const d = (name, call, t) => { dom.push({ eval: call }, { scrub: t, snap: `${prefix}-dom-${name}`, css: true }, { eval: '__lab.fx.clear()' }); };
+d('01-check-mine', "__lab.fx.banner('check',{tone:'mine'})", 400);
+d('02-check-danger', "__lab.fx.banner('check',{tone:'danger'})", 400);
+d('03-mate', "__lab.fx.banner('mate')", 500);
+d('04-lose', "__lab.fx.banner('lose')", 700);
+d('05-draw', "__lab.fx.banner('draw')", 700);
+d('06-river', "__lab.fx.banner('river')", 300);
+d('07-good', "__lab.fx.popup('好棋！', __lab.pt(3,4), {tone:'good'})", 300);
+d('08-great-mark', "(__lab.fx.popup('妙计！', __lab.pt(3,4), {tone:'great'}), __lab.fx.popup('自己想的', __lab.pt(3,4), {tone:'mark'}))", 300);
+d('09-brilliant', "__lab.fx.popup('神来之笔！', __lab.pt(6,6), {tone:'brilliant'})", 300);
+d('10-lord', "__lab.fx.popup('主公英明！', __lab.pt(3,4), {tone:'lord'})", 300);
+d('11-stamp-full', "__lab.fx.stamp('当头炮！', {size:'full'})", 500);
+d('12-stamp-small-mark', "(__lab.fx.stamp('马后炮！', {size:'small', at: __lab.pt(6,6)}), __lab.fx.popup('自己想的', __lab.pt(2,2), {tone:'mark'}))", 300);
+fs.writeFileSync(`p-dom-${prefix}.json`, JSON.stringify(dom));
+const cv = [{ clock: true }];
+const k = (name, call, t) => { cv.push({ eval: call }, { run: t, snap: `${prefix}-cv-${name}`, css: true }, { run: 3000 }); };
+k('01-explosion', "__lab.run['burst:爆炸']()", 110);
+k('02-capture-red', "(__lab.aim({row:3,col:4},{row:6,col:6}), __lab.run['burst:吃子碎片']())", 160);
+k('03-stars-splash', "(__lab.fx.burst('stars', __lab.pt(2,2), {n:14}), __lab.fx.burst('splash', {x: __lab.pt(4,6).x, y: 5.3*__lab.cell()}, {n:18}), __lab.fx.burst('sparks', __lab.pt(7,2), {n:16}), __lab.fx.burst('dust', __lab.pt(8,8), {n:8, dir: -1.57}), __lab.fx.burst('ring', __lab.pt(6,0)))", 130);
+k('04-confetti', "__lab.fx.confetti()", 1250);
+k('05-wind-slash', "(__lab.fx.wind(), __lab.fx.slash(__lab.pt(1,8)), __lab.fx.trail(__lab.pt(9,3), __lab.pt(8,4)))", 260);
+fs.writeFileSync(`p-cv-${prefix}.json`, JSON.stringify(cv));

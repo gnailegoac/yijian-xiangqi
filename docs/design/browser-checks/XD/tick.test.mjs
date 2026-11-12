@@ -1,0 +1,21 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+test('tick(0) and nested zero timers', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const log = [];
+  let n = 0;
+  const step = () => { log.push(n++); if (n < 4) setTimeout(step, 0); };
+  setTimeout(step, 0);
+  t.mock.timers.tick(0);
+  console.log('after tick(0):', JSON.stringify(log));
+  t.mock.timers.tick(0);
+  console.log('after 2nd tick(0):', JSON.stringify(log));
+  t.mock.timers.tick(1);
+  console.log('after tick(1):', JSON.stringify(log));
+  const id = setTimeout(() => log.push('x'), 5);
+  console.log('typeof id', typeof id, id && id.constructor && id.constructor.name);
+  clearTimeout(id);
+  clearTimeout(0);
+  t.mock.timers.tick(10);
+  console.log('after clear:', JSON.stringify(log));
+});

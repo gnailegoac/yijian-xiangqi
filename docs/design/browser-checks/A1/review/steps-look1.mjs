@@ -1,0 +1,24 @@
+import { sleep, phase, ply, waitPhase, waitPly, tapCell, bubble, chips, start } from '../lib.mjs';
+export default async ({ page, shot }) => {
+  const log = (...a) => console.log('[step]', ...a);
+  await sleep(300);
+  await shot('0-start');
+  await start(page);
+  await sleep(120); await shot('1-deal-a');
+  await sleep(120); await shot('1-deal-b');
+  await sleep(120); await shot('1-deal-c');
+  await waitPhase(page, 'childTurn', 8000);
+  await sleep(2500); await shot('2-turn');
+  log('phase', await phase(page), 'coach', await page.evaluate(() => document.querySelector('#app').dataset.coach));
+  log('bubble', JSON.stringify(await bubble(page)), 'chips', JSON.stringify(await chips(page)));
+  await tapCell(page, 7, 7); await sleep(250); await shot('3-selected');
+  await tapCell(page, 7, 4); await sleep(150); await shot('4-trial-a');
+  await sleep(1500); await shot('4-trial-b');
+  log('bubble', JSON.stringify(await bubble(page)), 'chips', JSON.stringify(await chips(page)));
+  await tapCell(page, 7, 4);
+  await sleep(250); await shot('5-commit');
+  await waitPly(page, 2, 8000);
+  await sleep(400); await shot('6-rival-a');
+  await sleep(2500); await shot('6-rival-b');
+  log('phase', await phase(page), 'ply', await ply(page), 'bubble', JSON.stringify(await bubble(page)), 'chips', JSON.stringify(await chips(page)));
+};
