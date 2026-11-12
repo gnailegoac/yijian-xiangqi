@@ -1,6 +1,6 @@
 // tests/e2e/trial.spec.js (E1): SPEC 14.7 flows 2, 3, 7 and 8: the tentative move, the second tap, a held trial, the pouches.
 import { expect, test } from '@playwright/test';
-import { bubble, explainProxyLimit, KEYS, laps, pieces, ply, ready, savedMoves, seedStorage, stopwatch, tap, watch } from './helpers.js';
+import { bubble, cellCentre, explainProxyLimit, KEYS, laps, pieces, ply, ready, savedMoves, seedStorage, stopwatch, tap, watch } from './helpers.js';
 
 test.describe.configure({ timeout: 60000 });
 explainProxyLimit(test);
@@ -78,15 +78,20 @@ test.describe('flow 3', () => {
     await tap(page, ...CANNON);
     await expect(app).toHaveAttribute('data-phase', 'selected');
     await stopwatch(page, {});
-    await tap(page, ...CENTRE);
+    // The target is looked up once: the early tap must not wait for a round trip to the page. On a slow machine (CI on
+    // Linux) the lookup, a 50 ms wait in the page and the tap took 271 ms together, and the guard is 320 ms long.
+    const centre = await cellCentre(page, ...CENTRE);
+    const before = Date.now();
+    await page.touchscreen.tap(centre.x, centre.y);
     const tried = Date.now();
 
-    // a tap 50 ms later is inside the guard (200 ms from landing): nothing happens
-    await page.waitForTimeout(50);
-    await tap(page, ...CENTRE);
+    // a tap 50 ms later is inside the guard (200 ms from landing): nothing happens. The 50 ms are waited here, not in
+    // the page, and only as far as the first tap has not used them up already.
+    await new Promise((resolve) => { setTimeout(resolve, Math.max(0, 50 - (tried - before))); });
+    await page.touchscreen.tap(centre.x, centre.y);
     const early = await laps(page);
     expect(early.ups).toHaveLength(2);
-    expect(early.ups[1] - early.ups[0]).toBeLessThan(250);                              // the tap did arrive inside the guard (it ends 320 ms after the first tap)
+    expect(early.ups[1] - early.ups[0]).toBeLessThan(300);                              // the tap did arrive inside the guard (it ends 320 ms after the first tap)
     await expect(app).toHaveAttribute('data-phase', 'tentative');
     await page.waitForTimeout(150);
     await expect(app).toHaveAttribute('data-phase', 'tentative');

@@ -17,6 +17,9 @@ export default defineConfig({
   testDir: './tests/e2e',
   workers: 1,
   fullyParallel: false,
+  // Several flows measure real time (a tap inside a guard of 320 ms, a face within 150 ms). A CI machine is slow and
+  // uneven, so a flow that fails there is tried once more; the reporter still names it as flaky. Locally: no retry.
+  retries: process.env.CI ? 1 : 0,
   // In CI the failures are also written as annotations of the run: they can be read without the job's log.
   reporter: process.env.CI ? [['list'], ['github']] : 'list',
   use: {
