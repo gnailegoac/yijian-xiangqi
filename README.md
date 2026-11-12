@@ -371,7 +371,10 @@ npm run build
 node scripts/serve.js --dist --port 5174
 ```
 
-推送到 `main` 后，GitHub Actions（`.github/workflows/deploy.yml`）依次做三件事：`check`（类型检查、全部单元测试、构建）、`e2e`（Playwright 浏览器测试），两者都通过后 `deploy` 重新构建并发布到 GitHub Pages。
+推送到 `main` 后，GitHub Actions（`.github/workflows/deploy.yml`）依次做三件事：`check`（类型检查、全部单元测试、构建）、`e2e`（Playwright 浏览器测试），两者都通过后 `deploy` 重新构建并发布到 GitHub Pages。有一项不过就不发布，线上保持原样。
+
+- 浏览器测试在 GitHub 的机器上比本机慢，有几个流程量的是真实时间，所以失败的流程在那边会自动再试一次；失败的流程会写在这次运行的「Annotations」里，它的录像（trace）作为附件保留 7 天。
+- 想只跑检查不发布：在 GitHub 的 Actions 页面手动运行这个工作流，分支选 `main` 以外的分支（例如 `kids-coach`）。`deploy` 只在 `main` 上执行。
 
 ## `scripts/serve.js` 的参数
 
