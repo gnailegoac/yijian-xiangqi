@@ -52,6 +52,15 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: End-to-end tests
         run: npm run test:e2e
+      # What a failed flow leaves behind (the trace of each failed test) for whoever has to find out why.
+      - name: Keep the traces of failed flows
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore
 
   # The published site has no proxy unless the repository variable COACH_API_BASE names one (an https URL).
   deploy:

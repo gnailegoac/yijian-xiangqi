@@ -17,7 +17,8 @@ export default defineConfig({
   testDir: './tests/e2e',
   workers: 1,
   fullyParallel: false,
-  reporter: 'list',
+  // In CI the failures are also written as annotations of the run: they can be read without the job's log.
+  reporter: process.env.CI ? [['list'], ['github']] : 'list',
   use: {
     baseURL: 'http://127.0.0.1:5173',
     browserName: 'chromium',
